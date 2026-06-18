@@ -7,6 +7,19 @@ import { sha256 } from '../lib/hash.js';
 import { isPdf } from '../lib/pdf.js';
 import { runExtraction } from '../extraction/run.js';
 
+export function buildWhere(q: Record<string, string>) {
+  const where: any = {};
+  if (q.status) where.status = q.status;
+  if (q.q) where.OR = [
+    { vendorName: { contains: q.q, mode: 'insensitive' } },
+    { invoiceNumber: { contains: q.q, mode: 'insensitive' } },
+    { fileName: { contains: q.q, mode: 'insensitive' } },
+  ];
+  if (q.minTotal) where.totalAmount = { gte: Number(q.minTotal) };
+  if (q.dateFrom || q.dateTo) where.invoiceDate = { ...(q.dateFrom ? { gte: new Date(q.dateFrom) } : {}), ...(q.dateTo ? { lte: new Date(q.dateTo) } : {}) };
+  return where;
+}
+
 export async function invoiceRoutes(app: FastifyInstance) {
   app.post('/api/invoices/upload', async (req, reply) => {
     await mkdir(env.uploadDir, { recursive: true });
@@ -30,15 +43,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
 
   app.get('/api/invoices', async (req) => {
     const q = req.query as Record<string, string>;
-    const where: any = {};
-    if (q.status) where.status = q.status;
-    if (q.q) where.OR = [
-      { vendorName: { contains: q.q, mode: 'insensitive' } },
-      { invoiceNumber: { contains: q.q, mode: 'insensitive' } },
-      { fileName: { contains: q.q, mode: 'insensitive' } },
-    ];
-    if (q.minTotal) where.totalAmount = { gte: Number(q.minTotal) };
-    if (q.dateFrom || q.dateTo) where.invoiceDate = { ...(q.dateFrom ? { gte: new Date(q.dateFrom) } : {}), ...(q.dateTo ? { lte: new Date(q.dateTo) } : {}) };
+    const where = buildWhere(q);
     const sortMap: Record<string, string> = { status: 'status', vendor: 'vendorName', date: 'invoiceDate', confidence: 'confidence', total: 'totalAmount' };
     const dir: 'asc' | 'desc' = q.dir === 'asc' ? 'asc' : 'desc';
     const orderBy: any = q.sort && sortMap[q.sort] ? { [sortMap[q.sort]]: dir } : { createdAt: 'desc' };
