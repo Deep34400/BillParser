@@ -15,7 +15,7 @@ export async function exportRoutes(app: FastifyInstance) {
   });
   app.get('/api/invoices/export/line-items.csv', async (req, reply) => {
     const invoices = await prisma.invoice.findMany({ where: buildWhere(req.query as any), include: { lineItems: { orderBy: { lineNumber: 'asc' } } } });
-    const rows = invoices.flatMap((inv) => inv.lineItems.map((li) => ({ invoiceId: inv.id, vendorName: inv.vendorName, invoiceNumber: inv.invoiceNumber, ...li })));
+    const rows = invoices.flatMap((inv) => inv.lineItems.map((li) => ({ ...li, invoiceId: inv.id, vendorName: inv.vendorName, invoiceNumber: inv.invoiceNumber })));
     reply.header('content-type', 'text/csv').header('content-disposition', 'attachment; filename="line-items.csv"');
     return toCsv(ITEM_HEADERS, rows);
   });
