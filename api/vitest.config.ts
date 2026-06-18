@@ -12,5 +12,13 @@ function loadEnv(): Record<string, string> {
 }
 
 export default defineConfig({
-  test: { environment: 'node', include: ['tests/**/*.test.ts'], hookTimeout: 30000, testTimeout: 30000, env: loadEnv() },
+  test: {
+    environment: 'node',
+    include: ['tests/**/*.test.ts'],
+    hookTimeout: 30000,
+    testTimeout: 30000,
+    env: loadEnv(),
+    pool: 'forks',
+    poolOptions: { forks: { singleFork: true } },
+  },
 });

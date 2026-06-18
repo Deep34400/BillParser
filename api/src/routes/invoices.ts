@@ -40,9 +40,10 @@ export async function invoiceRoutes(app: FastifyInstance) {
     if (q.minTotal) where.totalAmount = { gte: Number(q.minTotal) };
     if (q.dateFrom || q.dateTo) where.invoiceDate = { ...(q.dateFrom ? { gte: new Date(q.dateFrom) } : {}), ...(q.dateTo ? { lte: new Date(q.dateTo) } : {}) };
     const sortMap: Record<string, string> = { status: 'status', vendor: 'vendorName', date: 'invoiceDate', confidence: 'confidence', total: 'totalAmount' };
-    const orderBy = q.sort && sortMap[q.sort] ? { [sortMap[q.sort]]: q.dir === 'asc' ? 'asc' : 'desc' } : { createdAt: 'desc' };
+    const dir: 'asc' | 'desc' = q.dir === 'asc' ? 'asc' : 'desc';
+    const orderBy: any = q.sort && sortMap[q.sort] ? { [sortMap[q.sort]]: dir } : { createdAt: 'desc' };
     const invoices = await prisma.invoice.findMany({ where, orderBy, include: { _count: { select: { lineItems: true } } } });
-    return { invoices: invoices.map((i) => ({ ...i, itemCount: i._count.lineItems })) };
+    return { invoices: invoices.map((i: any) => ({ ...i, itemCount: i._count.lineItems })) };
   });
 
   app.get('/api/invoices/:id', async (req, reply) => {
