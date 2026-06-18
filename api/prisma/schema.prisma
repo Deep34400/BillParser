@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RunStatus {
+  COMPLETED
+  FAILED
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  fileName      String
+  storedPath    String
+  fileHash      String        @unique
+  status        InvoiceStatus @default(PENDING)
+  provider      String?
+  confidence    Float?
+  error         String?
+  vendorName    String?
+  vendorAddress String?
+  vendorTaxId   String?
+  invoiceNumber String?
+  poNumber      String?
+  invoiceDate   DateTime?
+  dueDate       DateTime?
+  currency      String?
+  subtotal      Float?
+  taxAmount     Float?
+  totalAmount   Float?
+  paymentTerms  String?
+  rawText       String?
+  rawJson       Json?
+  verified      Boolean       @default(false)
+  editedAt      DateTime?
+  activeRunId   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  lineItems     LineItem[]
+  runs          ExtractionRun[]
+
+  @@index([status])
+  @@index([vendorName])
+  @@index([invoiceDate])
+}
+
+model LineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNumber  Int
+  description String?
+  sku         String?
+  quantity    Float?
+  unitPrice   Float?
+  amount      Float?
+  taxRate     Float?
+
+  @@index([invoiceId])
+}
+
+model ExtractionRun {
+  id               String    @id @default(cuid())
+  invoiceId        String
+  invoice          Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  provider         String
+  structuringModel String?
+  status           RunStatus
+  confidence       Float?
+  costEstimate     Float?
+  latencyMs        Int?
+  pageCount        Int?
+  rawText          String?
+  rawJson          Json?
+  error            String?
+  fieldsSnapshot   Json?
+  itemsSnapshot    Json?
+  createdAt        DateTime  @default(now())
+
+  @@index([invoiceId])
+}
+
+model ProviderConfig {
+  provider       String   @id
+  credentialsEnc String
+  enabled        Boolean  @default(true)
+  updatedAt      DateTime @updatedAt
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
