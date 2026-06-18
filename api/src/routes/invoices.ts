@@ -27,4 +27,29 @@ export async function invoiceRoutes(app: FastifyInstance) {
     reply.code(201);
     return { created, duplicates, rejected };
   });
+
+  app.get('/api/invoices', async (req) => {
+    const q = req.query as Record<string, string>;
+    const where: any = {};
+    if (q.status) where.status = q.status;
+    if (q.q) where.OR = [
+      { vendorName: { contains: q.q, mode: 'insensitive' } },
+      { invoiceNumber: { contains: q.q, mode: 'insensitive' } },
+      { fileName: { contains: q.q, mode: 'insensitive' } },
+    ];
+    if (q.minTotal) where.totalAmount = { gte: Number(q.minTotal) };
+    if (q.dateFrom || q.dateTo) where.invoiceDate = { ...(q.dateFrom ? { gte: new Date(q.dateFrom) } : {}), ...(q.dateTo ? { lte: new Date(q.dateTo) } : {}) };
+    const sortMap: Record<string, string> = { status: 'status', vendor: 'vendorName', date: 'invoiceDate', confidence: 'confidence', total: 'totalAmount' };
+    const orderBy = q.sort && sortMap[q.sort] ? { [sortMap[q.sort]]: q.dir === 'asc' ? 'asc' : 'desc' } : { createdAt: 'desc' };
+    const invoices = await prisma.invoice.findMany({ where, orderBy, include: { _count: { select: { lineItems: true } } } });
+    return { invoices: invoices.map((i) => ({ ...i, itemCount: i._count.lineItems })) };
+  });
+
+  app.get('/api/invoices/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const inv = await prisma.invoice.findUnique({ where: { id },
+      include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } } } });
+    if (!inv) return reply.code(404).send({ error: 'not found' });
+    return inv;
+  });
 }
