@@ -1,0 +1,18 @@
+import type { StructuringModel } from './types.js';
+import { STRUCTURING_PROMPT } from './types.js';
+import { normalizeStructured } from './index.js';
+export const mistralStructModel = (model: string): StructuringModel => ({
+  provider: 'mistral', model,
+  async structure(markdown, creds) {
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${creds.apiKey}` },
+      body: JSON.stringify({ model, messages: [
+        { role: 'system', content: STRUCTURING_PROMPT }, { role: 'user', content: markdown },
+      ] }),
+    });
+    if (!res.ok) throw new Error(`Mistral structuring HTTP ${res.status}`);
+    const j: any = await res.json();
+    return normalizeStructured(j.choices?.[0]?.message?.content ?? '{}');
+  },
+});
