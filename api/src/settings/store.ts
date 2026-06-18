@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
+import type { ExtractionProvider } from '../providers/types.js';
 
 export async function getSetting(key: string, fallback: string): Promise<string> {
   const row = await prisma.setting.findUnique({ where: { key } });
@@ -22,4 +23,9 @@ export async function setCredentials(provider: string, creds: Record<string, str
 }
 export async function clearCredentials(provider: string): Promise<void> {
   await prisma.providerConfig.deleteMany({ where: { provider } });
+}
+export async function getProviderCredsOrThrow(provider: string, impl: ExtractionProvider): Promise<Record<string, string>> {
+  const creds = await getCredentials(provider);
+  if (!impl.isConfigured(creds)) throw new Error(`No credentials configured for provider "${provider}". Add them in Settings.`);
+  return creds!;
 }
