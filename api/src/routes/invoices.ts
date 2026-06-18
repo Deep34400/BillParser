@@ -52,4 +52,63 @@ export async function invoiceRoutes(app: FastifyInstance) {
     if (!inv) return reply.code(404).send({ error: 'not found' });
     return inv;
   });
+
+  app.post('/api/invoices/bulk', async (req) => {
+    const { action, ids } = req.body as { action: 'reextract' | 'delete'; ids: string[] };
+    if (action === 'delete') { await prisma.invoice.deleteMany({ where: { id: { in: ids } } }); return { ok: true, count: ids.length }; }
+    for (const id of ids) { await prisma.invoice.update({ where: { id }, data: { status: 'PENDING', error: null } }); void runExtraction(id); }
+    return { ok: true, count: ids.length };
+  });
+
+  app.post('/api/invoices/:id/reextract', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { provider } = (req.body ?? {}) as { provider?: string };
+    await prisma.invoice.update({ where: { id }, data: { status: 'PENDING', error: null } });
+    void runExtraction(id, provider);
+    reply.code(202); return { ok: true };
+  });
+
+  app.patch('/api/invoices/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as any;
+    const { lineItems, ...fields } = body;
+    const data: any = { ...fields, verified: true, editedAt: new Date() };
+    if (data.invoiceDate) data.invoiceDate = new Date(data.invoiceDate);
+    if (data.dueDate) data.dueDate = new Date(data.dueDate);
+    await prisma.$transaction(async (tx) => {
+      await tx.invoice.update({ where: { id }, data });
+      if (Array.isArray(lineItems)) {
+        await tx.lineItem.deleteMany({ where: { invoiceId: id } });
+        await tx.lineItem.createMany({ data: lineItems.map((li: any, i: number) => ({
+          invoiceId: id, lineNumber: li.lineNumber ?? i + 1, description: li.description ?? null, sku: li.sku ?? null,
+          quantity: li.quantity ?? null, unitPrice: li.unitPrice ?? null, amount: li.amount ?? null, taxRate: li.taxRate ?? null })) });
+      }
+    });
+    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } } } });
+  });
+
+  app.post('/api/invoices/:id/apply-run', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { runId } = req.body as { runId: string };
+    const run = await prisma.extractionRun.findUnique({ where: { id: runId } });
+    if (!run || run.invoiceId !== id) return reply.code(404).send({ error: 'run not found' });
+    const fields = (run.fieldsSnapshot ?? {}) as any;
+    const items = (run.itemsSnapshot ?? []) as any[];
+    if (fields.invoiceDate) fields.invoiceDate = new Date(fields.invoiceDate);
+    if (fields.dueDate) fields.dueDate = new Date(fields.dueDate);
+    await prisma.$transaction(async (tx) => {
+      await tx.lineItem.deleteMany({ where: { invoiceId: id } });
+      await tx.lineItem.createMany({ data: items.map((li, i) => ({ invoiceId: id, lineNumber: li.lineNumber ?? i + 1,
+        description: li.description ?? null, sku: li.sku ?? null, quantity: li.quantity ?? null, unitPrice: li.unitPrice ?? null,
+        amount: li.amount ?? null, taxRate: li.taxRate ?? null })) });
+      await tx.invoice.update({ where: { id }, data: { ...fields, provider: run.provider, confidence: run.confidence,
+        status: 'COMPLETED', activeRunId: run.id, rawText: run.rawText, rawJson: run.rawJson as any } });
+    });
+    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } } } });
+  });
+
+  app.delete('/api/invoices/:id', async (req) => {
+    await prisma.invoice.delete({ where: { id: (req.params as { id: string }).id } });
+    return { ok: true };
+  });
 }
