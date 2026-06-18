@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { prisma } from '../db.js';
 import type { CanonicalResult, ExtractionProvider } from '../providers/types.js';
-import { getProvider } from '../providers/registry.js';
-import { getProviderCredsOrThrow, getSetting } from '../settings/store.js';
+import { allProviders, getProvider } from '../providers/registry.js';
+import { getCredentials, getProviderCredsOrThrow, getSetting } from '../settings/store.js';
 import { deriveConfidence, estimateCost } from './confidence.js';
 import { pageCount } from '../lib/pdf.js';
 
@@ -54,4 +54,33 @@ export async function runExtraction(invoiceId: string, providerName?: string): P
   const provider = getProvider(name);
   const creds = await getProviderCredsOrThrow(name, provider);
   await runExtractionWith(invoiceId, provider, creds);
+}
+
+export async function runOneForBakeoff(invoiceId: string, provider: ExtractionProvider, creds: Record<string, string>) {
+  const inv = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  const started = Date.now();
+  try {
+    const file = await readFile(inv.storedPath);
+    const pages = await pageCount(file);
+    const structuring = { provider: await getSetting('structuring_provider', 'anthropic'), model: await getSetting('structuring_model', 'claude-sonnet-4-6') };
+    const result = await provider.extract(file, creds, { fileName: inv.fileName, structuring });
+    return prisma.extractionRun.create({ data: { invoiceId, provider: provider.name,
+      structuringModel: provider.kind === 'markdown' ? structuring.model : null, status: 'COMPLETED',
+      confidence: deriveConfidence(result), costEstimate: result.costEstimate ?? estimateCost(provider.name, pages),
+      latencyMs: Date.now() - started, pageCount: pages, rawText: result.rawText, rawJson: result.rawJson as any,
+      fieldsSnapshot: headerData(result) as any, itemsSnapshot: result.lineItems as any } });
+  } catch (e: any) {
+    return prisma.extractionRun.create({ data: { invoiceId, provider: provider.name, status: 'FAILED',
+      latencyMs: Date.now() - started, error: String(e?.message ?? e) } });
+  }
+}
+
+export async function bakeoffInvoice(invoiceId: string) {
+  const runs = [];
+  for (const p of allProviders()) {
+    const creds = await getCredentials(p.name);
+    if (!p.isConfigured(creds)) continue;
+    runs.push(await runOneForBakeoff(invoiceId, p, creds!));
+  }
+  return runs;
 }

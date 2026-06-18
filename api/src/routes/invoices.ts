@@ -111,4 +111,11 @@ export async function invoiceRoutes(app: FastifyInstance) {
     await prisma.invoice.delete({ where: { id: (req.params as { id: string }).id } });
     return { ok: true };
   });
+
+  app.post('/api/invoices/:id/bakeoff', async (req) => {
+    const { id } = req.params as { id: string };
+    const { bakeoffInvoice } = await import('../extraction/run.js');
+    const runs = await bakeoffInvoice(id);
+    return { runs };
+  });
 }
