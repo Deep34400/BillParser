@@ -31,7 +31,7 @@ export const azureProvider: ExtractionProvider = {
     const base = creds.endpoint.replace(/\/$/, '');
     const url = `${base}/documentintelligence/documentModels/prebuilt-invoice:analyze?api-version=2024-02-29-preview&outputContentFormat=text`;
     const submit = await fetch(url, { method: 'POST',
-      headers: { 'content-type': 'application/pdf', 'ocp-apim-subscription-key': creds.apiKey }, body: file });
+      headers: { 'content-type': 'application/pdf', 'ocp-apim-subscription-key': creds.apiKey }, body: file as unknown as BodyInit });
     if (!submit.ok) throw new Error(`Azure analyze HTTP ${submit.status}`);
     const opLoc = submit.headers.get('operation-location');
     if (!opLoc) throw new Error('Azure: missing operation-location');
