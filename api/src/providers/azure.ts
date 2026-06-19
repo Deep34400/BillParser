@@ -29,19 +29,31 @@ export const azureProvider: ExtractionProvider = {
   isConfigured: (c) => !!c?.endpoint && !!c?.apiKey,
   async extract(file, creds) {
     const base = creds.endpoint.replace(/\/$/, '');
-    const url = `${base}/documentintelligence/documentModels/prebuilt-invoice:analyze?api-version=2024-02-29-preview&outputContentFormat=text`;
+    // GA Document Intelligence version; override with an `apiVersion` credential if needed.
+    const apiVersion = creds.apiVersion || '2024-11-30';
+    const url = `${base}/documentintelligence/documentModels/prebuilt-invoice:analyze?api-version=${apiVersion}`;
     const submit = await fetch(url, { method: 'POST',
       headers: { 'content-type': 'application/pdf', 'ocp-apim-subscription-key': creds.apiKey }, body: file as unknown as BodyInit });
-    if (!submit.ok) throw new Error(`Azure analyze HTTP ${submit.status}`);
+    if (!submit.ok) {
+      const detail = (await submit.text().catch(() => '')).slice(0, 500);
+      throw new Error(
+        `Azure analyze HTTP ${submit.status} (api-version ${apiVersion}). ` +
+          `Check the endpoint is your Document Intelligence resource URL and the key/region are correct. ${detail}`,
+      );
+    }
     const opLoc = submit.headers.get('operation-location');
-    if (!opLoc) throw new Error('Azure: missing operation-location');
+    if (!opLoc) throw new Error('Azure: missing operation-location header');
     let result: any;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 1500));
       const poll = await fetch(opLoc, { headers: { 'ocp-apim-subscription-key': creds.apiKey } });
+      if (!poll.ok) {
+        const detail = (await poll.text().catch(() => '')).slice(0, 300);
+        throw new Error(`Azure poll HTTP ${poll.status}. ${detail}`);
+      }
       const j: any = await poll.json();
       if (j.status === 'succeeded') { result = j.analyzeResult; break; }
-      if (j.status === 'failed') throw new Error('Azure analysis failed');
+      if (j.status === 'failed') throw new Error(`Azure analysis failed: ${JSON.stringify(j.error ?? {}).slice(0, 300)}`);
     }
     if (!result) throw new Error('Azure analysis timed out');
     const mapped = mapAzure(result);
