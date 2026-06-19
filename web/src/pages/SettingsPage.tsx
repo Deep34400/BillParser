@@ -92,13 +92,6 @@ const toggleBtn: React.CSSProperties = {
   fontFamily: T.font,
 };
 
-const hintStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: T.faint,
-  margin: '0 0 4px',
-  fontFamily: T.mono,
-};
-
 export function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [extractionProvider, setExtractionProvider] = useState('');
@@ -120,14 +113,30 @@ export function SettingsPage() {
   const toggleReveal = (key: string) =>
     setRevealed((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // Refresh provider status/selections only. Deliberately does NOT touch the
-  // typed-in credential values, so entered values stay in their fields after a save.
   const load = useCallback(async () => {
     const data = await api.settings();
     setSettings(data);
     setExtractionProvider(data.extractionProvider);
     setStructuringProvider(data.structuringProvider);
     setStructuringModel(data.structuringModel);
+    // Prefill the credential fields with the stored (decrypted) values so they
+    // persist across reloads. Best-effort: if reveal is unavailable, leave fields as-is.
+    try {
+      const { credentials } = await api.revealCreds();
+      const cv: Record<string, string> = {};
+      const sv: Record<string, string> = {};
+      for (const p of data.providers) {
+        const c = credentials[p.name];
+        if (c) for (const f of p.requiredCredentials ?? []) if (c[f] != null) cv[`${p.name}.${f}`] = c[f];
+      }
+      for (const name of STRUCTURING_PROVIDERS.map((s) => s.name)) {
+        if (credentials[name]?.apiKey != null) sv[name] = credentials[name].apiKey;
+      }
+      setCredValues(cv);
+      setStructCredValues(sv);
+    } catch {
+      /* reveal unavailable — keep whatever is already in the fields */
+    }
   }, []);
 
   useEffect(() => {
@@ -299,11 +308,9 @@ export function SettingsPage() {
             const key = `${provider.name}.${field}`;
             const isSecret = SECRET_FIELDS.has(field);
             const shown = !isSecret || !!revealed[key];
-            const maskedHint = provider.masked?.[field];
             return (
               <div key={field} style={{ marginBottom: 12 }}>
                 <label style={labelStyle}>{field}</label>
-                {maskedHint && <p style={hintStyle}>Saved: {maskedHint}</p>}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     type={shown ? 'text' : 'password'}

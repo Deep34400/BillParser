@@ -18,6 +18,19 @@ export async function settingsRoutes(app: FastifyInstance) {
       providers,
     };
   });
+  // Returns DECRYPTED credentials so the Settings UI can repopulate fields across
+  // reloads. This intentionally sends secrets to the client — acceptable for the
+  // trusted, single-tenant, no-auth self-hosted deployment this tool targets.
+  // (The default GET /api/settings stays masked; only this endpoint reveals.)
+  app.get('/api/settings/reveal', async () => {
+    const names = new Set<string>([...allProviders().map((p) => p.name), 'anthropic', 'openai', 'mistral']);
+    const credentials: Record<string, Record<string, string>> = {};
+    for (const name of names) {
+      const creds = await getCredentials(name);
+      if (creds) credentials[name] = creds;
+    }
+    return { credentials };
+  });
   app.put('/api/settings', async (req) => {
     const b = req.body as any;
     if (b.extractionProvider) await setSetting('extraction_provider', b.extractionProvider);

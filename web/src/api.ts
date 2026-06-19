@@ -17,6 +17,7 @@ export const api = {
   bulk: (action: string, ids: string[]) => j('/api/invoices/bulk', { method: 'POST', body: JSON.stringify({ action, ids }) }),
   analytics: () => j<Analytics>('/api/analytics'),
   settings: () => j<SettingsData>('/api/settings'),
+  revealCreds: () => j<{ credentials: Record<string, Record<string, string>> }>('/api/settings/reveal'),
   saveSettings: (b: unknown) => j('/api/settings', { method: 'PUT', body: JSON.stringify(b) }),
   saveCreds: (provider: string, b: unknown) => j(`/api/settings/providers/${provider}`, { method: 'PUT', body: JSON.stringify(b) }),
   clearCreds: (provider: string) => j(`/api/settings/providers/${provider}`, { method: 'DELETE' }),

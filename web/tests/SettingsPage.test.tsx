@@ -5,6 +5,13 @@ import { api } from '../src/api.js';
 beforeEach(() => {
   vi.spyOn(api, 'settings').mockResolvedValue({ extractionProvider: 'mistral', structuringProvider: 'anthropic', structuringModel: 'claude-sonnet-4-6',
     providers: [{ name: 'azure', displayName: 'Azure', kind: 'structured', requiredCredentials: ['endpoint','apiKey'], configured: false, masked: {} }] } as any);
+  vi.spyOn(api, 'revealCreds').mockResolvedValue({ credentials: {} } as any);
+});
+it('prefills credential fields from revealed stored values', async () => {
+  vi.spyOn(api, 'revealCreds').mockResolvedValue({ credentials: { azure: { endpoint: 'https://stored', apiKey: 'sk-stored-1234' } } } as any);
+  render(<SettingsPage />);
+  await waitFor(() => expect((screen.getByPlaceholderText('endpoint') as HTMLInputElement).value).toBe('https://stored'));
+  expect((screen.getByPlaceholderText('apiKey') as HTMLInputElement).value).toBe('sk-stored-1234');
 });
 it('renders provider credential forms and saves', async () => {
   const save = vi.spyOn(api, 'saveCreds').mockResolvedValue({} as any);

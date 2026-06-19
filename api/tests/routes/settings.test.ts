@@ -31,6 +31,16 @@ it('PUT credentials merges over existing fields (partial save does not clobber)'
   expect(azure.masked.apiKey).toBe('••••1111');
   await app.close();
 });
+it('GET /api/settings/reveal returns decrypted credentials', async () => {
+  const app = await buildApp();
+  await app.inject({ method: 'PUT', url: '/api/settings/providers/azure', payload: { endpoint: 'https://x', apiKey: 'sk-reveal-7777' } });
+  const b = (await app.inject({ url: '/api/settings/reveal' })).json();
+  expect(b.credentials.azure).toEqual({ endpoint: 'https://x', apiKey: 'sk-reveal-7777' });
+  // and the masked GET still does NOT leak the raw key
+  const masked = (await app.inject({ url: '/api/settings' })).json();
+  expect(JSON.stringify(masked)).not.toContain('sk-reveal-7777');
+  await app.close();
+});
 it('PUT selections persists', async () => {
   const app = await buildApp();
   await app.inject({ method: 'PUT', url: '/api/settings', payload: { extractionProvider: 'azure', structuringProvider: 'openai', structuringModel: 'gpt-4o-mini' } });

@@ -100,7 +100,8 @@ cd web && npm test
 
 ## Security notes
 
-- **Credential storage**: provider credentials entered in Settings are stored in Postgres encrypted with AES-256-GCM, keyed from `APP_SECRET`. The API never returns plain credentials; responses contain only masked hints (e.g. `••••abcd`).
+- **Credential storage**: provider credentials entered in Settings are stored in Postgres encrypted with AES-256-GCM, keyed from `APP_SECRET`. The default `GET /api/settings` returns only masked hints (e.g. `••••abcd`) and never the raw key.
+- **Credential reveal**: a dedicated `GET /api/settings/reveal` endpoint returns the **decrypted** credentials so the Settings UI can repopulate fields across reloads. This intentionally sends plaintext secrets to the client — it is safe only because v1 is single-tenant with no auth (see below). If you add authentication, gate this endpoint.
 - **No authentication**: v1 has no login/session system. Deploy on trusted or internal infrastructure only. Authentication is on the roadmap.
 - **`APP_SECRET`**: must be set to a strong random value in production. The Docker Compose default (`dev-secret-change-me`) is intentionally weak and must be replaced before exposing the service externally.
 
