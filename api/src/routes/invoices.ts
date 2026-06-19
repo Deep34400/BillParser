@@ -90,7 +90,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
           quantity: li.quantity ?? null, unitPrice: li.unitPrice ?? null, amount: li.amount ?? null, taxRate: li.taxRate ?? null })) });
       }
     });
-    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } } } });
+    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } } } });
   });
 
   app.post('/api/invoices/:id/apply-run', async (req, reply) => {
@@ -110,7 +110,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
       await tx.invoice.update({ where: { id }, data: { ...fields, provider: run.provider, confidence: run.confidence,
         status: 'COMPLETED', activeRunId: run.id, rawText: run.rawText, rawJson: run.rawJson as any } });
     });
-    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } } } });
+    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } } } });
   });
 
   app.delete('/api/invoices/:id', async (req) => {
