@@ -120,15 +120,14 @@ export function SettingsPage() {
   const toggleReveal = (key: string) =>
     setRevealed((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  // Refresh provider status/selections only. Deliberately does NOT touch the
+  // typed-in credential values, so entered values stay in their fields after a save.
   const load = useCallback(async () => {
     const data = await api.settings();
     setSettings(data);
     setExtractionProvider(data.extractionProvider);
     setStructuringProvider(data.structuringProvider);
     setStructuringModel(data.structuringModel);
-    setCredValues({});
-    setStructCredValues({});
-    setRevealed({});
   }, []);
 
   useEffect(() => {
@@ -169,6 +168,11 @@ export function SettingsPage() {
   const handleClearCreds = async (providerName: string, displayName: string) => {
     try {
       await api.clearCreds(providerName);
+      setCredValues((prev) => {
+        const next = { ...prev };
+        for (const k of Object.keys(next)) if (k.startsWith(`${providerName}.`)) delete next[k];
+        return next;
+      });
       await load();
       showToast(`${displayName} credentials cleared`);
     } catch (e) {
@@ -194,6 +198,11 @@ export function SettingsPage() {
   const handleClearStructCreds = async (providerName: string, label: string) => {
     try {
       await api.clearCreds(providerName);
+      setStructCredValues((prev) => {
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
       await load();
       showToast(`${label} key cleared`);
     } catch (e) {
@@ -294,7 +303,7 @@ export function SettingsPage() {
             return (
               <div key={field} style={{ marginBottom: 12 }}>
                 <label style={labelStyle}>{field}</label>
-                {maskedHint && <p style={hintStyle}>Saved: {maskedHint} — leave blank to keep, or type a new value to replace</p>}
+                {maskedHint && <p style={hintStyle}>Saved: {maskedHint}</p>}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     type={shown ? 'text' : 'password'}
