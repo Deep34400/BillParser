@@ -13,6 +13,16 @@ type SortKey = 'status' | 'vendorName' | 'invoiceDate' | 'confidence' | 'totalAm
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'ALL' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NEEDS_REVIEW';
 
+// Accept a file as a PDF if its MIME type says so OR its name ends in .pdf.
+// Browsers frequently report an empty or non-standard MIME type for PDFs
+// (depends on OS, file source, and file associations), so the extension is a
+// necessary fallback — otherwise valid PDFs get silently dropped on selection.
+export function filterPdfs(files: FileList | File[]): File[] {
+  return Array.from(files).filter(
+    (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name),
+  );
+}
+
 function buildQs(params: Record<string, string | undefined>): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -275,8 +285,7 @@ export function InvoicesPage() {
 
   // Upload handler
   async function handleFiles(files: FileList | File[]) {
-    const arr = Array.from(files);
-    const pdfs = arr.filter((f) => f.type === 'application/pdf');
+    const pdfs = filterPdfs(files);
     if (pdfs.length === 0) {
       setToast('No PDF files selected');
       return;
@@ -629,12 +638,15 @@ export function InvoicesPage() {
             <input
               type="file"
               multiple
-              accept="application/pdf"
+              accept="application/pdf,.pdf"
               style={{ display: 'none' }}
               onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  void handleFiles(e.target.files);
+                const input = e.currentTarget;
+                if (input.files && input.files.length > 0) {
+                  void handleFiles(input.files);
                 }
+                // reset so selecting the same file again still fires onChange
+                input.value = '';
               }}
             />
           </label>
