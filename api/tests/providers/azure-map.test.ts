@@ -15,3 +15,12 @@ it('maps Azure prebuilt-invoice fields to canonical', () => {
   expect(r.lineItems[0]).toMatchObject({ lineNumber: 1, description: 'Item A', quantity: 2, amount: 20 });
   expect(r.confidence).toBeGreaterThan(0);
 });
+it('uses Azure normalized valueDate, not the raw locale-formatted date text', () => {
+  const doc = { fields: {
+    InvoiceDate: { content: '29.01.2026 16:36:20', valueDate: '2026-01-29' },
+    DueDate: { content: '16.02.2026', valueDate: '2026-02-16' },
+  } };
+  const r = mapAzure({ documents: [doc] });
+  expect(r.invoiceDate).toBe('2026-01-29');
+  expect(r.dueDate).toBe('2026-02-16');
+});

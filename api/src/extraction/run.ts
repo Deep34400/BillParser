@@ -6,11 +6,19 @@ import { getCredentials, getProviderCredsOrThrow, getSetting } from '../settings
 import { deriveConfidence, estimateCost } from './confidence.js';
 import { pageCount } from '../lib/pdf.js';
 
+// Parse a date string safely — an unparseable date (e.g. "29.01.2026") must never
+// crash the whole extraction; store null instead of an Invalid Date that Prisma rejects.
+export function toDate(v?: string | null): Date | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function headerData(r: CanonicalResult) {
   return {
     vendorName: r.vendorName ?? null, vendorAddress: r.vendorAddress ?? null, vendorTaxId: r.vendorTaxId ?? null,
     invoiceNumber: r.invoiceNumber ?? null, poNumber: r.poNumber ?? null,
-    invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null, dueDate: r.dueDate ? new Date(r.dueDate) : null,
+    invoiceDate: toDate(r.invoiceDate), dueDate: toDate(r.dueDate),
     currency: r.currency ?? null, subtotal: r.subtotal ?? null, taxAmount: r.taxAmount ?? null,
     totalAmount: r.totalAmount ?? null, paymentTerms: r.paymentTerms ?? null,
     rawText: r.rawText ?? null, rawJson: (r.rawJson ?? null) as any,

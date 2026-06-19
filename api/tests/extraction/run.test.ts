@@ -39,6 +39,20 @@ it('marks COMPLETED, applies fields, writes items + a run', async () => {
   expect(got!.activeRunId).toBe(got!.runs[0].id);
 });
 
+it('completes (does not fail) when a provider returns an unparseable date', async () => {
+  const weird: ExtractionProvider = { ...fake, async extract() {
+    return { vendorName: 'Acme', totalAmount: 50, invoiceDate: '29.01.2026', dueDate: 'not a date',
+      lineItems: [], rawText: 'RAW', rawJson: {}, pageCount: 1 };
+  } };
+  const inv = await prisma.invoice.create({ data: { fileName: 'd.pdf', storedPath: await tempPdf('d.pdf'), fileHash: 'hdate' } });
+  await runExtractionWith(inv.id, weird, {});
+  const got = await prisma.invoice.findUnique({ where: { id: inv.id } });
+  expect(got!.status).toBe('COMPLETED');
+  expect(got!.invoiceDate).toBeNull();
+  expect(got!.dueDate).toBeNull();
+  expect(got!.vendorName).toBe('Acme');
+});
+
 it('marks FAILED with captured error on throw', async () => {
   const boom: ExtractionProvider = { ...fake, async extract() { throw new Error('provider down'); } };
   const inv = await prisma.invoice.create({ data: { fileName: 'b.pdf', storedPath: await tempPdf('b.pdf'), fileHash: 'h2' } });

@@ -2,6 +2,9 @@ import type { ExtractionProvider, CanonicalResult } from './types.js';
 const num = (f: any): number | undefined =>
   f?.valueCurrency?.amount ?? f?.valueNumber ?? (f?.content ? Number(String(f.content).replace(/[^0-9.\-]/g, '')) : undefined);
 const str = (f: any): string | undefined => f?.content ?? f?.valueString ?? undefined;
+// Prefer Azure's normalized ISO date (valueDate) over the raw printed text, which can be
+// in any locale format (e.g. "29.01.2026") and is not a parseable Date.
+const dateStr = (f: any): string | undefined => f?.valueDate ?? str(f);
 
 export function mapAzure(json: any): Omit<CanonicalResult, 'rawText' | 'rawJson' | 'costEstimate' | 'latencyMs' | 'pageCount'> {
   const f = json?.documents?.[0]?.fields ?? {};
@@ -14,7 +17,7 @@ export function mapAzure(json: any): Omit<CanonicalResult, 'rawText' | 'rawJson'
   return {
     vendorName: str(f.VendorName), vendorAddress: str(f.VendorAddress), vendorTaxId: str(f.VendorTaxId),
     invoiceNumber: str(f.InvoiceId), poNumber: str(f.PurchaseOrder),
-    invoiceDate: str(f.InvoiceDate), dueDate: str(f.DueDate),
+    invoiceDate: dateStr(f.InvoiceDate), dueDate: dateStr(f.DueDate),
     currency: f.InvoiceTotal?.valueCurrency?.currencyCode ?? str(f.Currency),
     subtotal: num(f.SubTotal), taxAmount: num(f.TotalTax), totalAmount: num(f.InvoiceTotal),
     paymentTerms: str(f.PaymentTerm),
