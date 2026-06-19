@@ -19,6 +19,18 @@ it('PUT credentials stores encrypted + masks on read; never returns raw', async 
   expect(azure.masked.apiKey).toBe('••••9999');
   await app.close();
 });
+it('PUT credentials merges over existing fields (partial save does not clobber)', async () => {
+  const app = await buildApp();
+  await app.inject({ method: 'PUT', url: '/api/settings/providers/azure', payload: { endpoint: 'https://a', apiKey: 'sk-keep-1111' } });
+  // partial save of only the endpoint, with a blank apiKey — must keep the stored key
+  await app.inject({ method: 'PUT', url: '/api/settings/providers/azure', payload: { endpoint: 'https://b', apiKey: '' } });
+  const b = (await app.inject({ url: '/api/settings' })).json();
+  const azure = b.providers.find((p: any) => p.name === 'azure');
+  expect(azure.configured).toBe(true);
+  expect(azure.masked.endpoint).toBe('••••://b');
+  expect(azure.masked.apiKey).toBe('••••1111');
+  await app.close();
+});
 it('PUT selections persists', async () => {
   const app = await buildApp();
   await app.inject({ method: 'PUT', url: '/api/settings', payload: { extractionProvider: 'azure', structuringProvider: 'openai', structuringModel: 'gpt-4o-mini' } });

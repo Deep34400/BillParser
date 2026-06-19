@@ -27,7 +27,14 @@ export async function settingsRoutes(app: FastifyInstance) {
   });
   app.put('/api/settings/providers/:provider', async (req) => {
     const { provider } = req.params as { provider: string };
-    await setCredentials(provider, req.body as Record<string, string>);
+    const incoming = (req.body ?? {}) as Record<string, string>;
+    // Ignore blank fields and merge over any existing credentials so a partial
+    // save (e.g. updating only the endpoint) never clobbers the other fields.
+    const clean = Object.fromEntries(
+      Object.entries(incoming).filter(([, v]) => v !== '' && v != null),
+    );
+    const existing = (await getCredentials(provider)) ?? {};
+    await setCredentials(provider, { ...existing, ...clean });
     return { ok: true };
   });
   app.delete('/api/settings/providers/:provider', async (req) => {

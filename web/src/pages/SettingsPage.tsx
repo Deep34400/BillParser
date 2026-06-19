@@ -16,6 +16,10 @@ const STRUCTURING_CRED_LABELS: Record<string, string> = {
   mistral: 'Mistral API key',
 };
 
+// Fields that hold secrets are masked by default and get a show/hide toggle.
+// Everything else (endpoint, region, ids, location) is a plain visible text field.
+const SECRET_FIELDS = new Set(['apiKey', 'secretAccessKey', 'keyJson']);
+
 const cardStyle: React.CSSProperties = {
   background: T.panel,
   border: `1px solid ${T.border}`,
@@ -75,6 +79,26 @@ const btnSecondary: React.CSSProperties = {
   fontFamily: T.font,
 };
 
+const toggleBtn: React.CSSProperties = {
+  flex: 'none',
+  background: 'transparent',
+  color: T.accent,
+  border: `1px solid ${T.border}`,
+  borderRadius: 6,
+  padding: '0 12px',
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: T.font,
+};
+
+const hintStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: T.faint,
+  margin: '0 0 4px',
+  fontFamily: T.mono,
+};
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [extractionProvider, setExtractionProvider] = useState('');
@@ -84,12 +108,17 @@ export function SettingsPage() {
   const [credValues, setCredValues] = useState<Record<string, string>>({});
   // structuring provider api keys keyed by provider name
   const [structCredValues, setStructCredValues] = useState<Record<string, string>>({});
+  // which secret inputs are currently revealed, keyed the same as the value maps
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState('');
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
   };
+
+  const toggleReveal = (key: string) =>
+    setRevealed((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const load = useCallback(async () => {
     const data = await api.settings();
@@ -99,6 +128,7 @@ export function SettingsPage() {
     setStructuringModel(data.structuringModel);
     setCredValues({});
     setStructCredValues({});
+    setRevealed({});
   }, []);
 
   useEffect(() => {
@@ -106,40 +136,69 @@ export function SettingsPage() {
   }, [load]);
 
   const handleSaveSelections = async () => {
-    await api.saveSettings({ extractionProvider, structuringProvider, structuringModel });
-    await load();
-    showToast('Selections saved');
+    try {
+      await api.saveSettings({ extractionProvider, structuringProvider, structuringModel });
+      await load();
+      showToast('Selections saved');
+    } catch (e) {
+      showToast(`Could not save: ${(e as Error).message}`);
+    }
   };
 
-  const handleSaveCreds = async (providerName: string) => {
+  const handleSaveCreds = async (providerName: string, displayName: string) => {
     const body: Record<string, string> = {};
     const provider = settings?.providers.find((p) => p.name === providerName);
     provider?.requiredCredentials?.forEach((field) => {
       const val = credValues[`${providerName}.${field}`];
-      if (val !== undefined) body[field] = val;
+      // only send fields the user actually typed; blanks are left untouched (merge on the server)
+      if (val !== undefined && val !== '') body[field] = val;
     });
-    await api.saveCreds(providerName, body);
-    await load();
-    showToast('Saved');
+    if (Object.keys(body).length === 0) {
+      showToast('Enter a value first');
+      return;
+    }
+    try {
+      await api.saveCreds(providerName, body);
+      await load();
+      showToast(`${displayName} credentials saved`);
+    } catch (e) {
+      showToast(`Could not save: ${(e as Error).message}`);
+    }
   };
 
-  const handleClearCreds = async (providerName: string) => {
-    await api.clearCreds(providerName);
-    await load();
-    showToast('Cleared');
+  const handleClearCreds = async (providerName: string, displayName: string) => {
+    try {
+      await api.clearCreds(providerName);
+      await load();
+      showToast(`${displayName} credentials cleared`);
+    } catch (e) {
+      showToast(`Could not clear: ${(e as Error).message}`);
+    }
   };
 
-  const handleSaveStructCreds = async (providerName: string) => {
+  const handleSaveStructCreds = async (providerName: string, label: string) => {
     const val = structCredValues[providerName] ?? '';
-    await api.saveCreds(providerName, { apiKey: val });
-    await load();
-    showToast('Saved');
+    if (val === '') {
+      showToast('Enter a value first');
+      return;
+    }
+    try {
+      await api.saveCreds(providerName, { apiKey: val });
+      await load();
+      showToast(`${label} key saved`);
+    } catch (e) {
+      showToast(`Could not save: ${(e as Error).message}`);
+    }
   };
 
-  const handleClearStructCreds = async (providerName: string) => {
-    await api.clearCreds(providerName);
-    await load();
-    showToast('Cleared');
+  const handleClearStructCreds = async (providerName: string, label: string) => {
+    try {
+      await api.clearCreds(providerName);
+      await load();
+      showToast(`${label} key cleared`);
+    } catch (e) {
+      showToast(`Could not clear: ${(e as Error).message}`);
+    }
   };
 
   if (!settings) {
@@ -228,36 +287,40 @@ export function SettingsPage() {
           </div>
 
           {provider.requiredCredentials?.map((field) => {
+            const key = `${provider.name}.${field}`;
+            const isSecret = SECRET_FIELDS.has(field);
+            const shown = !isSecret || !!revealed[key];
             const maskedHint = provider.masked?.[field];
             return (
               <div key={field} style={{ marginBottom: 12 }}>
                 <label style={labelStyle}>{field}</label>
-                {maskedHint && (
-                  <p style={{ fontSize: 11, color: T.faint, margin: '0 0 4px', fontFamily: T.mono }}>
-                    Current: {maskedHint}
-                  </p>
-                )}
-                <input
-                  type="password"
-                  style={inputStyle}
-                  placeholder={field}
-                  value={credValues[`${provider.name}.${field}`] ?? ''}
-                  onChange={(e) =>
-                    setCredValues((prev) => ({
-                      ...prev,
-                      [`${provider.name}.${field}`]: e.target.value,
-                    }))
-                  }
-                />
+                {maskedHint && <p style={hintStyle}>Saved: {maskedHint} — leave blank to keep, or type a new value to replace</p>}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type={shown ? 'text' : 'password'}
+                    style={inputStyle}
+                    placeholder={field}
+                    autoComplete="off"
+                    value={credValues[key] ?? ''}
+                    onChange={(e) =>
+                      setCredValues((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                  />
+                  {isSecret && (
+                    <button type="button" style={toggleBtn} onClick={() => toggleReveal(key)}>
+                      {shown ? 'Hide' : 'Show'}
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
 
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            <button style={btnPrimary} onClick={() => handleSaveCreds(provider.name)}>
+            <button style={btnPrimary} onClick={() => handleSaveCreds(provider.name, provider.displayName)}>
               Save
             </button>
-            <button style={btnSecondary} onClick={() => handleClearCreds(provider.name)}>
+            <button style={btnSecondary} onClick={() => handleClearCreds(provider.name, provider.displayName)}>
               Clear
             </button>
           </div>
@@ -268,31 +331,41 @@ export function SettingsPage() {
       <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         Structuring provider credentials
       </h2>
-      {STRUCTURING_PROVIDERS.map((sp) => (
-        <div key={sp.name} style={cardStyle}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{sp.label}</div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={labelStyle}>API Key</label>
-            <input
-              type="password"
-              style={inputStyle}
-              placeholder={STRUCTURING_CRED_LABELS[sp.name]}
-              value={structCredValues[sp.name] ?? ''}
-              onChange={(e) =>
-                setStructCredValues((prev) => ({ ...prev, [sp.name]: e.target.value }))
-              }
-            />
+      {STRUCTURING_PROVIDERS.map((sp) => {
+        const key = `struct.${sp.name}`;
+        const shown = !!revealed[key];
+        return (
+          <div key={sp.name} style={cardStyle}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{sp.label}</div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={labelStyle}>API Key</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type={shown ? 'text' : 'password'}
+                  style={inputStyle}
+                  placeholder={STRUCTURING_CRED_LABELS[sp.name]}
+                  autoComplete="off"
+                  value={structCredValues[sp.name] ?? ''}
+                  onChange={(e) =>
+                    setStructCredValues((prev) => ({ ...prev, [sp.name]: e.target.value }))
+                  }
+                />
+                <button type="button" style={toggleBtn} onClick={() => toggleReveal(key)}>
+                  {shown ? 'Hide' : 'Show'}
+                </button>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={btnPrimary} onClick={() => handleSaveStructCreds(sp.name, sp.label)}>
+                Save
+              </button>
+              <button style={btnSecondary} onClick={() => handleClearStructCreds(sp.name, sp.label)}>
+                Clear
+              </button>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={btnPrimary} onClick={() => handleSaveStructCreds(sp.name)}>
-              Save
-            </button>
-            <button style={btnSecondary} onClick={() => handleClearStructCreds(sp.name)}>
-              Clear
-            </button>
-          </div>
-        </div>
-      ))}
+        );
+      })}
 
       <Toast message={toast} />
     </div>
