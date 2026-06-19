@@ -50,10 +50,17 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
 }
 
 export async function runExtraction(invoiceId: string, providerName?: string): Promise<void> {
-  const name = providerName ?? (await getSetting('extraction_provider', 'mistral'));
-  const provider = getProvider(name);
-  const creds = await getProviderCredsOrThrow(name, provider);
-  await runExtractionWith(invoiceId, provider, creds);
+  let name = providerName ?? 'mistral';
+  try {
+    name = providerName ?? (await getSetting('extraction_provider', 'mistral'));
+    const provider = getProvider(name);
+    const creds = await getProviderCredsOrThrow(name, provider);
+    await runExtractionWith(invoiceId, provider, creds);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    await prisma.extractionRun.create({ data: { invoiceId, provider: name, status: 'FAILED', error: msg } });
+    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED', error: msg, provider: name } });
+  }
 }
 
 export async function runOneForBakeoff(invoiceId: string, provider: ExtractionProvider, creds: Record<string, string>) {

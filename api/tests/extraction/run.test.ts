@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PDFDocument } from 'pdf-lib';
 import { prisma } from '../../src/db.js';
-import { runExtractionWith } from '../../src/extraction/run.js';
+import { runExtraction, runExtractionWith } from '../../src/extraction/run.js';
 import type { ExtractionProvider } from '../../src/providers/types.js';
 
 let dir: string;
@@ -46,4 +46,15 @@ it('marks FAILED with captured error on throw', async () => {
   const got = await prisma.invoice.findUnique({ where: { id: inv.id }, include: { runs: true } });
   expect(got!.status).toBe('FAILED'); expect(got!.error).toContain('provider down');
   expect(got!.runs[0].status).toBe('FAILED');
+});
+
+it('marks FAILED (does not throw) when the active provider has no credentials', async () => {
+  await prisma.providerConfig.deleteMany();
+  await prisma.setting.deleteMany(); // default provider resolves to 'mistral', which has no creds
+  const inv = await prisma.invoice.create({ data: { fileName: 'nc.pdf', storedPath: await tempPdf('nc.pdf'), fileHash: 'nocreds-1' } });
+  await runExtraction(inv.id); // must resolve, not reject
+  const got = await prisma.invoice.findUnique({ where: { id: inv.id }, include: { runs: true } });
+  expect(got!.status).toBe('FAILED');
+  expect(got!.error ?? '').toContain('No credentials configured');
+  expect(got!.runs.some((r) => r.status === 'FAILED')).toBe(true);
 });
