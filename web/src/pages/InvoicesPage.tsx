@@ -277,20 +277,19 @@ export function InvoicesPage() {
   async function handleFiles(files: FileList | File[]) {
     const arr = Array.from(files);
     const pdfs = arr.filter((f) => f.type === 'application/pdf');
-    const rejected = arr.length - pdfs.length;
     if (pdfs.length === 0) {
       setToast('No PDF files selected');
       return;
     }
     try {
       const result = await api.upload(pdfs);
-      const dups: number = result?.duplicates ?? 0;
-      if (dups > 0) setDuplicateBanner({ count: dups });
+      const created = result?.created?.length ?? 0;
+      const dupes = result?.duplicates?.length ?? 0;
+      const rejected = result?.rejected?.length ?? 0;
+      if (dupes > 0) setDuplicateBanner({ count: dupes });
       await refetch();
-      const uploaded: number = result?.uploaded ?? pdfs.length;
       setToast(
-        `Uploaded ${uploaded} invoice${uploaded !== 1 ? 's' : ''}` +
-          (rejected > 0 ? ` (${rejected} non-PDF rejected)` : ''),
+        `Uploaded ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`,
       );
       setShowUpload(false);
     } catch (e) {

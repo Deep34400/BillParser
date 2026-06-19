@@ -20,5 +20,10 @@ export const api = {
   saveSettings: (b: unknown) => j('/api/settings', { method: 'PUT', body: JSON.stringify(b) }),
   saveCreds: (provider: string, b: unknown) => j(`/api/settings/providers/${provider}`, { method: 'PUT', body: JSON.stringify(b) }),
   clearCreds: (provider: string) => j(`/api/settings/providers/${provider}`, { method: 'DELETE' }),
-  upload: async (files: File[]) => { const fd = new FormData(); files.forEach((f) => fd.append('files', f)); const res = await fetch('/api/invoices/upload', { method: 'POST', body: fd }); return res.json(); },
+  upload: async (files: File[]) => {
+    const fd = new FormData(); files.forEach((f) => fd.append('files', f));
+    const res = await fetch('/api/invoices/upload', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
+    return res.json();
+  },
 };
