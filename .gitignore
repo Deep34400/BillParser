@@ -5,3 +5,4 @@ dist/
 uploads/
 api/prisma/*.db
 coverage/
+.claude/

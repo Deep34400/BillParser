@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Invoice OCR — Product Requirements Document</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --panel-2: #1f232c; --border: #2a2f3a;
+    --text: #e6e8ec; --muted: #9aa3b2; --accent: #4f8cff; --accent-2:#7aa7ff;
+    --green: #2faa64; --amber: #d29922; --red: #e5534b; --purple:#a371f7; --cyan:#39c5cf;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+  }
+  a { color: var(--accent); text-decoration: none; }
+
+  /* Layout */
+  .app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+  nav.side {
+    border-right: 1px solid var(--border); background: #12141a;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 22px 16px;
+  }
+  nav.side .brand { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  nav.side .ver { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+  nav.side a.navlink {
+    display: block; padding: 8px 12px; border-radius: 8px; color: var(--muted);
+    font-size: 14px; cursor: pointer; margin-bottom: 2px; border: 1px solid transparent;
+  }
+  nav.side a.navlink:hover { background: var(--panel-2); color: var(--text); }
+  nav.side a.navlink.active { background: rgba(79,140,255,0.14); color: var(--accent-2); border-color: rgba(79,140,255,0.3); }
+  nav.side .nav-group { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #5c6473; margin: 18px 0 6px 12px; }
+
+  main { padding: 40px 56px 120px; max-width: 1040px; }
+  section { scroll-margin-top: 24px; margin-bottom: 56px; }
+  h1 { font-size: 30px; margin: 0 0 6px; }
+  h2 { font-size: 23px; margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 26px 0 10px; }
+  p { color: #ccd2dc; }
+  .lead { font-size: 16px; color: var(--muted); }
+  code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-size: 13px; color: #ffd9a8; }
+
+  .pill { display:inline-block; font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--border); color:var(--muted); }
+  .pill.accent { background: rgba(79,140,255,.14); color: var(--accent-2); border-color: rgba(79,140,255,.3); }
+  .pill.green { background: rgba(47,170,100,.14); color:var(--green); border-color: rgba(47,170,100,.3);}
+  .pill.amber { background: rgba(210,153,34,.14); color:var(--amber); border-color: rgba(210,153,34,.3);}
+  .pill.purple{ background: rgba(163,113,247,.14); color:var(--purple); border-color: rgba(163,113,247,.3);}
+
+  .grid { display: grid; gap: 16px; }
+  .cols-2 { grid-template-columns: repeat(2,1fr); }
+  .cols-3 { grid-template-columns: repeat(3,1fr); }
+  @media (max-width: 900px){ .cols-2,.cols-3{grid-template-columns:1fr;} .app{grid-template-columns:1fr;} nav.side{display:none;} main{padding:24px;} }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+  .card h4 { margin: 0 0 6px; font-size: 15px; }
+  .card .meta { font-size: 12px; color: var(--muted); }
+  .callout { border-left: 3px solid var(--accent); background: var(--panel); padding: 14px 18px; border-radius: 0 10px 10px 0; margin: 16px 0; }
+  .callout.warn { border-color: var(--amber); }
+  .callout.good { border-color: var(--green); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  tr:hover td { background: var(--panel); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .tab { padding: 8px 14px; border-radius: 8px; background: var(--panel-2); border:1px solid var(--border); cursor: pointer; font-size: 13px; color: var(--muted); }
+  .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tabpane { display: none; } .tabpane.active { display: block; }
+
+  /* Accordion */
+  .acc { border:1px solid var(--border); border-radius: 10px; overflow:hidden; margin-bottom: 10px; }
+  .acc-head { padding: 14px 16px; cursor: pointer; display:flex; justify-content:space-between; align-items:center; background: var(--panel); font-weight:600; font-size: 14px; }
+  .acc-head:hover { background: var(--panel-2); }
+  .acc-head .chev { transition: transform .2s; color: var(--muted); }
+  .acc.open .chev { transform: rotate(90deg); }
+  .acc-body { display:none; padding: 4px 16px 16px; font-size: 14px; color:#ccd2dc; }
+  .acc.open .acc-body { display: block; }
+  .req-id { font-family: ui-monospace, monospace; font-size: 12px; color: var(--cyan); margin-right:10px; }
+
+  /* Flow walkthrough */
+  .flow-wrap { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius); padding: 22px; }
+  .flow-steps { display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 18px; }
+  .fstep {
+    flex:1; min-width: 90px; text-align:center; padding: 12px 8px; border-radius: 10px; cursor:pointer;
+    background: var(--panel-2); border:1px solid var(--border); font-size:12px; color:var(--muted); position:relative;
+  }
+  .fstep .n { display:block; width:26px;height:26px;line-height:26px;margin:0 auto 6px;border-radius:50%; background:#2a2f3a; color:var(--text); font-weight:700; }
+  .fstep.active { border-color: var(--accent); background: rgba(79,140,255,.12); color: var(--text); }
+  .fstep.active .n { background: var(--accent); color:#fff; }
+  .flow-detail { border-top:1px solid var(--border); padding-top:16px; min-height: 120px; }
+  .flow-detail h4 { margin:0 0 6px; font-size:15px; }
+  .flow-detail .sysline { font-size:13px; color:var(--muted); margin-top:8px; }
+  .flow-nav { display:flex; gap:8px; margin-top:16px; }
+  .btn { background: var(--accent); color:#fff; border:none; border-radius:8px; padding:7px 14px; cursor:pointer; font-size:13px;}
+  .btn.sec { background: var(--panel-2); color:var(--text); border:1px solid var(--border); }
+  .btn:disabled{opacity:.4; cursor:not-allowed;}
+
+  .swap-note{font-size:12px;color:var(--muted);}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0 0;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;}
+
+  .kpi { display:grid; grid-template-columns: repeat(4,1fr); gap:14px; }
+  @media(max-width:900px){.kpi{grid-template-columns:repeat(2,1fr);}}
+  .kpi .card .big { font-size: 26px; font-weight:700; color: var(--accent-2); }
+
+  .mono-box{ background:#0c0e12; border:1px solid var(--border); border-radius:10px; padding:16px; font-family:ui-monospace,monospace; font-size:12.5px; color:#b7c0cd; overflow:auto; white-space:pre; }
+  .tag{font-size:11px;padding:1px 7px;border-radius:5px;background:var(--panel-2);border:1px solid var(--border);color:var(--muted);}
+  footer{color:var(--muted);font-size:13px;border-top:1px solid var(--border);padding-top:20px;}
+  .toprow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="side">
+    <div class="brand">📄 Invoice OCR</div>
+    <div class="ver">PRD v1.0 · Draft · Jun 2026</div>
+    <div class="nav-group">Context</div>
+    <a class="navlink" data-sec="overview">Overview</a>
+    <a class="navlink" data-sec="goals">Goals &amp; Non-Goals</a>
+    <a class="navlink" data-sec="personas">Personas</a>
+    <a class="navlink" data-sec="usecases">Use Cases</a>
+    <div class="nav-group">Experience</div>
+    <a class="navlink" data-sec="flows">User Flows</a>
+    <a class="navlink" data-sec="requirements">Requirements</a>
+    <div class="nav-group">System</div>
+    <a class="navlink" data-sec="providers">Extraction Providers</a>
+    <a class="navlink" data-sec="architecture">Architecture</a>
+    <a class="navlink" data-sec="datamodel">Data Model</a>
+    <a class="navlink" data-sec="api">API</a>
+    <div class="nav-group">Plan</div>
+    <a class="navlink" data-sec="nfr">Non-Functional</a>
+    <a class="navlink" data-sec="metrics">Success Metrics</a>
+    <a class="navlink" data-sec="roadmap">Roadmap</a>
+  </nav>
+
+  <main>
+    <div class="toprow">
+      <span class="pill accent">Internal tool</span>
+      <span class="pill">Owner: Abhishek</span>
+      <span class="pill green">Status: MVP built</span>
+      <span class="pill purple">Provider-agnostic</span>
+    </div>
+
+    <!-- OVERVIEW -->
+    <section id="overview">
+      <h1>Invoice OCR</h1>
+      <p class="lead">A self-hosted tool that turns finance bills (PDFs) into structured, queryable data. Upload a PDF, an extraction engine reads it, and the result is stored in Postgres and shown as a searchable table with full line-item detail.</p>
+
+      <h3>Problem</h3>
+      <p>Bills arrive as PDFs in many different layouts — every vendor formats invoices differently. Today they are read and re-keyed by hand into spreadsheets or an accounting system. That is slow, error-prone, doesn't scale, and leaves no clean dataset to query for spend analysis, reconciliation, or audit.</p>
+
+      <h3>Solution</h3>
+      <p>A web app with a single job: ingest bill PDFs and produce trustworthy structured records. Because layouts vary, extraction is <strong>provider-agnostic</strong> — every engine (Mistral OCR, Azure Document Intelligence, LlamaParse, Textract, Google Document AI) normalizes into one canonical invoice schema. Engines are swapped with a single config value, so accuracy/cost trade-offs can be tuned without touching the app.</p>
+
+      <div class="callout">
+        <strong>One-line pitch:</strong> Drop a folder of bills in; get a clean, searchable, exportable table of invoices and line items out — with the extraction engine of your choice behind a stable schema.
+      </div>
+    </section>
+
+    <!-- GOALS -->
+    <section id="goals">
+      <h2>Goals &amp; Non-Goals</h2>
+      <div class="grid cols-2">
+        <div class="card">
+          <h4 style="color:var(--green)">Goals</h4>
+          <ul>
+            <li>Extract header fields + line items from arbitrary-layout bill PDFs.</li>
+            <li>Store every bill in Postgres with a stable canonical schema.</li>
+            <li>Make results searchable, reviewable, and exportable (CSV).</li>
+            <li>Keep the extraction engine swappable per cost/accuracy needs.</li>
+            <li>Run fully self-hosted via one <code>docker compose up</code>.</li>
+            <li>De-duplicate re-uploaded files automatically.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4 style="color:var(--red)">Non-Goals (v1)</h4>
+          <ul>
+            <li>Approval workflows / payments / posting to an ERP.</li>
+            <li>Multi-tenant SaaS, billing, or per-user accounts.</li>
+            <li>Email-inbox ingestion (manual upload only in v1).</li>
+            <li>Editing extracted values in-place (review + re-extract only).</li>
+            <li>Mobile-native app.</li>
+            <li>Training a custom extraction model.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- PERSONAS -->
+    <section id="personas">
+      <h2>Personas</h2>
+      <div class="grid cols-3">
+        <div class="card">
+          <h4>🧾 Finance Operator</h4>
+          <div class="meta">Primary user</div>
+          <p>Processes incoming bills daily. Wants to stop hand-keying invoices and trust that totals, dates, and line items are captured correctly. Lives in the table view and CSV export.</p>
+        </div>
+        <div class="card">
+          <h4>📊 Finance Manager / Analyst</h4>
+          <div class="meta">Consumer of data</div>
+          <p>Needs clean spend data to reconcile, categorize, and analyze. Cares about completeness, accuracy, and being able to export to a spreadsheet or warehouse.</p>
+        </div>
+        <div class="card">
+          <h4>🛠️ Developer / Admin</h4>
+          <div class="meta">Operator of the tool</div>
+          <p>Deploys and configures it. Chooses the extraction provider, manages keys, monitors failures, and wires new providers or downstream integrations.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- USE CASES -->
+    <section id="usecases">
+      <h2>Use Cases</h2>
+      <div class="tabs" id="uc-tabs">
+        <div class="tab active" data-uc="uc1">UC-1 Bulk ingest</div>
+        <div class="tab" data-uc="uc2">UC-2 Review low-confidence</div>
+        <div class="tab" data-uc="uc3">UC-3 Re-extract / switch engine</div>
+        <div class="tab" data-uc="uc4">UC-4 Search &amp; export</div>
+        <div class="tab" data-uc="uc5">UC-5 Handle a failure</div>
+      </div>
+
+      <div class="tabpane active" id="uc1">
+        <div class="card">
+          <h4>UC-1 · Bulk ingest a batch of bills</h4>
+          <p><span class="tag">Actor</span> Finance Operator &nbsp; <span class="tag">Trigger</span> A pile of vendor PDFs to process</p>
+          <p><strong>Flow:</strong> Operator drags 30 PDFs onto the upload zone → each file is hashed, stored, and queued → rows appear as <span class="pill amber">PENDING</span>, move to <span class="pill amber">PROCESSING</span>, then <span class="pill green">COMPLETED</span> with vendor, totals, and line-item counts populated live.</p>
+          <p><strong>Success:</strong> All non-duplicate files become invoice rows; duplicates are flagged and skipped. No manual keying.</p>
+        </div>
+      </div>
+      <div class="tabpane" id="uc2">
+        <div class="card">
+          <h4>UC-2 · Review a low-confidence extraction</h4>
+          <p><span class="tag">Actor</span> Finance Operator &nbsp; <span class="tag">Trigger</span> Confidence badge looks low or totals seem off</p>
+          <p><strong>Flow:</strong> Operator opens the invoice detail → sees canonical fields, line-item table, confidence score, and the raw OCR text side-reference → compares against the source to confirm or spot a mis-read.</p>
+          <p><strong>Success:</strong> Operator can verify any field against raw OCR output without leaving the app; questionable bills are easy to spot via the confidence badge.</p>
+        </div>
+      </div>
+      <div class="tabpane" id="uc3">
+        <div class="card">
+          <h4>UC-3 · Re-extract or switch engine</h4>
+          <p><span class="tag">Actor</span> Operator / Admin &nbsp; <span class="tag">Trigger</span> A bill extracted poorly on the default engine</p>
+          <p><strong>Flow:</strong> From invoice detail, pick a different provider in the dropdown (e.g. <code>azure</code> for best line-item accuracy) → re-extract → existing line items are replaced atomically with the new result.</p>
+          <p><strong>Success:</strong> Same bill, better result, without re-uploading — and the choice is per-invoice, so engines can be compared head-to-head.</p>
+        </div>
+      </div>
+      <div class="tabpane" id="uc4">
+        <div class="card">
+          <h4>UC-4 · Search and export</h4>
+          <p><span class="tag">Actor</span> Analyst &nbsp; <span class="tag">Trigger</span> Needs spend data for a vendor / period</p>
+          <p><strong>Flow:</strong> Filter the table by status or search by vendor / invoice number / filename → export the (filtered) headers to CSV → open in a spreadsheet or load into a warehouse.</p>
+          <p><strong>Success:</strong> A clean dataset leaves the tool in seconds; no copy-paste from PDFs.</p>
+        </div>
+      </div>
+      <div class="tabpane" id="uc5">
+        <div class="card">
+          <h4>UC-5 · Diagnose &amp; recover from a failure</h4>
+          <p><span class="tag">Actor</span> Admin &nbsp; <span class="tag">Trigger</span> A bill lands in <span class="pill" style="color:var(--red)">FAILED</span></p>
+          <p><strong>Flow:</strong> Open the invoice → read the captured error (e.g. missing API key, provider timeout, unreadable scan) → fix config or choose another provider → re-extract.</p>
+          <p><strong>Success:</strong> Failures are explicit and actionable, never silent; recovery is one click after the fix.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FLOWS -->
+    <section id="flows">
+      <h2>User Flows</h2>
+      <p class="lead">Pick a flow, then step through it. Each step shows the user action and what the system does behind it.</p>
+      <div class="tabs" id="flow-picker">
+        <div class="tab active" data-flow="ingest">A · Upload &amp; extract</div>
+        <div class="tab" data-flow="review">B · Review &amp; verify</div>
+        <div class="tab" data-flow="reextract">C · Re-extract / switch provider</div>
+      </div>
+
+      <div class="flow-wrap">
+        <div class="flow-steps" id="flow-steps"></div>
+        <div class="flow-detail" id="flow-detail"></div>
+        <div class="flow-nav">
+          <button class="btn sec" id="flow-prev">← Prev</button>
+          <button class="btn" id="flow-next">Next →</button>
+        </div>
+        <div class="legend">
+          <span><span class="dot" style="background:var(--accent)"></span> user action</span>
+          <span><span class="dot" style="background:var(--green)"></span> system / backend</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- REQUIREMENTS -->
+    <section id="requirements">
+      <h2>Functional Requirements</h2>
+      <p class="lead">Click any requirement to expand. <span class="pill green">P0</span> = MVP must-have, <span class="pill amber">P1</span> = fast-follow, <span class="pill">P2</span> = later.</p>
+      <div id="req-list"></div>
+    </section>
+
+    <!-- PROVIDERS -->
+    <section id="providers">
+      <h2>Extraction Providers</h2>
+      <p class="lead">All engines normalize into one canonical schema. Choose with the <code>EXTRACTION_PROVIDER</code> env var. Pricing/accuracy as of mid-2026 — verify before relying on it.</p>
+      <table>
+        <thead><tr><th>Provider</th><th>Key</th><th class="num">~Cost / 1k pages</th><th>Line items</th><th>Pattern</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Mistral OCR 3</strong></td><td><code>mistral</code></td><td class="num">~$2 ($1 batch)</td><td>strong</td><td>OCR→markdown + LLM structuring</td><td><span class="pill green">default</span></td></tr>
+          <tr><td><strong>Azure Document Intelligence</strong></td><td><code>azure</code></td><td class="num">~$10</td><td><strong>best (~93%/87%)</strong></td><td>prebuilt invoice, structured out</td><td><span class="pill green">built</span></td></tr>
+          <tr><td><strong>LlamaParse v2</strong></td><td><code>llamaparse</code></td><td class="num">~$7.5–12</td><td>strong</td><td>OCR→markdown + LLM structuring</td><td><span class="pill green">built</span></td></tr>
+          <tr><td><strong>AWS Textract</strong> (AnalyzeExpense)</td><td><code>textract</code></td><td class="num">~$10</td><td>good (~78%/82%)</td><td>structured fields</td><td><span class="pill amber">stub</span></td></tr>
+          <tr><td><strong>Google Document AI</strong></td><td><code>google</code></td><td class="num">~$10–30</td><td>weaker (~40%)</td><td>structured fields</td><td><span class="pill amber">stub</span></td></tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>Two extraction patterns.</strong> <em>Markdown providers</em> (Mistral, LlamaParse) OCR to markdown, then a second "structuring" LLM (OpenAI / Anthropic / Mistral, via <code>STRUCTURING_MODEL_PROVIDER</code>) maps text → fields. <em>Structured providers</em> (Azure, Textract, Google) return invoice fields directly — no LLM step.
+      </div>
+      <div class="callout warn">
+        <strong>Decision:</strong> default to <code>mistral</code> for lowest cost and layout robustness; recommend <code>azure</code> when line-item accuracy matters most. The abstraction means this is a config choice, not a code change.
+      </div>
+    </section>
+
+    <!-- ARCHITECTURE -->
+    <section id="architecture">
+      <h2>Architecture</h2>
+      <div class="mono-box">┌──────────┐   upload    ┌──────────────┐   extract    ┌────────────────────┐
+│  React   │ ──────────▶ │  Fastify API │ ───────────▶ │ Provider adapter   │
+│  (Vite)  │ ◀────────── │  + Prisma    │ ◀─────────── │ (Mistral/Azure/…)  │
+└──────────┘   JSON      └──────┬───────┘  canonical   └─────────┬──────────┘
+                                │                                 │ OCR / structuring
+                          ┌─────▼─────┐                    ┌──────▼───────┐
+                          │ Postgres  │ invoices+line_items│ external API │
+                          └───────────┘                    └──────────────┘</div>
+      <div class="grid cols-3" style="margin-top:16px;">
+        <div class="card"><h4>Frontend</h4><div class="meta">React + Vite, React Router</div><p>Upload UI, searchable table, invoice detail with line items, CSV export, live polling while jobs run.</p></div>
+        <div class="card"><h4>API</h4><div class="meta">Node · Fastify · Prisma</div><p>Upload, list/search, detail, re-extract, delete, CSV. Runs extraction fire-and-forget per file.</p></div>
+        <div class="card"><h4>Storage</h4><div class="meta">Postgres 16</div><p><code>Invoice</code> + <code>LineItem</code> tables, plus raw OCR text and full provider JSON for audit.</p></div>
+      </div>
+      <p style="margin-top:14px;">Packaged as three containers via Docker Compose (<code>db</code>, <code>api</code>, <code>web</code>). Migrations apply automatically on API start. Files stored on a mounted volume; de-duplicated by SHA-256 of content.</p>
+    </section>
+
+    <!-- DATA MODEL -->
+    <section id="datamodel">
+      <h2>Data Model</h2>
+      <div class="grid cols-2">
+        <div class="card">
+          <h4>Invoice <span class="tag">one per bill</span></h4>
+          <table>
+            <tbody>
+              <tr><td><code>id</code></td><td class="meta">cuid PK</td></tr>
+              <tr><td><code>fileName, storedPath, fileHash</code></td><td class="meta">file + dedupe</td></tr>
+              <tr><td><code>status</code></td><td class="meta">PENDING→PROCESSING→COMPLETED/FAILED</td></tr>
+              <tr><td><code>provider, confidence, error</code></td><td class="meta">extraction meta</td></tr>
+              <tr><td><code>vendorName, vendorAddress, vendorTaxId</code></td><td class="meta">vendor</td></tr>
+              <tr><td><code>invoiceNumber, poNumber</code></td><td class="meta">references</td></tr>
+              <tr><td><code>invoiceDate, dueDate</code></td><td class="meta">dates</td></tr>
+              <tr><td><code>currency, subtotal, taxAmount, totalAmount</code></td><td class="meta">money</td></tr>
+              <tr><td><code>paymentTerms</code></td><td class="meta">terms</td></tr>
+              <tr><td><code>rawText, rawJson</code></td><td class="meta">audit trail</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h4>LineItem <span class="tag">many per invoice</span></h4>
+          <table>
+            <tbody>
+              <tr><td><code>id</code></td><td class="meta">cuid PK</td></tr>
+              <tr><td><code>invoiceId</code></td><td class="meta">FK → Invoice (cascade)</td></tr>
+              <tr><td><code>lineNumber</code></td><td class="meta">order</td></tr>
+              <tr><td><code>description, sku</code></td><td class="meta">what</td></tr>
+              <tr><td><code>quantity, unitPrice, amount</code></td><td class="meta">numbers</td></tr>
+              <tr><td><code>taxRate</code></td><td class="meta">per-line tax</td></tr>
+            </tbody>
+          </table>
+          <p class="meta" style="margin-top:14px;">Indexes on status, vendorName, invoiceDate; unique on fileHash. Re-extraction replaces line items atomically in a transaction.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- API -->
+    <section id="api">
+      <h2>API Reference</h2>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag">GET</span></td><td><code>/api/config</code></td><td>Active + available providers</td></tr>
+          <tr><td><span class="tag">POST</span></td><td><code>/api/invoices/upload</code></td><td>Multipart upload, 1..N PDFs (field <code>files</code>)</td></tr>
+          <tr><td><span class="tag">GET</span></td><td><code>/api/invoices?status=&amp;q=</code></td><td>List / search</td></tr>
+          <tr><td><span class="tag">GET</span></td><td><code>/api/invoices/:id</code></td><td>One invoice + line items</td></tr>
+          <tr><td><span class="tag">POST</span></td><td><code>/api/invoices/:id/reextract</code></td><td>Re-run, optional <code>{provider}</code></td></tr>
+          <tr><td><span class="tag">DELETE</span></td><td><code>/api/invoices/:id</code></td><td>Delete</td></tr>
+          <tr><td><span class="tag">GET</span></td><td><code>/api/invoices/export/csv</code></td><td>Export headers as CSV</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- NFR -->
+    <section id="nfr">
+      <h2>Non-Functional Requirements</h2>
+      <div class="grid cols-2">
+        <div class="card"><h4>Performance</h4><p>Upload of 50 files accepted without blocking the UI; extraction runs async. A typical 1–3 page bill completes within the provider's round-trip (seconds to ~30s).</p></div>
+        <div class="card"><h4>Reliability</h4><p>A failed extraction never blocks others; errors are captured per-invoice and recoverable via re-extract. Duplicate uploads are idempotent (hash dedupe).</p></div>
+        <div class="card"><h4>Security &amp; Privacy</h4><p>Self-hosted; bill data and files stay on the operator's infra. Provider API keys via env only. (v1 has no auth — intended for trusted/internal deployment; see roadmap.)</p></div>
+        <div class="card"><h4>Portability</h4><p>One <code>docker compose up</code> brings up DB + API + web. No cloud lock-in; provider is swappable by config.</p></div>
+        <div class="card"><h4>Observability</h4><p>Structured API logs; per-invoice status, provider, confidence, and raw payloads retained for audit and debugging.</p></div>
+        <div class="card"><h4>Extensibility</h4><p>New provider = implement one interface + register it; it appears in the UI automatically. Stable canonical schema shields the rest of the app.</p></div>
+      </div>
+    </section>
+
+    <!-- METRICS -->
+    <section id="metrics">
+      <h2>Success Metrics</h2>
+      <div class="kpi">
+        <div class="card"><div class="big">≥ 95%</div><div class="meta">bills reach COMPLETED without manual fix</div></div>
+        <div class="card"><div class="big">≥ 90%</div><div class="meta">header-field accuracy vs. source</div></div>
+        <div class="card"><div class="big">≥ 85%</div><div class="meta">line-item accuracy (chosen provider)</div></div>
+        <div class="card"><div class="big">→ 0</div><div class="meta">manual re-keying of captured fields</div></div>
+      </div>
+      <p style="margin-top:14px;" class="meta">Secondary: time-to-process a batch, % low-confidence flagged for review, cost per 1k pages, failure rate by provider.</p>
+    </section>
+
+    <!-- ROADMAP -->
+    <section id="roadmap">
+      <h2>Roadmap</h2>
+      <div class="grid cols-3">
+        <div class="card">
+          <h4><span class="pill green">Now — MVP (built)</span></h4>
+          <ul>
+            <li>Upload, async extract, dedupe</li>
+            <li>Canonical schema in Postgres</li>
+            <li>Searchable table + detail + line items</li>
+            <li>Re-extract / switch provider</li>
+            <li>CSV (headers) export</li>
+            <li>Mistral, Azure, LlamaParse adapters</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4><span class="pill amber">Next</span></h4>
+          <ul>
+            <li>Finish Textract + Google adapters</li>
+            <li>CSV/Excel export incl. line items</li>
+            <li>Inline field correction + audit log</li>
+            <li>Low-confidence review queue</li>
+            <li>Job queue (BullMQ/Redis) + worker</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4><span class="pill">Later</span></h4>
+          <ul>
+            <li>Auth + roles (multi-user)</li>
+            <li>Email-inbox ingestion</li>
+            <li>Duplicate-invoice / fraud heuristics</li>
+            <li>Export to accounting/ERP</li>
+            <li>Spend dashboards</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout warn" style="margin-top:18px;">
+        <strong>Open questions:</strong> Which provider becomes the standing default after a cost/accuracy bake-off? Is in-place correction needed before downstream export? What auth model fits the deployment (SSO vs. basic)? Retention policy for raw OCR text &amp; source PDFs?
+      </div>
+      <footer>Invoice OCR — Product Requirements Document · v1.0 draft · generated Jun 18 2026. Interactive document; open in any browser.</footer>
+    </section>
+  </main>
+</div>
+
+<script>
+  /* ---------- Sidebar active state on scroll ---------- */
+  const links = [...document.querySelectorAll('.navlink')];
+  const secs = links.map(l => document.getElementById(l.dataset.sec));
+  links.forEach(l => l.addEventListener('click', () => document.getElementById(l.dataset.sec).scrollIntoView()));
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.toggle('active', l.dataset.sec === e.target.id));
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  secs.forEach(s => s && obs.observe(s));
+
+  /* ---------- Use-case tabs ---------- */
+  document.querySelectorAll('#uc-tabs .tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('#uc-tabs .tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('#usecases .tabpane').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById(t.dataset.uc).classList.add('active');
+    });
+  });
+
+  /* ---------- Flows ---------- */
+  const flows = {
+    ingest: {
+      label: 'Upload & extract',
+      steps: [
+        { t:'Drop PDFs', who:'user', d:'Operator drags one or many bill PDFs onto the upload zone (or clicks to browse).', sys:'Browser POSTs multipart form to /api/invoices/upload.' },
+        { t:'Store & dedupe', who:'sys', d:'API hashes each file (SHA-256), skips exact duplicates, writes the file to the uploads volume.', sys:'New Invoice row created with status PENDING; duplicates returned flagged.' },
+        { t:'Queue job', who:'sys', d:'A fire-and-forget extraction job starts for each new invoice.', sys:'runExtraction(invoiceId) → status PROCESSING.' },
+        { t:'Extract', who:'sys', d:'The configured provider reads the PDF and returns canonical fields + line items.', sys:'Markdown providers add an LLM structuring pass; structured providers map fields directly.' },
+        { t:'Persist', who:'sys', d:'Canonical data written transactionally; line items replace any prior ones.', sys:'status COMPLETED (or FAILED with a captured error).' },
+        { t:'See rows fill in', who:'user', d:'Table polls every few seconds; rows move PENDING → PROCESSING → COMPLETED with vendor, totals, item counts.', sys:'GET /api/invoices returns latest state until nothing is pending.' },
+      ]
+    },
+    review: {
+      label: 'Review & verify',
+      steps: [
+        { t:'Open invoice', who:'user', d:'Operator clicks a vendor name in the table to open the detail view.', sys:'GET /api/invoices/:id with line items.' },
+        { t:'Scan fields', who:'user', d:'Reviews header fields, line-item table, confidence badge, and which provider produced it.', sys:'Confidence surfaced per invoice; low scores stand out.' },
+        { t:'Check raw OCR', who:'user', d:'Expands the raw OCR text to compare any field against what the engine actually read.', sys:'rawText stored at extraction time; no source round-trip needed.' },
+        { t:'Decide', who:'user', d:'Confirm it looks right, or flag it for re-extraction (Flow C). Optionally delete a bad upload.', sys:'DELETE /api/invoices/:id removes invoice + cascaded line items.' },
+      ]
+    },
+    reextract: {
+      label: 'Re-extract / switch provider',
+      steps: [
+        { t:'Spot a weak result', who:'user', d:'A bill extracted poorly on the default engine, or landed in FAILED.', sys:'Error (if any) shown in an explicit error box.' },
+        { t:'Pick a provider', who:'user', d:'Choose a different engine in the detail-view dropdown (e.g. azure for best line items).', sys:'Providers list comes from GET /api/config.' },
+        { t:'Re-extract', who:'user', d:'Click Re-extract; the same stored file is re-processed.', sys:'POST /api/invoices/:id/reextract {provider} → status PROCESSING.' },
+        { t:'Replace atomically', who:'sys', d:'New canonical result overwrites the old; line items swapped in one transaction.', sys:'No duplicate rows; status returns to COMPLETED.' },
+        { t:'Compare', who:'user', d:'Review the improved result; repeat with another engine to compare head-to-head.', sys:'Per-invoice provider choice enables bake-offs.' },
+      ]
+    }
+  };
+
+  let curFlow = 'ingest', curStep = 0;
+  const stepsEl = document.getElementById('flow-steps');
+  const detailEl = document.getElementById('flow-detail');
+  const prevBtn = document.getElementById('flow-prev');
+  const nextBtn = document.getElementById('flow-next');
+
+  function renderFlow() {
+    const f = flows[curFlow];
+    stepsEl.innerHTML = '';
+    f.steps.forEach((s, i) => {
+      const el = document.createElement('div');
+      el.className = 'fstep' + (i === curStep ? ' active' : '');
+      el.innerHTML = '<span class="n">' + (i+1) + '</span>' + s.t;
+      el.style.borderColor = (i===curStep) ? (s.who==='user'?'var(--accent)':'var(--green)') : '';
+      el.addEventListener('click', () => { curStep = i; renderFlow(); });
+      stepsEl.appendChild(el);
+    });
+    const s = f.steps[curStep];
+    const color = s.who === 'user' ? 'var(--accent)' : 'var(--green)';
+    detailEl.innerHTML =
+      '<h4><span class="dot" style="background:'+color+';margin-right:8px;"></span>Step '+(curStep+1)+' · '+s.t+
+      ' <span class="pill" style="margin-left:8px;color:'+color+'">'+(s.who==='user'?'user action':'system')+'</span></h4>'+
+      '<p>'+s.d+'</p>'+
+      '<div class="sysline">⤷ <strong>System:</strong> '+s.sys+'</div>';
+    prevBtn.disabled = curStep === 0;
+    nextBtn.disabled = curStep === f.steps.length - 1;
+  }
+  prevBtn.addEventListener('click', () => { if (curStep>0){curStep--;renderFlow();} });
+  nextBtn.addEventListener('click', () => { if (curStep<flows[curFlow].steps.length-1){curStep++;renderFlow();} });
+  document.querySelectorAll('#flow-picker .tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('#flow-picker .tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      curFlow = t.dataset.flow; curStep = 0; renderFlow();
+    });
+  });
+  renderFlow();
+
+  /* ---------- Requirements accordion ---------- */
+  const reqs = [
+    { id:'FR-1', p:'P0', t:'Multi-file PDF upload', d:'Users can upload one or many PDFs at once via drag-drop or file picker. Each becomes an invoice record and an async extraction job. Non-PDF files are rejected; >50MB files are rejected.' },
+    { id:'FR-2', p:'P0', t:'Content-hash de-duplication', d:'Each file is hashed (SHA-256). A file whose hash already exists is not re-processed; the user is told it already existed. Makes re-uploading a folder safe and idempotent.' },
+    { id:'FR-3', p:'P0', t:'Asynchronous extraction with live status', d:'Extraction runs in the background. Each invoice exposes status PENDING → PROCESSING → COMPLETED / FAILED. The UI polls and updates rows live until nothing is pending. One slow/failed file never blocks others.' },
+    { id:'FR-4', p:'P0', t:'Canonical extraction schema', d:'Every provider normalizes into one shape: vendor (name/address/tax id), invoice & PO numbers, invoice & due dates, currency, subtotal/tax/total, payment terms, and line items (desc, qty, unit price, amount, sku, tax rate), plus a confidence score.' },
+    { id:'FR-5', p:'P0', t:'Provider abstraction & selection', d:'The extraction engine is chosen by config (EXTRACTION_PROVIDER). Adapters exist for Mistral, Azure, LlamaParse (built) and Textract, Google (stubbed). Markdown providers use a configurable structuring LLM.' },
+    { id:'FR-6', p:'P0', t:'Searchable, filterable invoice table', d:'List view shows status, vendor, invoice #, dates, tax, total, line-item count, filename. Filter by status; free-text search across vendor / invoice number / filename.' },
+    { id:'FR-7', p:'P0', t:'Invoice detail with line items & raw OCR', d:'Detail view shows all canonical header fields, the full line-item table, provider + confidence badges, captured errors, and an expandable raw-OCR-text reference for verification.' },
+    { id:'FR-8', p:'P0', t:'Re-extract / switch provider per invoice', d:'From the detail view, re-run extraction on the stored file, optionally with a different provider. Line items are replaced atomically — no duplicates.' },
+    { id:'FR-9', p:'P0', t:'CSV export', d:'Export invoice headers (optionally filtered) to CSV for spreadsheets or a warehouse. (Line-item export is a fast-follow.)' },
+    { id:'FR-10', p:'P0', t:'Delete invoice', d:'Remove an invoice; its line items cascade-delete. Used for bad uploads or test data.' },
+    { id:'FR-11', p:'P1', t:'Audit trail retention', d:'Raw OCR text and the full provider/LLM JSON payload are stored per invoice for debugging and audit. Retention policy is an open question (see roadmap).' },
+    { id:'FR-12', p:'P1', t:'Low-confidence review queue', d:'Surface invoices below a confidence threshold in a dedicated review view so operators can prioritize verification.' },
+    { id:'FR-13', p:'P1', t:'Line-item-level export', d:'CSV/Excel export that includes line items, not just headers.' },
+    { id:'FR-14', p:'P2', t:'Inline field correction', d:'Allow editing extracted values in-place with an audit log of who changed what, before downstream export.' },
+    { id:'FR-15', p:'P2', t:'Durable job queue', d:'Move extraction to a queue (e.g. BullMQ/Redis) with a dedicated worker for high volume and retries.' },
+    { id:'FR-16', p:'P2', t:'Authentication & roles', d:'Add user accounts / SSO and roles for multi-user, non-trusted deployments.' },
+  ];
+  const pillClass = p => p==='P0'?'green':(p==='P1'?'amber':'');
+  const reqList = document.getElementById('req-list');
+  reqs.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'acc';
+    el.innerHTML =
+      '<div class="acc-head"><span><span class="req-id">'+r.id+'</span>'+r.t+
+      ' <span class="pill '+pillClass(r.p)+'" style="margin-left:8px;">'+r.p+'</span></span><span class="chev">▶</span></div>'+
+      '<div class="acc-body">'+r.d+'</div>';
+    el.querySelector('.acc-head').addEventListener('click', () => el.classList.toggle('open'));
+    reqList.appendChild(el);
+  });
+  reqList.firstChild.classList.add('open');
+</script>
+</body>
+</html>
