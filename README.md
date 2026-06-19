@@ -26,13 +26,19 @@ A self-hosted web application that turns PDF invoices/bills into structured data
 
 ```bash
 cp .env.example .env
-# Edit .env: set a strong APP_SECRET; optionally seed provider API keys.
-# Or generate one on the fly:
-APP_SECRET=$(openssl rand -hex 32) docker compose up --build
+# Edit .env and set a strong, STABLE APP_SECRET, e.g. generate one once:
+#   APP_SECRET=$(openssl rand -hex 32)   # paste the value into .env
+docker compose up --build
 ```
 
 - Web UI: http://localhost:8080
 - API: http://localhost:4000
+
+> **Important — keep `APP_SECRET` stable.** Provider credentials are encrypted at
+> rest with `APP_SECRET`. If the value changes between runs, previously-saved
+> credentials can no longer be decrypted and show up as **"not configured"**.
+> Always set it **once** in `.env` (which Docker Compose loads automatically) —
+> do **not** pass a freshly-generated `APP_SECRET=...` on each `docker compose up`.
 
 The API container runs `prisma migrate deploy` automatically on startup, so the database schema is applied before the server begins accepting traffic.
 
