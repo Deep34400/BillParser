@@ -23,4 +23,17 @@ describe('ollamaStructModel', () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
     expect(body.format).toBe('json');
   });
+
+  it('uses the configured structuring model, not the OCR provider model', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: '{"lineItems":[]}' } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const model = ollamaStructModel('qwen2.5');
+    await model.structure('# md', { baseUrl: 'http://x:11434', model: 'glm-ocr' });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.model).toBe('qwen2.5'); // structuring model wins over creds.model (glm-ocr)
+  });
 });
