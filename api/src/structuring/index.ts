@@ -4,6 +4,7 @@ import { getSetting, getCredentials } from '../settings/store.js';
 import { anthropicModel } from './anthropic.js';
 import { openaiModel } from './openai.js';
 import { mistralStructModel } from './mistral.js';
+import { ollamaStructModel } from './ollama.js';
 
 const toNum = (v: unknown): number | undefined => {
   if (v === null || v === undefined || v === '') return undefined;
@@ -37,6 +38,7 @@ export async function getStructuringModel(): Promise<{ model: StructuringModel; 
   const creds = (await getCredentials(`structuring_${provider}`)) ?? (await getCredentials(provider)) ?? {};
   const impl: Record<string, (m: string) => StructuringModel> = {
     anthropic: anthropicModel, openai: openaiModel, mistral: mistralStructModel,
+    ollama: ollamaStructModel,
   };
   const factory = impl[provider];
   if (!factory) throw new Error(`Unknown structuring provider: ${provider}`);

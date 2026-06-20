@@ -1,0 +1,26 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { ollamaStructModel } from '../../src/structuring/ollama.js';
+
+afterEach(() => vi.restoreAllMocks());
+
+describe('ollamaStructModel', () => {
+  it('sends markdown in JSON mode and normalizes the result', async () => {
+    const json = JSON.stringify({
+      vendorName: 'Globex', invoiceNumber: 'INV-9', totalAmount: '100', currency: 'USD',
+      lineItems: [{ description: 'Item A', quantity: 2, amount: 20 }],
+    });
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: json } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const model = ollamaStructModel('glm-ocr');
+    const r = await model.structure('# OCR markdown', { baseUrl: 'http://x:11434', model: 'glm-ocr' });
+
+    expect(r.vendorName).toBe('Globex');
+    expect(r.totalAmount).toBe(100); // normalized string -> number
+    expect(r.lineItems[0]).toMatchObject({ lineNumber: 1, description: 'Item A', amount: 20 });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.format).toBe('json');
+  });
+});
