@@ -3,6 +3,23 @@ import { prisma } from '../db.js';
 import type { CanonicalResult, ExtractionProvider } from '../providers/types.js';
 import { allProviders, getProvider } from '../providers/registry.js';
 import { getCredentials, getProviderCredsOrThrow, getSetting } from '../settings/store.js';
+
+// Pick a sensible extraction provider when the caller didn't specify one. The configured
+// default (extraction_provider) is only honored if it actually has credentials — otherwise
+// re-extraction would fail with "No credentials configured" for a provider the user never set
+// up (e.g. the seed default 'mistral'). Falls back to the invoice's own last-used provider,
+// then any configured provider, and finally the raw default so the failure message is clear.
+async function resolveProvider(invoiceId: string): Promise<string> {
+  const isConfigured = async (name: string): Promise<boolean> => {
+    try { return getProvider(name).isConfigured(await getCredentials(name)); } catch { return false; }
+  };
+  const def = await getSetting('extraction_provider', 'mistral');
+  if (await isConfigured(def)) return def;
+  const inv = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+  if (inv?.provider && (await isConfigured(inv.provider))) return inv.provider;
+  for (const p of allProviders()) if (await isConfigured(p.name)) return p.name;
+  return def;
+}
 import { deriveConfidence, estimateCost } from './confidence.js';
 import { pageCount } from '../lib/pdf.js';
 
@@ -60,7 +77,7 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
 export async function runExtraction(invoiceId: string, providerName?: string): Promise<void> {
   let name = providerName ?? 'mistral';
   try {
-    name = providerName ?? (await getSetting('extraction_provider', 'mistral'));
+    name = providerName ?? (await resolveProvider(invoiceId));
     const provider = getProvider(name);
     const creds = await getProviderCredsOrThrow(name, provider);
     await runExtractionWith(invoiceId, provider, creds);
