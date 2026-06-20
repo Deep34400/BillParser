@@ -29,4 +29,10 @@ describe('ollamaChat', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
     await expect(ollamaChat('http://x:11434', 'glm-ocr', 'P')).rejects.toThrow(/Ollama HTTP 500/);
   });
+
+  it('throws a timeout error when fetch times out', async () => {
+    const err = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+    vi.stubGlobal('fetch', vi.fn(async () => { throw err; }));
+    await expect(ollamaChat('http://x:11434', 'm', 'P')).rejects.toThrow(/timed out after/);
+  });
 });
