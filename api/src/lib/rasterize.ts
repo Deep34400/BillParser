@@ -9,7 +9,8 @@ const exec = promisify(execFile);
 
 // Rasterize a PDF to one base64-encoded PNG per page using poppler's pdftoppm.
 // Ollama vision models accept images, not PDFs. dpi trades quality vs payload size;
-// maxPages caps huge documents.
+// maxPages caps huge documents — passed as pdftoppm's -l (last page) with an
+// implicit first page of 1, so it renders at most the first maxPages pages.
 export async function rasterizePdf(
   buf: Buffer,
   opts: { dpi?: number; maxPages?: number } = {},
@@ -29,11 +30,11 @@ export async function rasterizePdf(
       if (e?.code === 'ENOENT') {
         throw new Error('rasterizePdf: pdftoppm not found — install poppler-utils.');
       }
-      throw new Error(`rasterizePdf: pdftoppm failed: ${String(e?.stderr ?? e?.message ?? e)}`);
+      throw new Error(`rasterizePdf: pdftoppm failed: ${String(e?.stderr?.toString() ?? e?.message ?? e)}`);
     }
     const files = (await readdir(dir))
       .filter((f) => f.startsWith('page') && f.endsWith('.png'))
-      .sort();
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const pages = await Promise.all(
       files.map((f) => readFile(join(dir, f)).then((b) => b.toString('base64'))),
     );
