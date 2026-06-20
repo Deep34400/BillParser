@@ -15,3 +15,7 @@ it('strips code fences and tolerates surrounding prose', () => {
   const r = normalizeStructured('Here:\n```json\n{"vendorName":"X","lineItems":[]}\n```');
   expect(r.vendorName).toBe('X'); expect(r.lineItems).toEqual([]);
 });
+it('throws with the raw output when the model returns malformed JSON', () => {
+  expect(() => normalizeStructured('{ this is not valid json'))
+    .toThrow(/Failed to parse structured JSON/);
+});

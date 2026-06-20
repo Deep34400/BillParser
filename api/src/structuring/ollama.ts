@@ -13,10 +13,11 @@ export const ollamaStructModel = (model: string): StructuringModel => ({
   model,
   async structure(markdown, creds) {
     const baseUrl = creds.baseUrl || DEFAULT_BASE_URL;
-    // The structuring model is independent of the OCR provider's model: glm-ocr does OCR,
-    // a general LLM (a local Ollama model or cloud provider) does structuring. Prefer the
-    // configured structuring_model; fall back to the provider creds' model only if unset.
-    const useModel = model || creds.model;
+    // The structuring model is the configured structuring_model, independent of the OCR
+    // provider's model: glm-ocr does OCR; a general LLM (local Ollama model or cloud) does
+    // structuring. We never fall back to the OCR provider's vision model here — it cannot
+    // follow text instructions, so sending structuring to it produces garbage.
+    const useModel = model;
     const { content } = await ollamaChat(
       baseUrl,
       useModel,

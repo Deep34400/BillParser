@@ -16,7 +16,15 @@ const toStr = (v: unknown): string | undefined => (v === null || v === undefined
 export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText' | 'rawJson'> {
   const start = raw.indexOf('{'); const end = raw.lastIndexOf('}');
   const json = start >= 0 && end >= 0 ? raw.slice(start, end + 1) : raw;
-  const o = JSON.parse(json) as Record<string, unknown>;
+  let o: Record<string, unknown>;
+  try {
+    o = JSON.parse(json) as Record<string, unknown>;
+  } catch (e: any) {
+    throw new Error(
+      `Failed to parse structured JSON from model output: ${String(e?.message ?? e)}. ` +
+        `Raw output (first 300 chars): ${raw.slice(0, 300)}`,
+    );
+  }
   const items = Array.isArray(o.lineItems) ? o.lineItems : [];
   return {
     vendorName: toStr(o.vendorName), vendorAddress: toStr(o.vendorAddress), vendorTaxId: toStr(o.vendorTaxId),
