@@ -1,7 +1,21 @@
 import type { ExtractionProvider, CanonicalResult } from './types.js';
 const num = (f: any): number | undefined =>
   f?.valueCurrency?.amount ?? f?.valueNumber ?? (f?.content ? Number(String(f.content).replace(/[^0-9.\-]/g, '')) : undefined);
-const str = (f: any): string | undefined => f?.content ?? f?.valueString ?? undefined;
+// Strip label cruft that the OCR sometimes leaves attached to a field value:
+// leading/trailing separator punctuation (e.g. ": DW21S25102751" -> "DW21S25102751",
+// "#PO-42 ;" -> "PO-42") and collapse internal whitespace runs. Returns undefined when
+// nothing meaningful remains, so empty/punctuation-only fields don't persist as noise.
+const clean = (s: string | undefined): string | undefined => {
+  if (s == null) return undefined;
+  const t = s
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[\s:;,\-#=.|]+/, '')
+    .replace(/[\s:;,\-|]+$/, '')
+    .trim();
+  return t.length ? t : undefined;
+};
+const str = (f: any): string | undefined => clean(f?.content ?? f?.valueString ?? undefined);
 // Prefer Azure's normalized ISO date (valueDate) over the raw printed text, which can be
 // in any locale format (e.g. "29.01.2026") and is not a parseable Date.
 const dateStr = (f: any): string | undefined => f?.valueDate ?? str(f);
