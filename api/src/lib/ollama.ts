@@ -1,17 +1,26 @@
 const TIMEOUT_MS = 180_000; // local vision models are slow
 
+// Ollama defaults num_ctx to 4096, which a single rasterized page image already exceeds.
+// Request a larger window (the OCR models we target support far more).
+const DEFAULT_NUM_CTX = 16384;
+
 // Single entry point for Ollama's /api/chat. Returns the assistant message text.
 // Pass images (base64 PNGs) for vision; pass json:true to force JSON output.
 export async function ollamaChat(
   baseUrl: string,
   model: string,
   prompt: string,
-  opts: { images?: string[]; json?: boolean } = {},
+  opts: { images?: string[]; json?: boolean; numCtx?: number } = {},
 ): Promise<{ content: string; raw: unknown }> {
   const url = `${baseUrl.replace(/\/$/, '')}/api/chat`;
   const message: { role: 'user'; content: string; images?: string[] } = { role: 'user', content: prompt };
   if (opts.images?.length) message.images = opts.images;
-  const body: Record<string, unknown> = { model, messages: [message], stream: false };
+  const body: Record<string, unknown> = {
+    model,
+    messages: [message],
+    stream: false,
+    options: { num_ctx: opts.numCtx ?? DEFAULT_NUM_CTX },
+  };
   if (opts.json) body.format = 'json';
 
   let res: Response;
