@@ -4,8 +4,9 @@ import { azureProvider } from './azure.js';
 import { llamaparseProvider } from './llamaparse.js';
 import { textractProvider } from './textract.js';
 import { googleProvider } from './google.js';
+import { ollamaProvider } from './ollama.js';
 
-const REGISTRY: ExtractionProvider[] = [mistralProvider, azureProvider, llamaparseProvider, textractProvider, googleProvider];
+const REGISTRY: ExtractionProvider[] = [mistralProvider, azureProvider, llamaparseProvider, textractProvider, googleProvider, ollamaProvider];
 export const allProviders = (): ExtractionProvider[] => REGISTRY;
 export function getProvider(name: string): ExtractionProvider {
   const p = REGISTRY.find((x) => x.name === name);

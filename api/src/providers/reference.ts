@@ -5,4 +5,5 @@ export const PROVIDER_REFERENCE: Record<string, { costPer1k: number; headerAcc: 
   llamaparse: { costPer1k: 9,   headerAcc: 0.9,  lineAcc: 0.85, pattern: 'OCR→md + LLM' },
   textract:   { costPer1k: 10,  headerAcc: 0.78, lineAcc: 0.82, pattern: 'structured fields' },
   google:     { costPer1k: 20,  headerAcc: 0.4,  lineAcc: 0.4,  pattern: 'structured fields' },
+  ollama:     { costPer1k: 0,   headerAcc: 0.85, lineAcc: 0.8,  pattern: 'local OCR→md + LLM' },
 };
