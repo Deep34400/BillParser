@@ -15,7 +15,7 @@ export async function rasterizePdf(
   buf: Buffer,
   opts: { dpi?: number; maxPages?: number } = {},
 ): Promise<string[]> {
-  const dpi = opts.dpi ?? 200;
+  const dpi = opts.dpi ?? 150;
   const maxPages = opts.maxPages ?? 5;
   if (!isPdf(buf)) throw new Error('rasterizePdf: input is not a PDF');
 

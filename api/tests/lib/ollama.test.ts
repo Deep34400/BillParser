@@ -23,7 +23,7 @@ describe('ollamaChat', () => {
     expect(body.stream).toBe(false);
     expect(body.format).toBe('json');
     expect(body.messages[0].images).toEqual(['BASE64IMG']);
-    expect(body.options.num_ctx).toBe(16384);
+    expect(body.options.num_ctx).toBe(8192);
   });
 
   it('throws a clear error on non-200', async () => {

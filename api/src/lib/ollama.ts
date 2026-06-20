@@ -1,8 +1,8 @@
 const TIMEOUT_MS = 180_000; // local vision models are slow
 
-// Ollama defaults num_ctx to 4096, which a single rasterized page image already exceeds.
-// Request a larger window (the OCR models we target support far more).
-const DEFAULT_NUM_CTX = 16384;
+// Ollama defaults num_ctx to 4096, which a single rasterized page image already exceeds
+// (~4100 tokens). 8192 fits a page plus prompt with headroom without oversizing the KV cache.
+const DEFAULT_NUM_CTX = 8192;
 
 // Single entry point for Ollama's /api/chat. Returns the assistant message text.
 // Pass images (base64 PNGs) for vision; pass json:true to force JSON output.
