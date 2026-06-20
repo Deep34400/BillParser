@@ -7,7 +7,7 @@ export async function ollamaChat(
   model: string,
   prompt: string,
   opts: { images?: string[]; json?: boolean } = {},
-): Promise<string> {
+): Promise<{ content: string; raw: unknown }> {
   const url = `${baseUrl.replace(/\/$/, '')}/api/chat`;
   const message: { role: 'user'; content: string; images?: string[] } = { role: 'user', content: prompt };
   if (opts.images?.length) message.images = opts.images;
@@ -39,5 +39,5 @@ export async function ollamaChat(
   if (typeof content !== 'string') {
     throw new Error(`Ollama returned an unexpected response shape: ${JSON.stringify(j).slice(0, 300)}`);
   }
-  return content;
+  return { content, raw: j };
 }

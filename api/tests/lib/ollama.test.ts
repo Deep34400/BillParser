@@ -15,7 +15,7 @@ describe('ollamaChat', () => {
       json: true,
     });
 
-    expect(out).toBe('hello md');
+    expect(out.content).toBe('hello md');
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('http://host.docker.internal:11434/api/chat');
     const body = JSON.parse((init as any).body);

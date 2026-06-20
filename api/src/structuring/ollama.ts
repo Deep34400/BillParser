@@ -14,12 +14,12 @@ export const ollamaStructModel = (model: string): StructuringModel => ({
   async structure(markdown, creds) {
     const baseUrl = creds.baseUrl || DEFAULT_BASE_URL;
     const useModel = creds.model || model;
-    const text = await ollamaChat(
+    const { content } = await ollamaChat(
       baseUrl,
       useModel,
       `${STRUCTURING_PROMPT}\n\nOCR markdown:\n${markdown}`,
       { json: true },
     );
-    return normalizeStructured(text);
+    return normalizeStructured(content);
   },
 });

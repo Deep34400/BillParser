@@ -23,6 +23,7 @@ describe('ollamaProvider', () => {
     expect(ollamaProvider.isConfigured({ baseUrl: 'http://x', model: 'glm-ocr' })).toBe(true);
     expect(ollamaProvider.isConfigured({ baseUrl: 'http://x' })).toBe(false);
     expect(ollamaProvider.isConfigured(null)).toBe(false);
+    expect(ollamaProvider.isConfigured({ model: 'glm-ocr' })).toBe(false);
   });
 
   it('rasterizes, OCRs the images, then structures the markdown', async () => {
@@ -42,5 +43,26 @@ describe('ollamaProvider', () => {
     expect(body.messages[0].images).toEqual(['PAGE1B64']);
     expect(r.rawText).toBe('# OCR MD');
     expect(r.vendorName).toBe('Acme'); // from the structuring step
+    expect(r.rawJson).toEqual({ pages: [{ message: { content: '# OCR MD' } }] });
+  });
+
+  it('OCRs each page in its own request and joins the markdown', async () => {
+    (rasterizePdf as any).mockResolvedValueOnce(['P1', 'P2']);
+    let n = 0;
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: `MD${++n}` } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const r = await ollamaProvider.extract(
+      Buffer.from('%PDF-fake'),
+      { baseUrl: 'http://x:11434', model: 'glm-ocr' },
+      { fileName: 'a.pdf', structuring: null },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as any).body).messages[0].images).toEqual(['P1']);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as any).body).messages[0].images).toEqual(['P2']);
+    expect(r.rawText).toBe('MD1\n\nMD2');
   });
 });
