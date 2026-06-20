@@ -4,10 +4,11 @@ import { T } from '../theme.js';
 import { Toast } from '../components/Toast.js';
 import type { SettingsData } from '../types.js';
 
-const STRUCTURING_PROVIDERS = [
+const STRUCTURING_PROVIDERS: { name: string; label: string; keyless?: boolean }[] = [
   { name: 'anthropic', label: 'Anthropic' },
   { name: 'openai', label: 'OpenAI' },
   { name: 'mistral', label: 'Mistral' },
+  { name: 'ollama', label: 'GLM-OCR (Ollama)', keyless: true },
 ];
 
 const STRUCTURING_CRED_LABELS: Record<string, string> = {
@@ -129,6 +130,8 @@ export function SettingsPage() {
         const c = credentials[p.name];
         if (c) for (const f of p.requiredCredentials ?? []) if (c[f] != null) cv[`${p.name}.${f}`] = c[f];
       }
+      if (cv['ollama.baseUrl'] == null || cv['ollama.baseUrl'] === '') cv['ollama.baseUrl'] = 'http://host.docker.internal:11434';
+      if (cv['ollama.model'] == null || cv['ollama.model'] === '') cv['ollama.model'] = 'glm-ocr';
       for (const name of STRUCTURING_PROVIDERS.map((s) => s.name)) {
         if (credentials[name]?.apiKey != null) sv[name] = credentials[name].apiKey;
       }
@@ -347,7 +350,7 @@ export function SettingsPage() {
       <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         Structuring provider credentials
       </h2>
-      {STRUCTURING_PROVIDERS.map((sp) => {
+      {STRUCTURING_PROVIDERS.filter((sp) => !sp.keyless).map((sp) => {
         const key = `struct.${sp.name}`;
         const shown = !!revealed[key];
         return (
