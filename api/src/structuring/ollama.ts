@@ -18,12 +18,15 @@ export const ollamaStructModel = (model: string): StructuringModel => ({
     // structuring. We never fall back to the OCR provider's vision model here — it cannot
     // follow text instructions, so sending structuring to it produces garbage.
     const useModel = model;
-    const { content } = await ollamaChat(
-      baseUrl,
-      useModel,
-      `${STRUCTURING_PROMPT}\n\nOCR markdown:\n${markdown}`,
-      { json: true },
-    );
+    const prompt = `${STRUCTURING_PROMPT}\n\nOCR markdown:\n${markdown}`;
+    // Unlike the per-page OCR call, structuring receives every page's markdown at once,
+    // which routinely exceeds the 8192 default. If num_ctx is too small Ollama silently
+    // truncates the input — the model then "structures" a fragment and returns empty
+    // fields with no error. Size the window to the full prompt (dense numeric invoice
+    // text tokenizes ~2 chars/token) plus headroom for the JSON output, capped to keep
+    // the KV cache bounded.
+    const numCtx = Math.min(32_768, Math.max(8192, Math.ceil(prompt.length / 2) + 4096));
+    const { content } = await ollamaChat(baseUrl, useModel, prompt, { json: true, numCtx });
     return normalizeStructured(content);
   },
 });

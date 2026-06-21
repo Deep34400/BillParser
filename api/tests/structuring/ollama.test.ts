@@ -36,4 +36,19 @@ describe('ollamaStructModel', () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
     expect(body.model).toBe('qwen2.5'); // structuring model wins over creds.model (glm-ocr)
   });
+
+  it('grows num_ctx for large markdown so the input is not silently truncated', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: '{"lineItems":[]}' } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const big = 'x'.repeat(40_000); // ~20k token prompt — must not clamp to the 8192 default
+    const model = ollamaStructModel('qwen2.5');
+    await model.structure(big, { baseUrl: 'http://x:11434', model: 'qwen2.5' });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.options.num_ctx).toBeGreaterThan(8192);
+    expect(body.options.num_ctx).toBeLessThanOrEqual(32_768);
+  });
 });
