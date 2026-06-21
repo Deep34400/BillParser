@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 vi.mock('../../src/lib/rasterize.js', () => ({
   rasterizePdf: vi.fn(async () => ['PAGE1B64']),
+  rasterizeTopBand: vi.fn(async () => 'HEADERB64'),
 }));
 vi.mock('../../src/structuring/index.js', () => ({
   getStructuringModel: vi.fn(async () => ({
@@ -13,7 +14,7 @@ vi.mock('../../src/structuring/index.js', () => ({
 }));
 
 import { ollamaProvider } from '../../src/providers/ollama.js';
-import { rasterizePdf } from '../../src/lib/rasterize.js';
+import { rasterizePdf, rasterizeTopBand } from '../../src/lib/rasterize.js';
 
 afterEach(() => vi.clearAllMocks());
 
@@ -26,9 +27,11 @@ describe('ollamaProvider', () => {
     expect(ollamaProvider.isConfigured({ model: 'glm-ocr' })).toBe(false);
   });
 
-  it('rasterizes, OCRs the images, then structures the markdown', async () => {
+  it('OCRs the header band first, then the pages, then structures the markdown', async () => {
+    const responses = ['HEADER MD', 'PAGE MD'];
+    let n = 0;
     const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ message: { content: '# OCR MD' } }), { status: 200 }),
+      new Response(JSON.stringify({ message: { content: responses[n++] } }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -38,19 +41,25 @@ describe('ollamaProvider', () => {
       { fileName: 'a.pdf', structuring: null },
     );
 
+    expect(rasterizeTopBand).toHaveBeenCalledOnce();
     expect(rasterizePdf).toHaveBeenCalledOnce();
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
-    expect(body.messages[0].images).toEqual(['PAGE1B64']);
-    expect(r.rawText).toBe('# OCR MD');
+    // First request is the cropped header band; second is the full page.
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as any).body).messages[0].images).toEqual(['HEADERB64']);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as any).body).messages[0].images).toEqual(['PAGE1B64']);
+    // Header markdown is prepended so structuring sees vendor/invoice-number metadata.
+    expect(r.rawText).toBe('HEADER MD\n\nPAGE MD');
     expect(r.vendorName).toBe('Acme'); // from the structuring step
-    expect(r.rawJson).toEqual({ pages: [{ message: { content: '# OCR MD' } }] });
+    expect(r.rawJson).toEqual({
+      header: { message: { content: 'HEADER MD' } },
+      pages: [{ message: { content: 'PAGE MD' } }],
+    });
   });
 
-  it('OCRs each page in its own request and joins the markdown', async () => {
+  it('OCRs each page in its own request after the header band', async () => {
     (rasterizePdf as any).mockResolvedValueOnce(['P1', 'P2']);
     let n = 0;
     const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ message: { content: `MD${++n}` } }), { status: 200 }),
+      new Response(JSON.stringify({ message: { content: `MD${n++}` } }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -60,9 +69,11 @@ describe('ollamaProvider', () => {
       { fileName: 'a.pdf', structuring: null },
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse((fetchMock.mock.calls[0][1] as any).body).messages[0].images).toEqual(['P1']);
-    expect(JSON.parse((fetchMock.mock.calls[1][1] as any).body).messages[0].images).toEqual(['P2']);
-    expect(r.rawText).toBe('MD1\n\nMD2');
+    // 1 header band + 2 pages = 3 requests
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as any).body).messages[0].images).toEqual(['HEADERB64']);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as any).body).messages[0].images).toEqual(['P1']);
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as any).body).messages[0].images).toEqual(['P2']);
+    expect(r.rawText).toBe('MD0\n\nMD1\n\nMD2');
   });
 });

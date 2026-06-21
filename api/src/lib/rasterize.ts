@@ -44,3 +44,41 @@ export async function rasterizePdf(
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+// Rasterize only the top band of page 1 as a single base64 PNG. The header/letterhead
+// block (vendor, invoice number, dates) lives here; OCRing just this crop with a focused
+// prompt is fast and avoids asking the slow vision model to re-transcribe the whole page.
+// Uses pdftoppm's crop flags: -H bounds the height (px), -W defaults to 0 = full width.
+export async function rasterizeTopBand(
+  buf: Buffer,
+  opts: { dpi?: number; heightInches?: number } = {},
+): Promise<string> {
+  const dpi = opts.dpi ?? 150;
+  const heightInches = opts.heightInches ?? 4;
+  if (!isPdf(buf)) throw new Error('rasterizeTopBand: input is not a PDF');
+
+  const dir = await mkdtemp(join(tmpdir(), 'ioc-raster-'));
+  try {
+    const input = join(dir, 'input.pdf');
+    await writeFile(input, buf);
+    const heightPx = Math.round(heightInches * dpi);
+    const args = [
+      '-png', '-r', String(dpi), '-f', '1', '-l', '1',
+      '-x', '0', '-y', '0', '-H', String(heightPx),
+      input, join(dir, 'header'),
+    ];
+    try {
+      await exec('pdftoppm', args);
+    } catch (e: any) {
+      if (e?.code === 'ENOENT') {
+        throw new Error('rasterizeTopBand: pdftoppm not found — install poppler-utils.');
+      }
+      throw new Error(`rasterizeTopBand: pdftoppm failed: ${String(e?.stderr?.toString() ?? e?.message ?? e)}`);
+    }
+    const file = (await readdir(dir)).find((f) => f.startsWith('header') && f.endsWith('.png'));
+    if (!file) throw new Error('rasterizeTopBand: no band rendered');
+    return (await readFile(join(dir, file))).toString('base64');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
