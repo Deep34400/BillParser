@@ -1,4 +1,7 @@
-const TIMEOUT_MS = 180_000; // local vision models are slow
+// Local vision models are slow: a single rasterized page through glm-ocr measures
+// ~190s on modest GPUs, so 180s clipped legitimate, in-progress OCR. 300s leaves
+// headroom for the slowest page without hanging indefinitely.
+const TIMEOUT_MS = 300_000;
 
 // Ollama defaults num_ctx to 4096, which a single rasterized page image already exceeds
 // (~4100 tokens). 8192 fits a page plus prompt with headroom without oversizing the KV cache.
