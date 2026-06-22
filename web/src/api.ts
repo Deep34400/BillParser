@@ -10,6 +10,9 @@ export const api = {
   list: (qs: string) => j<{ invoices: Invoice[] }>(`/api/invoices${qs}`),
   get: (id: string) => j<Invoice>(`/api/invoices/${id}`),
   reextract: (id: string, provider?: string) => j(`/api/invoices/${id}/reextract`, { method: 'POST', body: JSON.stringify({ provider }) }),
+  // Send an empty JSON body: the shared fetch helper sets content-type application/json,
+  // and Fastify rejects that header with no body (400). Matches the reextract call.
+  cancel: (id: string) => j(`/api/invoices/${id}/cancel`, { method: 'POST', body: '{}' }),
   bakeoff: (id: string) => j<{ runs: ExtractionRun[] }>(`/api/invoices/${id}/bakeoff`, { method: 'POST' }),
   applyRun: (id: string, runId: string) => j(`/api/invoices/${id}/apply-run`, { method: 'POST', body: JSON.stringify({ runId }) }),
   patch: (id: string, body: unknown) => j<Invoice>(`/api/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

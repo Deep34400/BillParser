@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { PDFDocument } from 'pdf-lib';
 import { prisma } from '../../src/db.js';
 import { runExtraction, runExtractionWith } from '../../src/extraction/run.js';
+import { requestCancel } from '../../src/extraction/cancel.js';
 import { setCredentials, setSetting } from '../../src/settings/store.js';
 import type { ExtractionProvider } from '../../src/providers/types.js';
 
@@ -27,6 +28,27 @@ const fake: ExtractionProvider = {
 
 beforeAll(async () => { dir = await mkdtemp(join(tmpdir(), 'ioc-run-')); });
 beforeEach(async () => { await prisma.invoice.deleteMany(); });
+
+it('cancellation aborts the run and marks the invoice FAILED with a clear message', async () => {
+  const inv = await prisma.invoice.create({ data: { fileName: 'c.pdf', storedPath: await tempPdf('c.pdf'), fileHash: 'cancel-1' } });
+  const slow: ExtractionProvider = {
+    name: 'slow', displayName: 'Slow', kind: 'structured', requiredCredentials: [], isConfigured: () => true,
+    async extract(_f, _c, ctx) {
+      await new Promise((_resolve, reject) => {
+        ctx.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      });
+      throw new Error('unreachable');
+    },
+  };
+  const run = runExtractionWith(inv.id, slow, {});
+  await new Promise((r) => setTimeout(r, 50)); // let it register + start
+  expect(requestCancel(inv.id)).toBe(true);
+  await run;
+  const got = await prisma.invoice.findUnique({ where: { id: inv.id }, include: { runs: true } });
+  expect(got!.status).toBe('FAILED');
+  expect(got!.error).toBe('Cancelled by user');
+  expect(got!.runs.some((r) => r.status === 'FAILED')).toBe(true);
+});
 
 it('marks COMPLETED, applies fields, writes items + a run', async () => {
   const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: await tempPdf('a.pdf'), fileHash: 'h1' } });

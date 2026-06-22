@@ -12,6 +12,24 @@ it('reextract sets PENDING and calls runExtraction with provider', async () => {
   expect(run.runExtraction).toHaveBeenCalledWith(inv.id, 'azure');
   await app.close();
 });
+it('cancel marks an in-flight invoice FAILED with "Cancelled by user"', async () => {
+  const app = await buildApp();
+  const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'hcancel', status: 'PROCESSING' } });
+  const res = await app.inject({ method: 'POST', url: `/api/invoices/${inv.id}/cancel` });
+  expect(res.statusCode).toBe(202);
+  const got = await prisma.invoice.findUnique({ where: { id: inv.id } });
+  expect(got!.status).toBe('FAILED');
+  expect(got!.error).toBe('Cancelled by user');
+  await app.close();
+});
+it('cancel does not clobber an already-completed invoice', async () => {
+  const app = await buildApp();
+  const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'hdone', status: 'COMPLETED' } });
+  await app.inject({ method: 'POST', url: `/api/invoices/${inv.id}/cancel` });
+  const got = await prisma.invoice.findUnique({ where: { id: inv.id } });
+  expect(got!.status).toBe('COMPLETED'); // unchanged
+  await app.close();
+});
 it('patch edits fields, replaces items, marks verified', async () => {
   const app = await buildApp();
   const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'hb' } });

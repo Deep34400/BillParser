@@ -6,6 +6,7 @@ import { env } from '../env.js';
 import { sha256 } from '../lib/hash.js';
 import { isPdf } from '../lib/pdf.js';
 import { runExtraction } from '../extraction/run.js';
+import { requestCancel } from '../extraction/cancel.js';
 
 export function buildWhere(q: Record<string, string>) {
   const where: any = {};
@@ -72,6 +73,17 @@ export async function invoiceRoutes(app: FastifyInstance) {
     await prisma.invoice.update({ where: { id }, data: { status: 'PENDING', error: null } });
     void runExtraction(id, provider);
     reply.code(202); return { ok: true };
+  });
+
+  app.post('/api/invoices/:id/cancel', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const cancelling = requestCancel(id); // aborts the in-flight run if it's in this process
+    // Mark it FAILED only while still in flight, so a result that just landed isn't clobbered.
+    await prisma.invoice.updateMany({
+      where: { id, status: { in: ['PENDING', 'PROCESSING'] } },
+      data: { status: 'FAILED', error: 'Cancelled by user' },
+    });
+    reply.code(202); return { ok: true, cancelling };
   });
 
   app.patch('/api/invoices/:id', async (req) => {

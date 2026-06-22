@@ -13,7 +13,7 @@ export async function ollamaChat(
   baseUrl: string,
   model: string,
   prompt: string,
-  opts: { images?: string[]; json?: boolean; numCtx?: number; temperature?: number } = {},
+  opts: { images?: string[]; json?: boolean; numCtx?: number; temperature?: number; signal?: AbortSignal } = {},
 ): Promise<{ content: string; raw: unknown }> {
   const url = `${baseUrl.replace(/\/$/, '')}/api/chat`;
   const message: { role: 'user'; content: string; images?: string[] } = { role: 'user', content: prompt };
@@ -23,15 +23,20 @@ export async function ollamaChat(
   const body: Record<string, unknown> = { model, messages: [message], stream: false, options };
   if (opts.json) body.format = 'json';
 
+  // Combine our timeout with the caller's cancel signal so either one aborts the request.
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout;
+
   let res: Response;
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal,
     });
   } catch (e: any) {
+    if (opts.signal?.aborted) throw Object.assign(new Error('Ollama request cancelled'), { name: 'AbortError' });
     if (e?.name === 'TimeoutError') {
       throw new Error(`Ollama request to ${url} timed out after ${TIMEOUT_MS / 1000}s (model "${model}").`);
     }

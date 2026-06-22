@@ -14,6 +14,9 @@ export interface CanonicalResult {
 export interface ExtractCtx {
   fileName: string;
   structuring: { provider: string; model: string } | null;
+  // Aborted when the user cancels the extraction; providers should pass it to their
+  // long-running network calls so a cancel takes effect promptly.
+  signal?: AbortSignal;
 }
 export type ProviderKind = 'markdown' | 'structured';
 export interface ExtractionProvider {

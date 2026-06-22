@@ -266,6 +266,16 @@ export function InvoicesPage() {
     }
   }
 
+  async function handleCancel(id: string) {
+    try {
+      await api.cancel(id);
+      setToast('Cancelling extraction…');
+      await refetch();
+    } catch (e) {
+      setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
+    }
+  }
+
   async function handleBulkDelete() {
     try {
       await api.bulk('delete', [...selected]);
@@ -922,7 +932,21 @@ export function InvoicesPage() {
 
                     {/* Status */}
                     <td style={tdBase}>
-                      <StatusDot status={row.status} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <StatusDot status={row.status} />
+                        {(row.status === 'PROCESSING' || row.status === 'PENDING') && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleCancel(row.id);
+                            }}
+                            title="Stop this extraction"
+                            style={stopBtn}
+                          >
+                            Stop
+                          </button>
+                        )}
+                      </div>
                     </td>
 
                     {/* Vendor */}
@@ -1020,6 +1044,18 @@ const tdBase: React.CSSProperties = {
   padding: '11px 14px',
   verticalAlign: 'middle',
   color: '#1c1a17',
+};
+
+const stopBtn: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid #e0b4b4',
+  color: '#c0392b',
+  borderRadius: 5,
+  fontSize: 11,
+  fontWeight: 600,
+  padding: '2px 8px',
+  cursor: 'pointer',
+  lineHeight: 1.4,
 };
 
 const bulkBtn: React.CSSProperties = {

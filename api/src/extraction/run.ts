@@ -4,6 +4,7 @@ import type { CanonicalResult, ExtractionProvider } from '../providers/types.js'
 import { allProviders, getProvider } from '../providers/registry.js';
 import { getCredentials, getProviderCredsOrThrow, getSetting } from '../settings/store.js';
 import { DEFAULTS } from '../settings/defaults.js';
+import { startCancellable, finishCancellable, isCancelError } from './cancel.js';
 
 // Pick a sensible extraction provider when the caller didn't specify one. The configured
 // default (extraction_provider) is only honored if it actually has credentials — otherwise
@@ -47,11 +48,15 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
   await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'PROCESSING', error: null, provider: provider.name } });
   const inv = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
   const started = Date.now();
+  const controller = startCancellable(invoiceId);
   try {
     const file = await readFile(inv.storedPath);
     const pages = await pageCount(file);
     const structuring = { provider: await getSetting('structuring_provider', DEFAULTS.structuring_provider), model: await getSetting('structuring_model', DEFAULTS.structuring_model) };
-    const result = await provider.extract(file, creds, { fileName: inv.fileName, structuring });
+    const result = await provider.extract(file, creds, { fileName: inv.fileName, structuring, signal: controller.signal });
+    // A cancel that lands right as extraction finishes must not overwrite the FAILED/cancelled
+    // status with COMPLETED — the cancel endpoint already set it.
+    if (controller.signal.aborted) return;
     const confidence = deriveConfidence(result);
     const costEstimate = result.costEstimate ?? estimateCost(provider.name, pages);
     const latencyMs = Date.now() - started;
@@ -70,8 +75,12 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
     });
   } catch (e: any) {
     const latencyMs = Date.now() - started;
-    await prisma.extractionRun.create({ data: { invoiceId, provider: provider.name, status: 'FAILED', latencyMs, error: String(e?.message ?? e) } });
-    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED', error: String(e?.message ?? e), provider: provider.name } });
+    const cancelled = controller.signal.aborted || isCancelError(e);
+    const msg = cancelled ? 'Cancelled by user' : String(e?.message ?? e);
+    await prisma.extractionRun.create({ data: { invoiceId, provider: provider.name, status: 'FAILED', latencyMs, error: msg } });
+    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED', error: msg, provider: provider.name } });
+  } finally {
+    finishCancellable(invoiceId, controller);
   }
 }
 
