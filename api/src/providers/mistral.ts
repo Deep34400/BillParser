@@ -1,5 +1,6 @@
 import type { ExtractionProvider, CanonicalResult } from './types.js';
 import { getStructuringModel } from '../structuring/index.js';
+import { httpErrorBody } from '../lib/http.js';
 
 export const mistralProvider: ExtractionProvider = {
   name: 'mistral', displayName: 'Mistral OCR', kind: 'markdown',
@@ -14,7 +15,7 @@ export const mistralProvider: ExtractionProvider = {
         document: { type: 'document_url', document_url: `data:application/pdf;base64,${file.toString('base64')}` },
       }),
     });
-    if (!res.ok) throw new Error(`Mistral OCR HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`Mistral OCR HTTP ${res.status}${await httpErrorBody(res)}`);
     const ocr: any = await res.json();
     const markdown = (ocr.pages ?? []).map((p: any) => p.markdown ?? '').join('\n\n');
     const { model, creds: sCreds } = await getStructuringModel();

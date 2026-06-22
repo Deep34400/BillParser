@@ -1,6 +1,7 @@
 import type { StructuringModel } from './types.js';
 import { STRUCTURING_PROMPT } from './types.js';
 import { normalizeStructured } from './index.js';
+import { httpErrorBody } from '../lib/http.js';
 export const mistralStructModel = (model: string): StructuringModel => ({
   provider: 'mistral', model,
   async structure(markdown, creds) {
@@ -11,7 +12,7 @@ export const mistralStructModel = (model: string): StructuringModel => ({
         { role: 'system', content: STRUCTURING_PROMPT }, { role: 'user', content: markdown },
       ] }),
     });
-    if (!res.ok) throw new Error(`Mistral structuring HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`Mistral structuring HTTP ${res.status}${await httpErrorBody(res)}`);
     const j: any = await res.json();
     return normalizeStructured(j.choices?.[0]?.message?.content ?? '{}');
   },

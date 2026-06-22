@@ -1,5 +1,6 @@
 import type { ExtractionProvider, CanonicalResult } from './types.js';
 import { getStructuringModel } from '../structuring/index.js';
+import { httpErrorBody } from '../lib/http.js';
 
 export const llamaparseProvider: ExtractionProvider = {
   name: 'llamaparse', displayName: 'LlamaParse', kind: 'markdown',
@@ -10,7 +11,7 @@ export const llamaparseProvider: ExtractionProvider = {
     form.append('file', new Blob([file as unknown as BlobPart], { type: 'application/pdf' }), ctx.fileName);
     const up = await fetch('https://api.cloud.llamaindex.ai/api/v1/parsing/upload', {
       method: 'POST', headers: { authorization: `Bearer ${creds.apiKey}` }, body: form });
-    if (!up.ok) throw new Error(`LlamaParse upload HTTP ${up.status}`);
+    if (!up.ok) throw new Error(`LlamaParse upload HTTP ${up.status}${await httpErrorBody(up)}`);
     const { id }: any = await up.json();
     let markdown = '';
     for (let i = 0; i < 40; i++) {
