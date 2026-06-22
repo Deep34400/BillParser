@@ -18,6 +18,17 @@ const HEADER_PROMPT =
   'invoice number, invoice date, due date, PO number, and bill-to/customer details. ' +
   'Output only the transcription — no commentary, no code fences.';
 
+// glm-ocr sometimes ignores the markdown instruction and runs away, transcribing a page as
+// repeated ```json code blocks. Left in, that soup dominates the structuring input and the
+// model returns empty results. Strip fenced code blocks (and a trailing unclosed fence from
+// a truncated runaway) so only the clean table/text transcription reaches structuring.
+export function stripCodeFences(s: string): string {
+  return s
+    .replace(/```[a-z]*\n?[\s\S]*?```/gi, '') // complete fenced blocks
+    .replace(/```[a-z]*\n?[\s\S]*$/i, '') // trailing unclosed fence (truncated runaway)
+    .trim();
+}
+
 export const ollamaProvider: ExtractionProvider = {
   name: 'ollama',
   displayName: 'GLM-OCR (Ollama)',
@@ -38,7 +49,7 @@ export const ollamaProvider: ExtractionProvider = {
     const raws: unknown[] = [];
     for (const img of images) {
       const { content, raw } = await ollamaChat(creds.baseUrl, creds.model, OCR_PROMPT, { images: [img] });
-      parts.push(content);
+      parts.push(stripCodeFences(content));
       raws.push(raw);
     }
     // Prepend the header markdown so structuring sees vendor/invoice-number alongside the tables.

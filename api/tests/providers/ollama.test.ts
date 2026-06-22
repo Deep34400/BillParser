@@ -55,6 +55,30 @@ describe('ollamaProvider', () => {
     });
   });
 
+  it('strips runaway ```json soup from page OCR before structuring', async () => {
+    // header band is clean; the page runs away into a fenced JSON blob around real text.
+    const responses = ['VENDOR HEADER', 'keep-before\n```json\n{"junk":1}\n```\nkeep-after'];
+    let n = 0;
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: responses[n++] } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const r = await ollamaProvider.extract(
+      Buffer.from('%PDF-fake'),
+      { baseUrl: 'http://x:11434', model: 'glm-ocr' },
+      { fileName: 'a.pdf', structuring: null },
+    );
+
+    expect(r.rawText).not.toContain('```'); // soup removed
+    expect(r.rawText).not.toContain('junk');
+    expect(r.rawText).toContain('keep-before');
+    expect(r.rawText).toContain('keep-after');
+    expect(r.rawText).toContain('VENDOR HEADER'); // header preserved for vendor extraction
+    // rawJson still preserves the untouched raw response for debugging
+    expect((r.rawJson as any).pages[0].message.content).toContain('```json');
+  });
+
   it('OCRs each page in its own request after the header band', async () => {
     (rasterizePdf as any).mockResolvedValueOnce(['P1', 'P2']);
     let n = 0;
