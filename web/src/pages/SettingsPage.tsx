@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { T } from '../theme.js';
 import { Toast } from '../components/Toast.js';
 import type { SettingsData } from '../types.js';
+import { STRUCTURING_MODEL_SUGGESTIONS, modelForProvider } from '../structuringModels.js';
 
 const STRUCTURING_PROVIDERS: { name: string; label: string; keyless?: boolean }[] = [
   { name: 'anthropic', label: 'Anthropic' },
@@ -262,7 +263,12 @@ export function SettingsPage() {
           <select
             style={selectStyle}
             value={structuringProvider}
-            onChange={(e) => setStructuringProvider(e.target.value)}
+            onChange={(e) => {
+              const p = e.target.value;
+              setStructuringProvider(p);
+              // Keep the model in sync so it can't be paired with the wrong provider.
+              setStructuringModel((m) => modelForProvider(p, m));
+            }}
           >
             {STRUCTURING_PROVIDERS.map((p) => (
               <option key={p.name} value={p.name}>{p.label}</option>
@@ -276,8 +282,21 @@ export function SettingsPage() {
             style={inputStyle}
             value={structuringModel}
             onChange={(e) => setStructuringModel(e.target.value)}
-            placeholder="e.g. claude-sonnet-4-6"
+            placeholder={STRUCTURING_MODEL_SUGGESTIONS[structuringProvider]?.[0] ?? 'model id'}
+            list="structuring-model-options"
           />
+          <datalist id="structuring-model-options">
+            {(STRUCTURING_MODEL_SUGGESTIONS[structuringProvider] ?? []).map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+          <div style={{ fontSize: 11, color: T.muted, marginTop: 5 }}>
+            Must be a model the selected provider offers
+            {(STRUCTURING_MODEL_SUGGESTIONS[structuringProvider]?.length ?? 0) > 0 && (
+              <> — e.g. {STRUCTURING_MODEL_SUGGESTIONS[structuringProvider].join(', ')}</>
+            )}
+            .
+          </div>
         </div>
         <button style={btnPrimary} onClick={handleSaveSelections}>
           Save selections
