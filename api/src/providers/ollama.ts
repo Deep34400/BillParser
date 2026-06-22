@@ -37,9 +37,10 @@ export const ollamaProvider: ExtractionProvider = {
   isConfigured: (c) => !!c?.baseUrl && !!c?.model,
   async extract(file, creds) {
     // Header pass: OCR just the cropped top band of page 1 for the letterhead metadata.
+    // temperature 0 (greedy) makes glm-ocr's transcription reproducible run-to-run.
     const band = await rasterizeTopBand(file);
     const { content: headerMd, raw: headerRaw } = await ollamaChat(
-      creds.baseUrl, creds.model, HEADER_PROMPT, { images: [band] },
+      creds.baseUrl, creds.model, HEADER_PROMPT, { images: [band], temperature: 0 },
     );
 
     const images = await rasterizePdf(file);
@@ -48,7 +49,7 @@ export const ollamaProvider: ExtractionProvider = {
     const parts: string[] = [];
     const raws: unknown[] = [];
     for (const img of images) {
-      const { content, raw } = await ollamaChat(creds.baseUrl, creds.model, OCR_PROMPT, { images: [img] });
+      const { content, raw } = await ollamaChat(creds.baseUrl, creds.model, OCR_PROMPT, { images: [img], temperature: 0 });
       parts.push(stripCodeFences(content));
       raws.push(raw);
     }

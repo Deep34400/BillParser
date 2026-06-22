@@ -55,6 +55,24 @@ describe('ollamaProvider', () => {
     });
   });
 
+  it('runs OCR greedily (temperature 0) so transcription is reproducible', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: 'MD' } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await ollamaProvider.extract(
+      Buffer.from('%PDF-fake'),
+      { baseUrl: 'http://x:11434', model: 'glm-ocr' },
+      { fileName: 'a.pdf', structuring: null },
+    );
+
+    // Every OCR request (header band + each page) pins temperature 0.
+    for (const call of fetchMock.mock.calls) {
+      expect(JSON.parse((call[1] as any).body).options.temperature).toBe(0);
+    }
+  });
+
   it('strips runaway ```json soup from page OCR before structuring', async () => {
     // header band is clean; the page runs away into a fenced JSON blob around real text.
     const responses = ['VENDOR HEADER', 'keep-before\n```json\n{"junk":1}\n```\nkeep-after'];
