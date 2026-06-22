@@ -2,6 +2,7 @@ import type { StructuringModel } from './types.js';
 import { STRUCTURING_PROMPT } from './types.js';
 import { normalizeStructured } from './index.js';
 import { httpErrorBody } from '../lib/http.js';
+import { structuringTokenCost } from './pricing.js';
 export const mistralStructModel = (model: string): StructuringModel => ({
   provider: 'mistral', model,
   async structure(markdown, creds) {
@@ -14,6 +15,7 @@ export const mistralStructModel = (model: string): StructuringModel => ({
     });
     if (!res.ok) throw new Error(`Mistral structuring HTTP ${res.status}${await httpErrorBody(res)}`);
     const j: any = await res.json();
-    return normalizeStructured(j.choices?.[0]?.message?.content ?? '{}');
+    const structuringCost = structuringTokenCost(model, j.usage?.prompt_tokens, j.usage?.completion_tokens);
+    return { ...normalizeStructured(j.choices?.[0]?.message?.content ?? '{}'), structuringCost };
   },
 });

@@ -12,3 +12,16 @@ export function estimateCost(provider: string, pages: number): number | undefine
   const ref = PROVIDER_REFERENCE[provider];
   return ref ? (pages * ref.costPer1k) / 1000 : undefined;
 }
+
+// Split a stored total cost back into its extraction (OCR) and structuring (LLM) parts.
+// Extraction is the per-page provider estimate; structuring is whatever remains of the
+// total (it was added in at extraction time from the LLM's token usage).
+export function splitCost(
+  provider: string | null | undefined,
+  pageCount: number | null | undefined,
+  total: number | null | undefined,
+): { extractionCost: number | null; structuringCost: number | null } {
+  if (total === null || total === undefined) return { extractionCost: null, structuringCost: null };
+  const extractionCost = (provider ? estimateCost(provider, pageCount ?? 0) : 0) ?? 0;
+  return { extractionCost, structuringCost: Math.max(0, total - extractionCost) };
+}

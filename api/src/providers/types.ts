@@ -10,6 +10,8 @@ export interface CanonicalResult {
   lineItems: CanonicalLineItem[];
   confidence?: number; rawText: string; rawJson: unknown;
   costEstimate?: number; latencyMs?: number; pageCount?: number;
+  // USD cost of the structuring (LLM) step, from its token usage. 0 for local/un-priced.
+  structuringCost?: number;
 }
 export interface ExtractCtx {
   fileName: string;

@@ -58,7 +58,10 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
     // status with COMPLETED — the cancel endpoint already set it.
     if (controller.signal.aborted) return;
     const confidence = deriveConfidence(result);
-    const costEstimate = result.costEstimate ?? estimateCost(provider.name, pages);
+    // Total cost = extraction (OCR, per-page estimate) + structuring (LLM, from token usage).
+    // The split is re-derived for display from provider + pageCount; here we store the total.
+    const extractionCost = result.costEstimate ?? estimateCost(provider.name, pages) ?? 0;
+    const costEstimate = extractionCost + (result.structuringCost ?? 0);
     const latencyMs = Date.now() - started;
     await prisma.$transaction(async (tx) => {
       const run = await tx.extractionRun.create({ data: {
@@ -108,7 +111,7 @@ export async function runOneForBakeoff(invoiceId: string, provider: ExtractionPr
     const result = await provider.extract(file, creds, { fileName: inv.fileName, structuring });
     return prisma.extractionRun.create({ data: { invoiceId, provider: provider.name,
       structuringModel: provider.kind === 'markdown' ? structuring.model : null, status: 'COMPLETED',
-      confidence: deriveConfidence(result), costEstimate: result.costEstimate ?? estimateCost(provider.name, pages),
+      confidence: deriveConfidence(result), costEstimate: (result.costEstimate ?? estimateCost(provider.name, pages) ?? 0) + (result.structuringCost ?? 0),
       latencyMs: Date.now() - started, pageCount: pages, rawText: result.rawText, rawJson: result.rawJson as any,
       fieldsSnapshot: headerData(result) as any, itemsSnapshot: result.lineItems as any } });
   } catch (e: any) {

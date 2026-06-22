@@ -7,6 +7,7 @@ import { sha256 } from '../lib/hash.js';
 import { isPdf } from '../lib/pdf.js';
 import { runExtraction } from '../extraction/run.js';
 import { requestCancel } from '../extraction/cancel.js';
+import { splitCost } from '../extraction/confidence.js';
 
 export function buildWhere(q: Record<string, string>) {
   const where: any = {};
@@ -53,12 +54,14 @@ export async function invoiceRoutes(app: FastifyInstance) {
       include: {
         _count: { select: { lineItems: true } },
         // newest run carries the cost of the current extraction (ollama/local = 0)
-        runs: { orderBy: { createdAt: 'desc' }, take: 1, select: { costEstimate: true } },
+        runs: { orderBy: { createdAt: 'desc' }, take: 1, select: { costEstimate: true, pageCount: true, provider: true } },
       },
     });
     return { invoices: invoices.map((i: any) => {
       const { _count, runs, ...rest } = i;
-      return { ...rest, itemCount: _count.lineItems, costEstimate: runs[0]?.costEstimate ?? null };
+      const r = runs[0];
+      const split = splitCost(r?.provider ?? rest.provider, r?.pageCount, r?.costEstimate);
+      return { ...rest, itemCount: _count.lineItems, costEstimate: r?.costEstimate ?? null, ...split };
     }) };
   });
 
@@ -67,7 +70,10 @@ export async function invoiceRoutes(app: FastifyInstance) {
     const inv = await prisma.invoice.findUnique({ where: { id },
       include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } } } });
     if (!inv) return reply.code(404).send({ error: 'not found' });
-    return inv;
+    // Expose the extraction/structuring cost split for the active (or latest) run.
+    const active = inv.runs.find((r) => r.id === inv.activeRunId) ?? inv.runs[0];
+    const split = splitCost(active?.provider, active?.pageCount, active?.costEstimate);
+    return { ...inv, costEstimate: active?.costEstimate ?? null, ...split };
   });
 
   app.post('/api/invoices/bulk', async (req) => {

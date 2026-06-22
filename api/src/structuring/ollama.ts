@@ -29,6 +29,7 @@ export const ollamaStructModel = (model: string): StructuringModel => ({
     // temperature 0 (greedy) makes structuring deterministic — at the default 0.8 the same
     // OCR markdown yields wildly different results run-to-run (e.g. 0 vs 10 line items).
     const { content } = await ollamaChat(baseUrl, useModel, prompt, { json: true, numCtx, temperature: 0 });
-    return normalizeStructured(content);
+    return { ...normalizeStructured(content), structuringCost: 0 }; // local model: free
+
   },
 });

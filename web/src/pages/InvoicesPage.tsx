@@ -1008,10 +1008,10 @@ export function InvoicesPage() {
                       {money(row.totalAmount, row.currency ?? 'USD')}
                     </td>
 
-                    {/* Cost */}
+                    {/* Cost (total; hover for the extraction/structuring split) */}
                     <td
                       style={{ ...tdBase, textAlign: 'right', color: row.costEstimate ? T.text : T.green, fontWeight: 500 }}
-                      title="Extraction + structuring cost (local providers are free)"
+                      title={`Extraction ${costFmt(row.extractionCost)} + Structuring ${costFmt(row.structuringCost)}`}
                     >
                       {costFmt(row.costEstimate)}
                     </td>
