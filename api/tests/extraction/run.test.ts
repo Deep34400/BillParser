@@ -77,7 +77,7 @@ it('re-extraction resolves to a configured provider when the default points at a
 
 it('marks FAILED (does not throw) when the active provider has no credentials', async () => {
   await prisma.providerConfig.deleteMany();
-  await prisma.setting.deleteMany(); // default provider resolves to 'mistral', which has no creds
+  await prisma.setting.deleteMany(); // default provider resolves to 'ollama', which has no creds here
   const inv = await prisma.invoice.create({ data: { fileName: 'nc.pdf', storedPath: await tempPdf('nc.pdf'), fileHash: 'nocreds-1' } });
   await runExtraction(inv.id); // must resolve, not reject
   const got = await prisma.invoice.findUnique({ where: { id: inv.id }, include: { runs: true } });

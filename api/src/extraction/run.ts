@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import type { CanonicalResult, ExtractionProvider } from '../providers/types.js';
 import { allProviders, getProvider } from '../providers/registry.js';
 import { getCredentials, getProviderCredsOrThrow, getSetting } from '../settings/store.js';
+import { DEFAULTS } from '../settings/defaults.js';
 
 // Pick a sensible extraction provider when the caller didn't specify one. The configured
 // default (extraction_provider) is only honored if it actually has credentials — otherwise
@@ -13,7 +14,7 @@ async function resolveProvider(invoiceId: string): Promise<string> {
   const isConfigured = async (name: string): Promise<boolean> => {
     try { return getProvider(name).isConfigured(await getCredentials(name)); } catch { return false; }
   };
-  const def = await getSetting('extraction_provider', 'mistral');
+  const def = await getSetting('extraction_provider', DEFAULTS.extraction_provider);
   if (await isConfigured(def)) return def;
   const inv = await prisma.invoice.findUnique({ where: { id: invoiceId } });
   if (inv?.provider && (await isConfigured(inv.provider))) return inv.provider;
@@ -49,7 +50,7 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
   try {
     const file = await readFile(inv.storedPath);
     const pages = await pageCount(file);
-    const structuring = { provider: await getSetting('structuring_provider', 'anthropic'), model: await getSetting('structuring_model', 'claude-sonnet-4-6') };
+    const structuring = { provider: await getSetting('structuring_provider', DEFAULTS.structuring_provider), model: await getSetting('structuring_model', DEFAULTS.structuring_model) };
     const result = await provider.extract(file, creds, { fileName: inv.fileName, structuring });
     const confidence = deriveConfidence(result);
     const costEstimate = result.costEstimate ?? estimateCost(provider.name, pages);
@@ -94,7 +95,7 @@ export async function runOneForBakeoff(invoiceId: string, provider: ExtractionPr
   try {
     const file = await readFile(inv.storedPath);
     const pages = await pageCount(file);
-    const structuring = { provider: await getSetting('structuring_provider', 'anthropic'), model: await getSetting('structuring_model', 'claude-sonnet-4-6') };
+    const structuring = { provider: await getSetting('structuring_provider', DEFAULTS.structuring_provider), model: await getSetting('structuring_model', DEFAULTS.structuring_model) };
     const result = await provider.extract(file, creds, { fileName: inv.fileName, structuring });
     return prisma.extractionRun.create({ data: { invoiceId, provider: provider.name,
       structuringModel: provider.kind === 'markdown' ? structuring.model : null, status: 'COMPLETED',

@@ -9,6 +9,14 @@ it('GET settings returns selections + masked provider status', async () => {
   expect(b.providers.find((p: any) => p.name === 'azure')).toMatchObject({ configured: false });
   await app.close();
 });
+it('defaults to fully-local providers (ollama) when nothing is configured', async () => {
+  const app = await buildApp();
+  const b = (await app.inject({ url: '/api/settings' })).json();
+  expect(b.extractionProvider).toBe('ollama');
+  expect(b.structuringProvider).toBe('ollama');
+  expect(b.structuringModel).toBe('qwen2.5:3b');
+  await app.close();
+});
 it('PUT credentials stores encrypted + masks on read; never returns raw', async () => {
   const app = await buildApp();
   await app.inject({ method: 'PUT', url: '/api/settings/providers/azure', payload: { endpoint: 'https://x', apiKey: 'sk-secret-9999' } });

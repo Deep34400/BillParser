@@ -52,13 +52,16 @@ If no credentials are configured for the active provider, uploads are accepted b
 
 | Provider              | Key         | Output type | Status                        |
 |-----------------------|-------------|-------------|-------------------------------|
-| Mistral OCR           | `mistral`   | Markdown    | Built, default                |
+| GLM-OCR (Ollama)      | `ollama`    | Markdown    | Built, **default** (fully local) |
+| Mistral OCR           | `mistral`   | Markdown    | Built                         |
 | Azure Document Intelligence | `azure` | Structured | Built                        |
 | LlamaParse            | `llamaparse`| Markdown    | Built                         |
 | AWS Textract          | `textract`  | Structured  | Built                         |
 | Google Document AI    | `google`    | Structured  | Stubbed — returns "not implemented" error |
 
-**Markdown providers** (Mistral, LlamaParse) produce raw markdown from the PDF, then run a second LLM structuring pass to extract canonical fields. The structuring model is configurable in Settings (supports Anthropic, OpenAI, and Mistral).
+The app defaults to the **fully local** Ollama path (`ollama` OCR + `ollama` structuring, e.g. `qwen2.5:3b`) so it runs with no cloud API keys. Switch any provider to a hosted one in **Settings → Selections** at any time.
+
+**Markdown providers** (Ollama, Mistral, LlamaParse) produce raw markdown from the PDF, then run a second LLM structuring pass to extract canonical fields. The structuring model is configurable in Settings (local Ollama, Anthropic, OpenAI, or Mistral).
 
 **Structured providers** (Azure, Textract) return pre-parsed field maps that are mapped directly to the canonical schema without a second LLM call.
 
@@ -121,9 +124,11 @@ All variables live in `.env` (copy from `.env.example`).
 | `APP_SECRET` | Yes | Secret key for AES-256-GCM credential encryption |
 | `UPLOAD_DIR` | No | Directory for uploaded PDFs (default `./uploads`) |
 | `PORT` | No | API listen port (default `4000`) |
-| `EXTRACTION_PROVIDER` | No | Seed the active extraction provider on first boot (`mistral`, `azure`, `llamaparse`, `textract`, `google`) |
-| `STRUCTURING_MODEL_PROVIDER` | No | Seed the structuring model provider (`anthropic`, `openai`, `mistral`) |
-| `STRUCTURING_MODEL` | No | Seed the structuring model ID (e.g. `claude-sonnet-4-6`) |
+| `EXTRACTION_PROVIDER` | No | Seed the active extraction provider on first boot (default `ollama`; also `mistral`, `azure`, `llamaparse`, `textract`, `google`) |
+| `STRUCTURING_MODEL_PROVIDER` | No | Seed the structuring model provider (default `ollama`; also `anthropic`, `openai`, `mistral`) |
+| `STRUCTURING_MODEL` | No | Seed the structuring model ID (default `qwen2.5:3b`; e.g. `claude-sonnet-4-6` for hosted) |
+| `OLLAMA_BASE_URL` | No | Seed the local Ollama URL for the `ollama` provider (default `http://host.docker.internal:11434`) |
+| `OLLAMA_MODEL` | No | Seed the local Ollama OCR model (default `glm-ocr`) |
 | `MISTRAL_API_KEY` | No | Seed Mistral API key |
 | `AZURE_DI_ENDPOINT` | No | Seed Azure Document Intelligence endpoint URL |
 | `AZURE_DI_KEY` | No | Seed Azure Document Intelligence API key |

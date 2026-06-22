@@ -1,6 +1,7 @@
 import type { CanonicalResult } from '../providers/types.js';
 import type { StructuringModel } from './types.js';
 import { getSetting, getCredentials } from '../settings/store.js';
+import { DEFAULTS } from '../settings/defaults.js';
 import { anthropicModel } from './anthropic.js';
 import { openaiModel } from './openai.js';
 import { mistralStructModel } from './mistral.js';
@@ -41,8 +42,8 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
 }
 
 export async function getStructuringModel(): Promise<{ model: StructuringModel; creds: Record<string, string> }> {
-  const provider = await getSetting('structuring_provider', 'anthropic');
-  const model = await getSetting('structuring_model', 'claude-sonnet-4-6');
+  const provider = await getSetting('structuring_provider', DEFAULTS.structuring_provider);
+  const model = await getSetting('structuring_model', DEFAULTS.structuring_model);
   const creds = (await getCredentials(`structuring_${provider}`)) ?? (await getCredentials(provider)) ?? {};
   const impl: Record<string, (m: string) => StructuringModel> = {
     anthropic: anthropicModel, openai: openaiModel, mistral: mistralStructModel,

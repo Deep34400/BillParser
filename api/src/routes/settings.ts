@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { allProviders } from '../providers/registry.js';
 import { getSetting, setSetting, getCredentials, setCredentials, clearCredentials } from '../settings/store.js';
 import { maskValue } from '../lib/crypto.js';
+import { DEFAULTS } from '../settings/defaults.js';
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/api/settings', async () => {
@@ -12,9 +13,9 @@ export async function settingsRoutes(app: FastifyInstance) {
       return { name: p.name, displayName: p.displayName, kind: p.kind, requiredCredentials: p.requiredCredentials, configured: p.isConfigured(creds), masked };
     }));
     return {
-      extractionProvider: await getSetting('extraction_provider', 'mistral'),
-      structuringProvider: await getSetting('structuring_provider', 'anthropic'),
-      structuringModel: await getSetting('structuring_model', 'claude-sonnet-4-6'),
+      extractionProvider: await getSetting('extraction_provider', DEFAULTS.extraction_provider),
+      structuringProvider: await getSetting('structuring_provider', DEFAULTS.structuring_provider),
+      structuringModel: await getSetting('structuring_model', DEFAULTS.structuring_model),
       providers,
     };
   });

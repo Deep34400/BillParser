@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { allProviders } from '../providers/registry.js';
 import { getCredentials, getSetting } from '../settings/store.js';
+import { DEFAULTS } from '../settings/defaults.js';
 
 export async function configRoutes(app: FastifyInstance) {
   app.get('/api/config', async () => {
@@ -10,9 +11,9 @@ export async function configRoutes(app: FastifyInstance) {
     })));
     return {
       providers,
-      activeProvider: await getSetting('extraction_provider', 'mistral'),
-      structuringProvider: await getSetting('structuring_provider', 'anthropic'),
-      structuringModel: await getSetting('structuring_model', 'claude-sonnet-4-6'),
+      activeProvider: await getSetting('extraction_provider', DEFAULTS.extraction_provider),
+      structuringProvider: await getSetting('structuring_provider', DEFAULTS.structuring_provider),
+      structuringModel: await getSetting('structuring_model', DEFAULTS.structuring_model),
     };
   });
 }
