@@ -13,17 +13,14 @@ export async function ollamaChat(
   baseUrl: string,
   model: string,
   prompt: string,
-  opts: { images?: string[]; json?: boolean; numCtx?: number } = {},
+  opts: { images?: string[]; json?: boolean; numCtx?: number; temperature?: number } = {},
 ): Promise<{ content: string; raw: unknown }> {
   const url = `${baseUrl.replace(/\/$/, '')}/api/chat`;
   const message: { role: 'user'; content: string; images?: string[] } = { role: 'user', content: prompt };
   if (opts.images?.length) message.images = opts.images;
-  const body: Record<string, unknown> = {
-    model,
-    messages: [message],
-    stream: false,
-    options: { num_ctx: opts.numCtx ?? DEFAULT_NUM_CTX },
-  };
+  const options: Record<string, unknown> = { num_ctx: opts.numCtx ?? DEFAULT_NUM_CTX };
+  if (opts.temperature !== undefined) options.temperature = opts.temperature;
+  const body: Record<string, unknown> = { model, messages: [message], stream: false, options };
   if (opts.json) body.format = 'json';
 
   let res: Response;

@@ -26,7 +26,9 @@ export const ollamaStructModel = (model: string): StructuringModel => ({
     // text tokenizes ~2 chars/token) plus headroom for the JSON output, capped to keep
     // the KV cache bounded.
     const numCtx = Math.min(32_768, Math.max(8192, Math.ceil(prompt.length / 2) + 4096));
-    const { content } = await ollamaChat(baseUrl, useModel, prompt, { json: true, numCtx });
+    // temperature 0 (greedy) makes structuring deterministic — at the default 0.8 the same
+    // OCR markdown yields wildly different results run-to-run (e.g. 0 vs 10 line items).
+    const { content } = await ollamaChat(baseUrl, useModel, prompt, { json: true, numCtx, temperature: 0 });
     return normalizeStructured(content);
   },
 });

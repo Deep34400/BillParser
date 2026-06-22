@@ -26,6 +26,18 @@ describe('ollamaChat', () => {
     expect(body.options.num_ctx).toBe(8192);
   });
 
+  it('forwards temperature into options when provided', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: 'x' } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await ollamaChat('http://x:11434', 'm', 'P', { temperature: 0 });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.options.temperature).toBe(0);
+  });
+
   it('throws a clear error on non-200', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
     await expect(ollamaChat('http://x:11434', 'glm-ocr', 'P')).rejects.toThrow(/Ollama HTTP 500/);

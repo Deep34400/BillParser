@@ -37,6 +37,18 @@ describe('ollamaStructModel', () => {
     expect(body.model).toBe('qwen2.5'); // structuring model wins over creds.model (glm-ocr)
   });
 
+  it('uses greedy decoding (temperature 0) so structuring is deterministic', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ message: { content: '{"lineItems":[]}' } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await ollamaStructModel('qwen2.5').structure('# md', { baseUrl: 'http://x:11434', model: 'qwen2.5' });
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.options.temperature).toBe(0);
+  });
+
   it('grows num_ctx for large markdown so the input is not silently truncated', async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ message: { content: '{"lineItems":[]}' } }), { status: 200 }),
