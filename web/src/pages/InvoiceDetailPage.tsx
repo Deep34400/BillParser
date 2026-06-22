@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Invoice, AppConfig, LineItem } from '../types.js';
 import { T } from '../theme.js';
-import { money, dateFmt, confLabel } from '../format.js';
+import { money, dateFmt, confLabel, costFmt } from '../format.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
@@ -562,6 +562,7 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
     { label: 'Due date', value: dateFmt(inv.dueDate) },
     { label: 'Currency', value: inv.currency ?? '—' },
     { label: 'Provider', value: inv.provider ?? '—' },
+    { label: 'Cost', value: costFmt((inv.runs?.find((r) => r.id === inv.activeRunId) ?? inv.runs?.[0])?.costEstimate) },
     { label: 'Confidence', value: confLabel(inv.confidence) },
     { label: 'Subtotal', value: money(inv.subtotal, currency) },
     { label: 'Tax', value: money(inv.taxAmount, currency) },

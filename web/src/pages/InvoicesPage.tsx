@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Invoice } from '../types.js';
 import { T } from '../theme.js';
-import { money, dateFmt } from '../format.js';
+import { money, dateFmt, costFmt } from '../format.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { ConfidenceBar } from '../components/ConfidenceBar.js';
 import { Toast } from '../components/Toast.js';
@@ -831,6 +831,8 @@ export function InvoicesPage() {
                 >
                   Total {sort === 'totalAmount' ? (dir === 'asc' ? '▲' : '▼') : ''}
                 </th>
+                {/* Cost */}
+                <th style={{ ...thBase, textAlign: 'right' }}>Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -839,7 +841,7 @@ export function InvoicesPage() {
                 skeletonRows.map((_, i) => (
                   <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
                     <td style={tdBase} />
-                    {Array.from({ length: 8 }).map((__, j) => (
+                    {Array.from({ length: 9 }).map((__, j) => (
                       <td key={j} style={tdBase}>
                         <div
                           style={{
@@ -858,7 +860,7 @@ export function InvoicesPage() {
               {/* Empty states */}
               {!loading && displayedRows.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', padding: '60px 24px' }}>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: '60px 24px' }}>
                     {allInvoices.length === 0 && !hasSearch && !hasAdvancedFilters && statusFilter === 'ALL' ? (
                       <div>
                         <div style={{ fontSize: 16, fontWeight: 600, color: T.text, marginBottom: 8 }}>
@@ -1004,6 +1006,14 @@ export function InvoicesPage() {
                     {/* Total */}
                     <td style={{ ...tdBase, textAlign: 'right', fontWeight: 600, color: T.text }}>
                       {money(row.totalAmount, row.currency ?? 'USD')}
+                    </td>
+
+                    {/* Cost */}
+                    <td
+                      style={{ ...tdBase, textAlign: 'right', color: row.costEstimate ? T.text : T.green, fontWeight: 500 }}
+                      title="Extraction + structuring cost (local providers are free)"
+                    >
+                      {costFmt(row.costEstimate)}
                     </td>
                   </tr>
                 );

@@ -48,8 +48,18 @@ export async function invoiceRoutes(app: FastifyInstance) {
     const sortMap: Record<string, string> = { status: 'status', vendor: 'vendorName', date: 'invoiceDate', confidence: 'confidence', total: 'totalAmount' };
     const dir: 'asc' | 'desc' = q.dir === 'asc' ? 'asc' : 'desc';
     const orderBy: any = q.sort && sortMap[q.sort] ? { [sortMap[q.sort]]: dir } : { createdAt: 'desc' };
-    const invoices = await prisma.invoice.findMany({ where, orderBy, include: { _count: { select: { lineItems: true } } } });
-    return { invoices: invoices.map((i: any) => ({ ...i, itemCount: i._count.lineItems })) };
+    const invoices = await prisma.invoice.findMany({
+      where, orderBy,
+      include: {
+        _count: { select: { lineItems: true } },
+        // newest run carries the cost of the current extraction (ollama/local = 0)
+        runs: { orderBy: { createdAt: 'desc' }, take: 1, select: { costEstimate: true } },
+      },
+    });
+    return { invoices: invoices.map((i: any) => {
+      const { _count, runs, ...rest } = i;
+      return { ...rest, itemCount: _count.lineItems, costEstimate: runs[0]?.costEstimate ?? null };
+    }) };
   });
 
   app.get('/api/invoices/:id', async (req, reply) => {
