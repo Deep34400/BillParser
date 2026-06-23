@@ -45,3 +45,14 @@ it('rejects a path that escapes IMPORT_DIR', async () => {
 it('rejects local paths when IMPORT_DIR is unset', async () => {
   await expect(resolveSource('a.pdf')).rejects.toThrow('local file import not enabled');
 });
+
+it('aborts a stream that exceeds the size cap', async () => {
+  const big = { length: 60 * 1024 * 1024 } as unknown as Uint8Array;
+  async function* gen() { yield big; }
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true, status: 200,
+    headers: { get: () => null },
+    body: gen(),
+  })));
+  await expect(resolveSource('https://example.com/big.pdf')).rejects.toThrow('file too large');
+});

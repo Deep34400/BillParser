@@ -19,8 +19,20 @@ async function fetchUrl(url: string): Promise<{ buf: Buffer; fileName: string }>
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const len = Number(res.headers.get('content-length') ?? 0);
   if (len > MAX_BYTES) throw new Error('file too large');
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > MAX_BYTES) throw new Error('file too large');
+  let buf: Buffer;
+  if (res.body) {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
+      total += chunk.length;
+      if (total > MAX_BYTES) throw new Error('file too large');
+      chunks.push(Buffer.from(chunk));
+    }
+    buf = Buffer.concat(chunks);
+  } else {
+    buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_BYTES) throw new Error('file too large');
+  }
   const name = new URL(url).pathname.split('/').filter(Boolean).pop() || 'download.pdf';
   return { buf, fileName: name };
 }
