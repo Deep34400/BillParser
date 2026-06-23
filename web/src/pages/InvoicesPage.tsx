@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import type { Invoice } from '../types.js';
+import type { Invoice, Batch } from '../types.js';
 import { T } from '../theme.js';
 import { money, dateFmt, costFmt } from '../format.js';
 import { StatusDot } from '../components/StatusDot.js';
@@ -96,6 +96,9 @@ export function InvoicesPage() {
   const [minTotal, setMinTotal] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [batchFilter, setBatchFilter] = useState('');
+  const [batchName, setBatchName] = useState('');
 
   // UI toggle state
   const [showFilters, setShowFilters] = useState(false);
@@ -115,8 +118,9 @@ export function InvoicesPage() {
   // Fetch all invoices (for count display and display)
   const fetchAll = useCallback(async () => {
     try {
-      const res = await api.list('');
-      setAllInvoices(res.invoices);
+      const [inv, bat] = await Promise.all([api.list(''), api.batches().catch(() => ({ batches: [] }))]);
+      setAllInvoices(inv.invoices);
+      setBatches(bat.batches);
     } catch (_e) {
       // silently ignore for counts
     }
@@ -167,6 +171,7 @@ export function InvoicesPage() {
 
   const displayedRows: Invoice[] = (() => {
     let rows = applyClientFilters(allInvoices, statusFilter);
+    if (batchFilter) rows = rows.filter((inv) => inv.batchId === batchFilter);
 
     // Apply text search client-side
     if (q) {
@@ -301,7 +306,7 @@ export function InvoicesPage() {
       return;
     }
     try {
-      const result = await api.upload(pdfs);
+      const result = await api.upload(pdfs, batchName.trim() || undefined);
       const created = result?.created?.length ?? 0;
       const dupes = result?.duplicates?.length ?? 0;
       const rejected = result?.rejected?.length ?? 0;
@@ -311,6 +316,7 @@ export function InvoicesPage() {
         `Uploaded ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`,
       );
       setShowUpload(false);
+      setBatchName('');
     } catch (e) {
       setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown'));
     }
@@ -420,6 +426,19 @@ export function InvoicesPage() {
               outline: 'none',
             }}
           />
+
+          {/* Batch filter */}
+          <select
+            aria-label="Filter by batch"
+            value={batchFilter}
+            onChange={(e) => setBatchFilter(e.target.value)}
+            style={{ padding: '7px 12px', border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: T.rail, outline: 'none', maxWidth: 200 }}
+          >
+            <option value="">All batches</option>
+            {batches.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
 
           {/* Filters toggle */}
           <button
@@ -632,6 +651,14 @@ export function InvoicesPage() {
           <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
             or browse to select files
           </div>
+          <input
+            type="text"
+            aria-label="Batch name"
+            placeholder="Batch name (optional)"
+            value={batchName}
+            onChange={(e) => setBatchName(e.target.value)}
+            style={{ display: 'block', margin: '0 auto 14px', maxWidth: 280, width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: T.rail, outline: 'none' }}
+          />
           <label
             style={{
               display: 'inline-block',
@@ -714,6 +741,26 @@ export function InvoicesPage() {
           );
         })}
       </div>
+
+      {/* Batch progress banner */}
+      {batchFilter && (() => {
+        const b = batches.find((x) => x.id === batchFilter);
+        if (!b) return null;
+        const pct = b.total ? Math.round((b.completed / b.total) * 100) : 0;
+        return (
+          <div style={{ margin: '12px 30px 0', padding: '12px 16px', background: T.rail, border: `1px solid ${T.border}`, borderRadius: 9 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 8 }}>
+              <span>{b.name}</span>
+              <span style={{ color: T.muted, fontWeight: 500 }}>
+                {b.completed}/{b.total} done{b.failed ? ` · ${b.failed} failed` : ''}{b.processing ? ` · ${b.processing} in progress` : ''}
+              </span>
+            </div>
+            <div style={{ height: 6, borderRadius: 3, background: '#e8e3da', overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: T.accent, transition: 'width 0.3s' }} />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
@@ -960,6 +1007,11 @@ export function InvoicesPage() {
                         <div style={{ fontSize: 11, color: T.faint, marginTop: 2 }}>
                           {row.fileName || row.vendorAddress}
                         </div>
+                      )}
+                      {row.batch && (
+                        <span style={{ display: 'inline-block', marginTop: 4, padding: '1px 7px', background: T.accentSoft, color: T.accent, borderRadius: 5, fontSize: 10, fontWeight: 600 }}>
+                          {row.batch.name}
+                        </span>
                       )}
                     </td>
 
