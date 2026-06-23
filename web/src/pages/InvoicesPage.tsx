@@ -100,6 +100,7 @@ export function InvoicesPage() {
   const [batchFilter, setBatchFilter] = useState('');
   const [batchName, setBatchName] = useState('');
   const [importText, setImportText] = useState('');
+  const [busy, setBusy] = useState(false);
 
   // UI toggle state
   const [showFilters, setShowFilters] = useState(false);
@@ -306,6 +307,8 @@ export function InvoicesPage() {
       setToast('No PDF files selected');
       return;
     }
+    if (busy) return;
+    setBusy(true);
     try {
       const result = await api.upload(pdfs, batchName.trim() || undefined);
       const created = result?.created?.length ?? 0;
@@ -320,6 +323,8 @@ export function InvoicesPage() {
       setBatchName('');
     } catch (e) {
       setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -330,6 +335,8 @@ export function InvoicesPage() {
       setToast('Paste at least one URL or file path');
       return;
     }
+    if (busy) return;
+    setBusy(true);
     try {
       const result = await api.importSources(sources, batchName.trim() || undefined);
       const created = result?.created?.length ?? 0;
@@ -345,6 +352,8 @@ export function InvoicesPage() {
       setBatchName('');
     } catch (e) {
       setToast('Import failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -694,14 +703,16 @@ export function InvoicesPage() {
               borderRadius: 7,
               fontSize: 13,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: busy ? 'default' : 'pointer',
+              opacity: busy ? 0.6 : 1,
             }}
           >
-            Browse files
+            {busy ? 'Uploading…' : 'Browse files'}
             <input
               type="file"
               multiple
               accept="application/pdf,.pdf"
+              disabled={busy}
               style={{ display: 'none' }}
               onChange={(e) => {
                 const input = e.currentTarget;
@@ -728,9 +739,10 @@ export function InvoicesPage() {
             <div>
               <button
                 onClick={() => void handleImport()}
-                style={{ marginTop: 10, padding: '8px 20px', background: T.accent, color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font }}
+                disabled={busy}
+                style={{ marginTop: 10, padding: '8px 20px', background: T.accent, color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, fontFamily: T.font }}
               >
-                Import
+                {busy ? 'Importing…' : 'Import'}
               </button>
             </div>
           </div>
