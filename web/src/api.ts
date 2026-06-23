@@ -33,4 +33,13 @@ export const api = {
     if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
     return res.json();
   },
+  importSources: async (sources: string[], batchName?: string) => {
+    const res = await fetch('/api/invoices/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sources, batchName }),
+    });
+    if (!res.ok) throw new Error(`Import failed: HTTP ${res.status}`);
+    return res.json();
+  },
 };

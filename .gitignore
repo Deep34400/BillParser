@@ -6,3 +6,5 @@ uploads/
 api/prisma/*.db
 coverage/
 .claude/
+import/*
+!import/.gitkeep
