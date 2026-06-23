@@ -18,6 +18,7 @@ export function buildWhere(q: Record<string, string>) {
     { fileName: { contains: q.q, mode: 'insensitive' } },
   ];
   if (q.minTotal) where.totalAmount = { gte: Number(q.minTotal) };
+  if (q.batchId) where.batchId = q.batchId;
   if (q.dateFrom || q.dateTo) where.invoiceDate = { ...(q.dateFrom ? { gte: new Date(q.dateFrom) } : {}), ...(q.dateTo ? { lte: new Date(q.dateTo) } : {}) };
   return where;
 }
@@ -65,6 +66,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
         _count: { select: { lineItems: true } },
         // newest run carries the cost of the current extraction (ollama/local = 0)
         runs: { orderBy: { createdAt: 'desc' }, take: 1, select: { costEstimate: true, pageCount: true, provider: true } },
+        batch: { select: { id: true, name: true } },
       },
     });
     return { invoices: invoices.map((i: any) => {
@@ -78,7 +80,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.get('/api/invoices/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const inv = await prisma.invoice.findUnique({ where: { id },
-      include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } } } });
+      include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } }, batch: { select: { id: true, name: true } } } });
     if (!inv) return reply.code(404).send({ error: 'not found' });
     // Expose the extraction/structuring cost split for the active (or latest) run.
     const active = inv.runs.find((r) => r.id === inv.activeRunId) ?? inv.runs[0];
