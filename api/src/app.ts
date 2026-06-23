@@ -6,6 +6,7 @@ import { invoiceRoutes } from './routes/invoices.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { settingsRoutes } from './routes/settings.js';
 import { exportRoutes } from './routes/export.js';
+import { batchesRoutes } from './routes/batches.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -13,6 +14,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 50 } });
   await app.register(configRoutes);
   await app.register(invoiceRoutes);
+  await app.register(batchesRoutes);
   await app.register(exportRoutes);
   await app.register(analyticsRoutes);
   await app.register(settingsRoutes);
