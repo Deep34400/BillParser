@@ -30,3 +30,15 @@ it('filters the table to the selected batch', async () => {
   await waitFor(() => expect(screen.queryByText('Globex')).toBeNull());
   expect(screen.getByText('Acme')).toBeTruthy();
 });
+
+it('imports pasted URLs/paths via the Import button', async () => {
+  const spy = vi.spyOn(api, 'importSources').mockResolvedValue({ created: [{}], duplicates: [], rejected: [] } as any);
+  render(<MemoryRouter><InvoicesPage /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByText('Acme')).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Upload bills' }));
+  fireEvent.change(screen.getByLabelText('Import URLs or paths'), {
+    target: { value: 'https://x.com/a.pdf\n\n/data/import/b.pdf\n' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+  await waitFor(() => expect(spy).toHaveBeenCalledWith(['https://x.com/a.pdf', '/data/import/b.pdf'], undefined));
+});

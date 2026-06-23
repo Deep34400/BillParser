@@ -99,6 +99,7 @@ export function InvoicesPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchFilter, setBatchFilter] = useState('');
   const [batchName, setBatchName] = useState('');
+  const [importText, setImportText] = useState('');
 
   // UI toggle state
   const [showFilters, setShowFilters] = useState(false);
@@ -319,6 +320,31 @@ export function InvoicesPage() {
       setBatchName('');
     } catch (e) {
       setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    }
+  }
+
+  // Import handler — paste URLs / server file paths, one per line.
+  async function handleImport() {
+    const sources = importText.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (sources.length === 0) {
+      setToast('Paste at least one URL or file path');
+      return;
+    }
+    try {
+      const result = await api.importSources(sources, batchName.trim() || undefined);
+      const created = result?.created?.length ?? 0;
+      const dupes = result?.duplicates?.length ?? 0;
+      const rejected = result?.rejected?.length ?? 0;
+      if (dupes > 0) setDuplicateBanner({ count: dupes });
+      await refetch();
+      setToast(
+        `Imported ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`,
+      );
+      setShowUpload(false);
+      setImportText('');
+      setBatchName('');
+    } catch (e) {
+      setToast('Import failed: ' + (e instanceof Error ? e.message : 'unknown'));
     }
   }
 
@@ -687,6 +713,27 @@ export function InvoicesPage() {
               }}
             />
           </label>
+          <div style={{ marginTop: 18, borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>
+              …or paste URLs / server file paths, one per line
+            </div>
+            <textarea
+              aria-label="Import URLs or paths"
+              placeholder={'https://bucket.s3.amazonaws.com/invoice.pdf\n/data/import/invoice.pdf'}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              rows={3}
+              style={{ width: '100%', maxWidth: 480, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 12, fontFamily: T.mono, color: T.text, background: T.rail, outline: 'none', resize: 'vertical' }}
+            />
+            <div>
+              <button
+                onClick={() => void handleImport()}
+                style={{ marginTop: 10, padding: '8px 20px', background: T.accent, color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font }}
+              >
+                Import
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
