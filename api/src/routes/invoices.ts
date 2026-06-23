@@ -48,8 +48,9 @@ export async function invoiceRoutes(app: FastifyInstance) {
       void runExtraction(inv.id);
     }
     if (created.length === 0) await prisma.batch.delete({ where: { id: batch.id } });
+    const finalBatch = created.length ? await prisma.batch.findUnique({ where: { id: batch.id } }) : null;
     reply.code(201);
-    return { created, duplicates, rejected, batchId: created.length ? batch.id : null, batch: created.length ? batch : null };
+    return { created, duplicates, rejected, batchId: finalBatch?.id ?? null, batch: finalBatch };
   });
 
   app.get('/api/invoices', async (req) => {

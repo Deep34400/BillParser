@@ -8,7 +8,7 @@ async function pdf(): Promise<Buffer> {
   const d = await PDFDocument.create();
   const page = d.addPage();
   // Draw a unique string so each call produces a distinct PDF (and thus a distinct hash).
-  page.drawText(String(Date.now() + Math.random()), { x: 10, y: 10, size: 8 });
+  page.drawText(String(Date.now()) + '-' + String(Math.random()), { x: 10, y: 10, size: 8 });
   return Buffer.from(await d.save());
 }
 
@@ -68,6 +68,7 @@ it('creates one batch and tags every created invoice with it', async () => {
 it('uses the batchName field as the batch name, else a default', async () => {
   const app = await buildApp();
   const named = await app.inject({ method: 'POST', url: '/api/invoices/upload', ...form([{ buf: await pdf(), name: 'a.pdf' }], 'April bills') });
+  expect(named.json().batch.name).toBe('April bills');
   expect((await prisma.batch.findUnique({ where: { id: named.json().batchId } }))!.name).toBe('April bills');
 
   const unnamed = await app.inject({ method: 'POST', url: '/api/invoices/upload', ...form([{ buf: await pdf(), name: 'b.pdf' }]) });
