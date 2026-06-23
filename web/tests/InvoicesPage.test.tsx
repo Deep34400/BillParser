@@ -42,3 +42,18 @@ it('imports pasted URLs/paths via the Import button', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Import' }));
   await waitFor(() => expect(spy).toHaveBeenCalledWith(['https://x.com/a.pdf', '/data/import/b.pdf'], undefined));
 });
+
+it('disables the Import button while a request is in flight (no double-submit)', async () => {
+  let resolve!: (v: unknown) => void;
+  const spy = vi.spyOn(api, 'importSources').mockReturnValue(new Promise((r) => { resolve = r; }) as any);
+  render(<MemoryRouter><InvoicesPage /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByText('Acme')).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Upload bills' }));
+  fireEvent.change(screen.getByLabelText('Import URLs or paths'), { target: { value: 'https://x.com/a.pdf' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+  // Button shows the in-flight label and is disabled; a second click must not fire another request.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Importing…' })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Importing…' }));
+  expect(spy).toHaveBeenCalledTimes(1);
+  resolve({ created: [{}], duplicates: [], rejected: [] });
+});
