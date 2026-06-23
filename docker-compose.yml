@@ -27,7 +27,8 @@ services:
       LLAMAPARSE_API_KEY: ${LLAMAPARSE_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-    volumes: [ "uploads:/data/uploads" ]
+      IMPORT_DIR: /data/import
+    volumes: [ "uploads:/data/uploads", "./import:/data/import" ]
     depends_on:
       db:
         condition: service_healthy
