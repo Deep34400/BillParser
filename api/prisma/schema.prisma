@@ -46,6 +46,8 @@ model Invoice {
   verified      Boolean       @default(false)
   editedAt      DateTime?
   activeRunId   String?
+  batchId       String?
+  batch         Batch?        @relation(fields: [batchId], references: [id], onDelete: SetNull)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   lineItems     LineItem[]
@@ -54,6 +56,7 @@ model Invoice {
   @@index([status])
   @@index([vendorName])
   @@index([invoiceDate])
+  @@index([batchId])
 }
 
 model LineItem {
@@ -69,6 +72,13 @@ model LineItem {
   taxRate     Float?
 
   @@index([invoiceId])
+}
+
+model Batch {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  invoices  Invoice[]
 }
 
 model ExtractionRun {

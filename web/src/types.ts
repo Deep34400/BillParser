@@ -7,10 +7,12 @@ export interface Invoice {
   invoiceNumber?: string | null; poNumber?: string | null; invoiceDate?: string | null; dueDate?: string | null;
   currency?: string | null; subtotal?: number | null; taxAmount?: number | null; totalAmount?: number | null; paymentTerms?: string | null;
   rawText?: string | null; verified: boolean; editedAt?: string | null; activeRunId?: string | null;
+  batchId?: string | null; batch?: { id: string; name: string } | null;
   itemCount?: number; costEstimate?: number | null;
   extractionCost?: number | null; structuringCost?: number | null;
   lineItems?: LineItem[]; runs?: ExtractionRun[];
 }
+export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; }
 export interface ProviderInfo { name: string; displayName: string; kind: string; configured: boolean; requiredCredentials?: string[]; masked?: Record<string, string>; }
 export interface AppConfig { providers: ProviderInfo[]; activeProvider: string; structuringProvider: string; structuringModel: string; }
 export interface SettingsData { extractionProvider: string; structuringProvider: string; structuringModel: string; providers: ProviderInfo[]; }

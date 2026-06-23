@@ -1,4 +1,4 @@
-import type { Invoice, AppConfig, SettingsData, Analytics, ExtractionRun } from './types.js';
+import type { Invoice, AppConfig, SettingsData, Analytics, ExtractionRun, Batch } from './types.js';
 const BASE = '';
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, { headers: { 'content-type': 'application/json' }, ...init });
@@ -19,13 +19,16 @@ export const api = {
   del: (id: string) => j(`/api/invoices/${id}`, { method: 'DELETE' }),
   bulk: (action: string, ids: string[]) => j('/api/invoices/bulk', { method: 'POST', body: JSON.stringify({ action, ids }) }),
   analytics: () => j<Analytics>('/api/analytics'),
+  batches: () => j<{ batches: Batch[] }>('/api/batches'),
   settings: () => j<SettingsData>('/api/settings'),
   revealCreds: () => j<{ credentials: Record<string, Record<string, string>> }>('/api/settings/reveal'),
   saveSettings: (b: unknown) => j('/api/settings', { method: 'PUT', body: JSON.stringify(b) }),
   saveCreds: (provider: string, b: unknown) => j(`/api/settings/providers/${provider}`, { method: 'PUT', body: JSON.stringify(b) }),
   clearCreds: (provider: string) => j(`/api/settings/providers/${provider}`, { method: 'DELETE' }),
-  upload: async (files: File[]) => {
-    const fd = new FormData(); files.forEach((f) => fd.append('files', f));
+  upload: async (files: File[], batchName?: string) => {
+    const fd = new FormData();
+    if (batchName) fd.append('batchName', batchName);
+    files.forEach((f) => fd.append('files', f));
     const res = await fetch('/api/invoices/upload', { method: 'POST', body: fd });
     if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
     return res.json();
