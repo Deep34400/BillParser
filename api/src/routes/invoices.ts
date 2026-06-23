@@ -26,7 +26,15 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.post('/api/invoices/upload', async (req, reply) => {
     await mkdir(env.uploadDir, { recursive: true });
     const created: any[] = []; const duplicates: any[] = []; const rejected: any[] = [];
+    // One batch per upload request. Default name is a UTC timestamp; an optional
+    // `batchName` form field (in any order) overrides it. Cleaned up if nothing lands.
+    const defaultName = 'Upload ' + new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    const batch = await prisma.batch.create({ data: { name: defaultName } });
     for await (const part of (req as any).parts()) {
+      if (part.type === 'field' && part.fieldname === 'batchName' && part.value) {
+        await prisma.batch.update({ where: { id: batch.id }, data: { name: String(part.value) } });
+        continue;
+      }
       if (part.type !== 'file') continue;
       const buf = await part.toBuffer();
       if (!isPdf(buf)) { rejected.push({ fileName: part.filename, reason: 'not a PDF' }); continue; }
@@ -35,12 +43,13 @@ export async function invoiceRoutes(app: FastifyInstance) {
       if (existing) { duplicates.push({ fileName: part.filename, id: existing.id }); continue; }
       const storedPath = join(env.uploadDir, `${hash}.pdf`);
       await writeFile(storedPath, buf);
-      const inv = await prisma.invoice.create({ data: { fileName: part.filename, storedPath, fileHash: hash } });
+      const inv = await prisma.invoice.create({ data: { fileName: part.filename, storedPath, fileHash: hash, batchId: batch.id } });
       created.push(inv);
       void runExtraction(inv.id);
     }
+    if (created.length === 0) await prisma.batch.delete({ where: { id: batch.id } });
     reply.code(201);
-    return { created, duplicates, rejected };
+    return { created, duplicates, rejected, batchId: created.length ? batch.id : null, batch: created.length ? batch : null };
   });
 
   app.get('/api/invoices', async (req) => {
