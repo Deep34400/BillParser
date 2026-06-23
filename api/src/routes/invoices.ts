@@ -6,6 +6,7 @@ import { runExtraction } from '../extraction/run.js';
 import { requestCancel } from '../extraction/cancel.js';
 import { splitCost } from '../extraction/confidence.js';
 import { ingestPdf, finalizeBatch, type IngestAcc } from '../extraction/ingest.js';
+import { resolveSource } from '../lib/fetchSource.js';
 
 const BATCH_SELECT = { select: { id: true, name: true } } as const;
 
@@ -39,6 +40,28 @@ export async function invoiceRoutes(app: FastifyInstance) {
       if (part.type !== 'file') continue;
       const buf = await part.toBuffer();
       await ingestPdf(buf, part.filename, batch.id, acc);
+    }
+    const finalBatch = await finalizeBatch(batch.id, acc.created.length);
+    reply.code(201);
+    return { ...acc, batchId: finalBatch?.id ?? null, batch: finalBatch };
+  });
+
+  app.post('/api/invoices/import', async (req, reply) => {
+    const { sources, batchName } = (req.body ?? {}) as { sources?: unknown; batchName?: string };
+    if (!Array.isArray(sources) || sources.length === 0 || !sources.every((s) => typeof s === 'string')) {
+      return reply.code(400).send({ error: 'sources must be a non-empty string array' });
+    }
+    await mkdir(env.uploadDir, { recursive: true });
+    const acc: IngestAcc = { created: [], duplicates: [], rejected: [] };
+    const defaultName = 'Import ' + new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    const batch = await prisma.batch.create({ data: { name: batchName?.trim() || defaultName } });
+    for (const source of sources as string[]) {
+      try {
+        const { buf, fileName } = await resolveSource(source);
+        await ingestPdf(buf, fileName, batch.id, acc, source);
+      } catch (e) {
+        acc.rejected.push({ fileName: source, reason: e instanceof Error ? e.message : 'failed' });
+      }
     }
     const finalBatch = await finalizeBatch(batch.id, acc.created.length);
     reply.code(201);
