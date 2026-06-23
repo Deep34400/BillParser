@@ -9,6 +9,8 @@ import { runExtraction } from '../extraction/run.js';
 import { requestCancel } from '../extraction/cancel.js';
 import { splitCost } from '../extraction/confidence.js';
 
+const BATCH_SELECT = { select: { id: true, name: true } } as const;
+
 export function buildWhere(q: Record<string, string>) {
   const where: any = {};
   if (q.status) where.status = q.status;
@@ -66,7 +68,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
         _count: { select: { lineItems: true } },
         // newest run carries the cost of the current extraction (ollama/local = 0)
         runs: { orderBy: { createdAt: 'desc' }, take: 1, select: { costEstimate: true, pageCount: true, provider: true } },
-        batch: { select: { id: true, name: true } },
+        batch: BATCH_SELECT,
       },
     });
     return { invoices: invoices.map((i: any) => {
@@ -80,7 +82,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.get('/api/invoices/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const inv = await prisma.invoice.findUnique({ where: { id },
-      include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } }, batch: { select: { id: true, name: true } } } });
+      include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } }, batch: BATCH_SELECT } });
     if (!inv) return reply.code(404).send({ error: 'not found' });
     // Expose the extraction/structuring cost split for the active (or latest) run.
     const active = inv.runs.find((r) => r.id === inv.activeRunId) ?? inv.runs[0];
@@ -130,7 +132,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
           quantity: li.quantity ?? null, unitPrice: li.unitPrice ?? null, amount: li.amount ?? null, taxRate: li.taxRate ?? null })) });
       }
     });
-    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } } } });
+    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } }, batch: BATCH_SELECT } });
   });
 
   app.post('/api/invoices/:id/apply-run', async (req, reply) => {
@@ -150,7 +152,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
       await tx.invoice.update({ where: { id }, data: { ...fields, provider: run.provider, confidence: run.confidence,
         status: 'COMPLETED', activeRunId: run.id, rawText: run.rawText, rawJson: run.rawJson as any } });
     });
-    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } } } });
+    return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } }, batch: BATCH_SELECT } });
   });
 
   app.delete('/api/invoices/:id', async (req) => {

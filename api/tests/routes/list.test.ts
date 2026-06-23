@@ -27,6 +27,7 @@ it('filters invoices by batchId and includes the batch name', async () => {
   const filtered = (await app.inject({ url: `/api/invoices?batchId=${b.id}` })).json().invoices;
   expect(filtered).toHaveLength(1);
   expect(filtered[0].batch).toMatchObject({ id: b.id, name: 'April bills' });
+  expect((all as any[]).find((i) => i.fileHash === 'qb')!.batch).toBeNull();
   await app.close();
 });
 it('detail returns line items + run summaries', async () => {
