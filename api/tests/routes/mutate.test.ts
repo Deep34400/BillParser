@@ -47,14 +47,18 @@ it('patch persists GST breakdown fields and per-line HSN/SAC', async () => {
   const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'hgst' } });
   const res = await app.inject({ method: 'PATCH', url: `/api/invoices/${inv.id}`, payload: {
     subtotal: 2666, discountAmount: 266.6, cgstAmount: 215.95, sgstAmount: 215.95, totalAmount: 2831.3, netAmount: 3997,
-    lineItems: [{ lineNumber: 1, description: 'Gasket', hsnSac: '8409', amount: 9.32 }] } });
+    lineItems: [
+      { lineNumber: 1, description: 'Gasket', hsnSac: '8409', amount: 9.32 },
+      { lineNumber: 2, description: 'OUT SIDE LABOUR', hsnSac: '998729', labourAmount: 550 },
+    ] } });
   expect(res.statusCode).toBe(200);
-  const got = await prisma.invoice.findUnique({ where: { id: inv.id }, include: { lineItems: true } });
+  const got = await prisma.invoice.findUnique({ where: { id: inv.id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } } } });
   expect(got!.discountAmount).toBe(266.6);
   expect(got!.cgstAmount).toBe(215.95);
   expect(got!.sgstAmount).toBe(215.95);
   expect(got!.netAmount).toBe(3997);
   expect(got!.lineItems[0].hsnSac).toBe('8409');
+  expect(got!.lineItems[1].labourAmount).toBe(550);
   await app.close();
 });
 it('apply-run copies a run snapshot onto the invoice', async () => {

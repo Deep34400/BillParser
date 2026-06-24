@@ -1,6 +1,6 @@
 export interface CanonicalLineItem {
   lineNumber: number; description?: string; sku?: string; hsnSac?: string;
-  quantity?: number; unitPrice?: number; amount?: number; taxRate?: number;
+  quantity?: number; unitPrice?: number; amount?: number; labourAmount?: number; taxRate?: number;
 }
 export interface CanonicalResult {
   vendorName?: string; vendorAddress?: string; vendorTaxId?: string;

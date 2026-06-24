@@ -1,5 +1,5 @@
 export type InvoiceStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
-export interface LineItem { id?: string; lineNumber: number; description?: string | null; sku?: string | null; hsnSac?: string | null; quantity?: number | null; unitPrice?: number | null; amount?: number | null; taxRate?: number | null; }
+export interface LineItem { id?: string; lineNumber: number; description?: string | null; sku?: string | null; hsnSac?: string | null; quantity?: number | null; unitPrice?: number | null; amount?: number | null; labourAmount?: number | null; taxRate?: number | null; }
 export interface ExtractionRun { id: string; provider: string; structuringModel?: string | null; status: string; confidence?: number | null; costEstimate?: number | null; latencyMs?: number | null; pageCount?: number | null; itemsSnapshot?: LineItem[] | null; fieldsSnapshot?: Record<string, unknown> | null; error?: string | null; createdAt: string; }
 export interface Invoice {
   id: string; fileName: string; status: InvoiceStatus; provider?: string | null; confidence?: number | null; error?: string | null;

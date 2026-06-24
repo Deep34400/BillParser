@@ -75,6 +75,7 @@ model LineItem {
   quantity    Float?
   unitPrice   Float?
   amount      Float?
+  labourAmount Float?
   taxRate     Float?
 
   @@index([invoiceId])

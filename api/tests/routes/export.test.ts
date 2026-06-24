@@ -18,10 +18,12 @@ it('exports header csv with content-type and rows', async () => {
 it('exports line items csv with HSN/SAC', async () => {
   const app = await buildApp();
   const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'h2', vendorName: 'Acme' } });
-  await prisma.lineItem.create({ data: { invoiceId: inv.id, lineNumber: 1, description: 'Widget', hsnSac: '8409', amount: 5 } });
+  await prisma.lineItem.create({ data: { invoiceId: inv.id, lineNumber: 1, description: 'Widget', hsnSac: '8409', amount: 5, labourAmount: 550 } });
   const res = await app.inject({ url: '/api/invoices/export/line-items.csv' });
   expect(res.body).toContain('Widget');
   expect(res.body).toContain('hsnSac');
   expect(res.body).toContain('8409');
+  expect(res.body).toContain('labourAmount');
+  expect(res.body).toContain('550');
   await app.close();
 });

@@ -23,6 +23,7 @@ interface EditLineItem {
   quantity: string;
   unitPrice: string;
   amount: string;
+  labourAmount: string;
   taxRate: string;
 }
 
@@ -36,12 +37,13 @@ function toEditItems(items: LineItem[]): EditLineItem[] {
     quantity: it.quantity != null ? String(it.quantity) : '',
     unitPrice: it.unitPrice != null ? String(it.unitPrice) : '',
     amount: it.amount != null ? String(it.amount) : '',
+    labourAmount: it.labourAmount != null ? String(it.labourAmount) : '',
     taxRate: it.taxRate != null ? String(it.taxRate) : '',
   }));
 }
 
 function blankEditItem(lineNumber: number): EditLineItem {
-  return { lineNumber, description: '', sku: '', hsnSac: '', quantity: '', unitPrice: '', amount: '', taxRate: '' };
+  return { lineNumber, description: '', sku: '', hsnSac: '', quantity: '', unitPrice: '', amount: '', labourAmount: '', taxRate: '' };
 }
 
 function parseNum(s: string): number | null {
@@ -231,6 +233,7 @@ export function InvoiceDetailPage() {
         quantity: parseNum(it.quantity),
         unitPrice: parseNum(it.unitPrice),
         amount: parseNum(it.amount),
+        labourAmount: parseNum(it.labourAmount),
         taxRate: parseNum(it.taxRate),
       })),
     };
@@ -697,13 +700,14 @@ function LineItemTable({ items, currency, inv }: { items: LineItem[]; currency: 
             <th style={{ ...thS, textAlign: 'right' }}>Qty</th>
             <th style={{ ...thS, textAlign: 'right' }}>Unit price</th>
             <th style={{ ...thS, textAlign: 'right' }}>Amount</th>
+            <th style={{ ...thS, textAlign: 'right' }}>Labour</th>
             <th style={{ ...thS, textAlign: 'right' }}>Tax rate</th>
           </tr>
         </thead>
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={7} style={{ ...tdS, textAlign: 'center', color: T.muted }}>No line items</td>
+              <td colSpan={8} style={{ ...tdS, textAlign: 'center', color: T.muted }}>No line items</td>
             </tr>
           ) : (
             items.map((it, i) => (
@@ -713,7 +717,8 @@ function LineItemTable({ items, currency, inv }: { items: LineItem[]; currency: 
                 <td style={{ ...tdS, color: T.muted, fontFamily: T.mono }}>{it.hsnSac ?? '—'}</td>
                 <td style={numS}>{it.quantity ?? '—'}</td>
                 <td style={numS}>{money(it.unitPrice, currency)}</td>
-                <td style={numS}>{money(it.amount, currency)}</td>
+                <td style={numS}>{it.amount != null ? money(it.amount, currency) : '—'}</td>
+                <td style={numS}>{it.labourAmount != null ? money(it.labourAmount, currency) : '—'}</td>
                 <td style={numS}>{it.taxRate != null ? `${it.taxRate}%` : '—'}</td>
               </tr>
             ))
@@ -888,7 +893,7 @@ function EditForm(props: EditFormProps) {
               key={idx}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '2fr 1fr 1fr 80px 100px 100px 80px 40px',
+                gridTemplateColumns: '2fr 1fr 1fr 80px 100px 100px 100px 80px 40px',
                 gap: 8,
                 alignItems: 'center',
                 padding: '10px 12px',
@@ -935,6 +940,13 @@ function EditForm(props: EditFormProps) {
                 placeholder="Amount"
                 value={it.amount}
                 onChange={(e) => updateEditItem(idx, 'amount', e.target.value)}
+              />
+              <input
+                type="number"
+                style={inputStyle}
+                placeholder="Labour"
+                value={it.labourAmount}
+                onChange={(e) => updateEditItem(idx, 'labourAmount', e.target.value)}
               />
               <input
                 type="number"

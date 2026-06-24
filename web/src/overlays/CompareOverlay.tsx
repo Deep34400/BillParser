@@ -167,7 +167,7 @@ export function CompareOverlay({ invoice, onClose }: { invoice: Invoice; onClose
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                      {['Description', 'HSN/SAC', 'Qty', 'Unit', 'Amount'].map((h) => (
+                      {['Description', 'HSN/SAC', 'Qty', 'Unit', 'Amount', 'Labour'].map((h) => (
                         <th
                           key={h}
                           style={{
@@ -195,7 +195,10 @@ export function CompareOverlay({ invoice, onClose }: { invoice: Invoice; onClose
                           {money(it.unitPrice, currency)}
                         </td>
                         <td style={{ padding: '7px 0', textAlign: 'right', fontWeight: 600, color: T.text, fontFamily: T.mono }}>
-                          {money(it.amount, currency)}
+                          {it.amount != null ? money(it.amount, currency) : '—'}
+                        </td>
+                        <td style={{ padding: '7px 0', textAlign: 'right', fontWeight: 600, color: T.text, fontFamily: T.mono }}>
+                          {it.labourAmount != null ? money(it.labourAmount, currency) : '—'}
                         </td>
                       </tr>
                     ))}
