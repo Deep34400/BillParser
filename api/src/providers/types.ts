@@ -1,5 +1,5 @@
 export interface CanonicalLineItem {
-  lineNumber: number; description?: string; sku?: string;
+  lineNumber: number; description?: string; sku?: string; hsnSac?: string;
   quantity?: number; unitPrice?: number; amount?: number; taxRate?: number;
 }
 export interface CanonicalResult {
@@ -7,6 +7,8 @@ export interface CanonicalResult {
   invoiceNumber?: string; poNumber?: string;
   invoiceDate?: string; dueDate?: string;            // ISO yyyy-mm-dd
   currency?: string; subtotal?: number; taxAmount?: number; totalAmount?: number; paymentTerms?: string;
+  // GST breakdown (Indian invoices). SGST and IGST are mutually exclusive.
+  discountAmount?: number; cgstAmount?: number; sgstAmount?: number; igstAmount?: number; netAmount?: number;
   lineItems: CanonicalLineItem[];
   confidence?: number; rawText: string; rawJson: unknown;
   costEstimate?: number; latencyMs?: number; pageCount?: number;

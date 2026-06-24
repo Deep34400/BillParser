@@ -189,7 +189,7 @@ export function InvoicesPage() {
     // Apply advanced filters client-side
     if (minTotal) {
       const min = parseFloat(minTotal);
-      if (!isNaN(min)) rows = rows.filter((inv) => (inv.totalAmount ?? 0) >= min);
+      if (!isNaN(min)) rows = rows.filter((inv) => ((inv.netAmount ?? inv.totalAmount) ?? 0) >= min);
     }
     if (dateFrom) {
       rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate >= dateFrom);
@@ -220,8 +220,8 @@ export function InvoicesPage() {
           bv = b.confidence ?? -1;
           break;
         case 'totalAmount':
-          av = a.totalAmount ?? 0;
-          bv = b.totalAmount ?? 0;
+          av = (a.netAmount ?? a.totalAmount) ?? 0;
+          bv = (b.netAmount ?? b.totalAmount) ?? 0;
           break;
       }
       if (av === null || av === undefined) av = '';
@@ -1114,9 +1114,9 @@ export function InvoicesPage() {
                       {row.itemCount ?? '—'}
                     </td>
 
-                    {/* Total */}
+                    {/* Total — prefer the final Net Bill Amount when present */}
                     <td style={{ ...tdBase, textAlign: 'right', fontWeight: 600, color: T.text }}>
-                      {money(row.totalAmount, row.currency ?? 'USD')}
+                      {money(row.netAmount ?? row.totalAmount, row.currency ?? 'USD')}
                     </td>
 
                     {/* Cost (total; hover for the extraction/structuring split) */}

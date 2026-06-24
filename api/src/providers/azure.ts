@@ -34,6 +34,8 @@ export function mapAzure(json: any): Omit<CanonicalResult, 'rawText' | 'rawJson'
     invoiceDate: dateStr(f.InvoiceDate), dueDate: dateStr(f.DueDate),
     currency: f.InvoiceTotal?.valueCurrency?.currencyCode ?? str(f.Currency),
     subtotal: num(f.SubTotal), taxAmount: num(f.TotalTax), totalAmount: num(f.InvoiceTotal),
+    // Azure DI exposes a discount and amount-due, but not the CGST/SGST/IGST split or HSN codes.
+    discountAmount: num(f.TotalDiscount), netAmount: num(f.AmountDue) ?? num(f.InvoiceTotal),
     paymentTerms: str(f.PaymentTerm),
     confidence: confs.length ? confs.reduce((a: number, b: number) => a + b, 0) / confs.length : undefined,
     lineItems: items,

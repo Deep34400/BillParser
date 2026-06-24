@@ -40,6 +40,8 @@ function headerData(r: CanonicalResult) {
     invoiceDate: toDate(r.invoiceDate), dueDate: toDate(r.dueDate),
     currency: r.currency ?? null, subtotal: r.subtotal ?? null, taxAmount: r.taxAmount ?? null,
     totalAmount: r.totalAmount ?? null, paymentTerms: r.paymentTerms ?? null,
+    discountAmount: r.discountAmount ?? null, cgstAmount: r.cgstAmount ?? null, sgstAmount: r.sgstAmount ?? null,
+    igstAmount: r.igstAmount ?? null, netAmount: r.netAmount ?? null,
     rawText: r.rawText ?? null, rawJson: (r.rawJson ?? null) as any,
   };
 }

@@ -1,6 +1,7 @@
 import type { Invoice } from '../types.js';
 import { T } from '../theme.js';
 import { money, dateFmt, confLabel } from '../format.js';
+import { SummaryBreakdown } from '../components/SummaryBreakdown.js';
 
 // ---------------------------------------------------------------------------
 // CompareOverlay — Source ⇄ extraction
@@ -166,12 +167,12 @@ export function CompareOverlay({ invoice, onClose }: { invoice: Invoice; onClose
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                      {['Description', 'Qty', 'Unit', 'Amount'].map((h) => (
+                      {['Description', 'HSN/SAC', 'Qty', 'Unit', 'Amount'].map((h) => (
                         <th
                           key={h}
                           style={{
                             padding: '6px 6px 6px 0',
-                            textAlign: h === 'Description' ? 'left' : 'right',
+                            textAlign: h === 'Description' || h === 'HSN/SAC' ? 'left' : 'right',
                             fontSize: 10,
                             fontWeight: 700,
                             color: T.muted,
@@ -188,6 +189,7 @@ export function CompareOverlay({ invoice, onClose }: { invoice: Invoice; onClose
                     {invoice.lineItems.map((it, i) => (
                       <tr key={it.id ?? i} style={{ borderBottom: `1px solid ${T.border}` }}>
                         <td style={{ padding: '7px 6px 7px 0', color: T.text }}>{it.description ?? '—'}</td>
+                        <td style={{ padding: '7px 6px 7px 0', color: T.muted, fontFamily: T.mono }}>{it.hsnSac ?? '—'}</td>
                         <td style={{ padding: '7px 0', textAlign: 'right', color: T.muted }}>{it.quantity ?? '—'}</td>
                         <td style={{ padding: '7px 0', textAlign: 'right', color: T.muted, fontFamily: T.mono }}>
                           {money(it.unitPrice, currency)}
@@ -205,26 +207,9 @@ export function CompareOverlay({ invoice, onClose }: { invoice: Invoice; onClose
                 </div>
               )}
 
-              {/* Subtotal/Tax/Total summary */}
+              {/* GST breakdown summary */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                <div style={{ fontSize: 12, color: T.muted }}>
-                  Subtotal:{' '}
-                  <span style={{ fontWeight: 600, color: T.text, fontFamily: T.mono }}>
-                    {money(invoice.subtotal, currency)}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: T.muted }}>
-                  Tax:{' '}
-                  <span style={{ fontWeight: 600, color: T.text, fontFamily: T.mono }}>
-                    {money(invoice.taxAmount, currency)}
-                  </span>
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>
-                  Total:{' '}
-                  <span style={{ fontFamily: T.mono }}>
-                    {money(invoice.totalAmount, currency)}
-                  </span>
-                </div>
+                <SummaryBreakdown inv={invoice} currency={currency} />
               </div>
             </div>
           </div>

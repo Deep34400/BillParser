@@ -33,9 +33,11 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
     invoiceDate: toStr(o.invoiceDate), dueDate: toStr(o.dueDate),
     currency: toStr(o.currency), subtotal: toNum(o.subtotal), taxAmount: toNum(o.taxAmount),
     totalAmount: toNum(o.totalAmount), paymentTerms: toStr(o.paymentTerms),
+    discountAmount: toNum(o.discountAmount), cgstAmount: toNum(o.cgstAmount), sgstAmount: toNum(o.sgstAmount),
+    igstAmount: toNum(o.igstAmount), netAmount: toNum(o.netAmount),
     confidence: toNum(o.confidence),
     lineItems: items.map((it: any, i: number) => ({
-      lineNumber: i + 1, description: toStr(it.description), sku: toStr(it.sku),
+      lineNumber: i + 1, description: toStr(it.description), sku: toStr(it.sku), hsnSac: toStr(it.hsnSac),
       quantity: toNum(it.quantity), unitPrice: toNum(it.unitPrice), amount: toNum(it.amount), taxRate: toNum(it.taxRate),
     })),
   };
