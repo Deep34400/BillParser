@@ -42,6 +42,7 @@ function headerData(r: CanonicalResult) {
     totalAmount: r.totalAmount ?? null, paymentTerms: r.paymentTerms ?? null,
     discountAmount: r.discountAmount ?? null, cgstAmount: r.cgstAmount ?? null, sgstAmount: r.sgstAmount ?? null,
     igstAmount: r.igstAmount ?? null, netAmount: r.netAmount ?? null,
+    summaryColumns: (r.summaryColumns ?? null) as any,
     rawText: r.rawText ?? null, rawJson: (r.rawJson ?? null) as any,
   };
 }

@@ -61,6 +61,19 @@ it('patch persists GST breakdown fields and per-line HSN/SAC', async () => {
   expect(got!.lineItems[1].labourAmount).toBe(550);
   await app.close();
 });
+it('patch persists the columnwise summary JSON', async () => {
+  const app = await buildApp();
+  const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'hcols' } });
+  const summaryColumns = [
+    { label: 'Parts', subtotal: 70766.7, discount: 7076.72, igst: 11464.19, total: 75154.17 },
+    { label: 'Labour', subtotal: 30450, discount: 10950, igst: 3510, total: 23010 },
+  ];
+  const res = await app.inject({ method: 'PATCH', url: `/api/invoices/${inv.id}`, payload: { netAmount: 98164, summaryColumns } });
+  expect(res.statusCode).toBe(200);
+  const got = await prisma.invoice.findUnique({ where: { id: inv.id } });
+  expect(got!.summaryColumns).toEqual(summaryColumns);
+  await app.close();
+});
 it('apply-run copies a run snapshot onto the invoice', async () => {
   const app = await buildApp();
   const inv = await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'hc' } });

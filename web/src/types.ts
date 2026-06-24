@@ -1,4 +1,5 @@
 export type InvoiceStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export interface SummaryColumn { label?: string | null; subtotal?: number | null; discount?: number | null; cgst?: number | null; sgst?: number | null; igst?: number | null; total?: number | null; }
 export interface LineItem { id?: string; lineNumber: number; description?: string | null; sku?: string | null; hsnSac?: string | null; quantity?: number | null; unitPrice?: number | null; amount?: number | null; labourAmount?: number | null; taxRate?: number | null; }
 export interface ExtractionRun { id: string; provider: string; structuringModel?: string | null; status: string; confidence?: number | null; costEstimate?: number | null; latencyMs?: number | null; pageCount?: number | null; itemsSnapshot?: LineItem[] | null; fieldsSnapshot?: Record<string, unknown> | null; error?: string | null; createdAt: string; }
 export interface Invoice {
@@ -7,6 +8,7 @@ export interface Invoice {
   invoiceNumber?: string | null; poNumber?: string | null; invoiceDate?: string | null; dueDate?: string | null;
   currency?: string | null; subtotal?: number | null; taxAmount?: number | null; totalAmount?: number | null; paymentTerms?: string | null;
   discountAmount?: number | null; cgstAmount?: number | null; sgstAmount?: number | null; igstAmount?: number | null; netAmount?: number | null;
+  summaryColumns?: SummaryColumn[] | null;
   rawText?: string | null; verified: boolean; editedAt?: string | null; activeRunId?: string | null;
   batchId?: string | null; batch?: { id: string; name: string } | null;
   itemCount?: number; costEstimate?: number | null;

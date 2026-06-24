@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import type { Invoice, AppConfig, LineItem } from '../types.js';
+import type { Invoice, AppConfig, LineItem, SummaryColumn } from '../types.js';
 import { T } from '../theme.js';
 import { money, dateFmt, confLabel, costFmt } from '../format.js';
 import { StatusDot } from '../components/StatusDot.js';
@@ -10,6 +10,7 @@ import { usePolling } from '../hooks/usePolling.js';
 import { CompareOverlay } from '../overlays/CompareOverlay.js';
 import { BakeoffOverlay } from '../overlays/BakeoffOverlay.js';
 import { SummaryBreakdown } from '../components/SummaryBreakdown.js';
+import { SummaryColumns } from '../components/SummaryColumns.js';
 
 // ---------------------------------------------------------------------------
 // Editable line item shape
@@ -44,6 +45,25 @@ function toEditItems(items: LineItem[]): EditLineItem[] {
 
 function blankEditItem(lineNumber: number): EditLineItem {
   return { lineNumber, description: '', sku: '', hsnSac: '', quantity: '', unitPrice: '', amount: '', labourAmount: '', taxRate: '' };
+}
+
+// ---------------------------------------------------------------------------
+// Editable summary column shape
+// ---------------------------------------------------------------------------
+interface EditSummaryColumn {
+  label: string; subtotal: string; discount: string; cgst: string; sgst: string; igst: string; total: string;
+}
+
+function toEditCols(cols: SummaryColumn[]): EditSummaryColumn[] {
+  const s = (n?: number | null) => (n != null ? String(n) : '');
+  return cols.map((c) => ({
+    label: c.label ?? '', subtotal: s(c.subtotal), discount: s(c.discount),
+    cgst: s(c.cgst), sgst: s(c.sgst), igst: s(c.igst), total: s(c.total),
+  }));
+}
+
+function blankSummaryCol(): EditSummaryColumn {
+  return { label: '', subtotal: '', discount: '', cgst: '', sgst: '', igst: '', total: '' };
 }
 
 function parseNum(s: string): number | null {
@@ -120,6 +140,7 @@ export function InvoiceDetailPage() {
   const [editTotalAmount, setEditTotalAmount] = useState('');
   const [editNetAmount, setEditNetAmount] = useState('');
   const [editItems, setEditItems] = useState<EditLineItem[]>([]);
+  const [editSummaryColumns, setEditSummaryColumns] = useState<EditSummaryColumn[]>([]);
 
   // Raw OCR toggle (bottom section, non-split view)
   const [showRaw, setShowRaw] = useState(false);
@@ -197,6 +218,7 @@ export function InvoiceDetailPage() {
     setEditTotalAmount(inv.totalAmount != null ? String(inv.totalAmount) : '');
     setEditNetAmount(inv.netAmount != null ? String(inv.netAmount) : '');
     setEditItems(toEditItems(inv.lineItems ?? []));
+    setEditSummaryColumns(toEditCols(inv.summaryColumns ?? []));
     setEditMode(true);
   }
 
@@ -206,7 +228,15 @@ export function InvoiceDetailPage() {
 
   async function saveEdit() {
     if (!id) return;
+    const cols = editSummaryColumns
+      .map((c) => ({
+        label: c.label || null,
+        subtotal: parseNum(c.subtotal), discount: parseNum(c.discount),
+        cgst: parseNum(c.cgst), sgst: parseNum(c.sgst), igst: parseNum(c.igst), total: parseNum(c.total),
+      }))
+      .filter((c) => [c.subtotal, c.discount, c.cgst, c.sgst, c.igst, c.total].some((v) => v != null) || c.label);
     const body = {
+      summaryColumns: cols.length ? cols : null,
       vendorName: editVendorName || null,
       vendorAddress: editVendorAddress || null,
       vendorTaxId: editVendorTaxId || null,
@@ -282,6 +312,16 @@ export function InvoiceDetailPage() {
 
   function addEditItem() {
     setEditItems((prev) => [...prev, blankEditItem(prev.length + 1)]);
+  }
+
+  function updateSummaryCol(idx: number, field: keyof EditSummaryColumn, value: string) {
+    setEditSummaryColumns((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c)));
+  }
+  function removeSummaryCol(idx: number) {
+    setEditSummaryColumns((prev) => prev.filter((_, i) => i !== idx));
+  }
+  function addSummaryCol() {
+    setEditSummaryColumns((prev) => [...prev, blankSummaryCol()]);
   }
 
   // ---------------------------------------------------------------------------
@@ -504,6 +544,7 @@ export function InvoiceDetailPage() {
       <div style={{ padding: '16px 30px 40px' }}>
         {editMode ? (
           /* Edit mode form */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <EditForm
             editVendorName={editVendorName} setEditVendorName={setEditVendorName}
             editVendorAddress={editVendorAddress} setEditVendorAddress={setEditVendorAddress}
@@ -527,6 +568,13 @@ export function InvoiceDetailPage() {
             removeEditItem={removeEditItem}
             addEditItem={addEditItem}
           />
+          <SummaryColumnsEditor
+            columns={editSummaryColumns}
+            updateCol={updateSummaryCol}
+            removeCol={removeSummaryCol}
+            addCol={addSummaryCol}
+          />
+          </div>
         ) : pdfOpen ? (
           /* Side-by-side: PDF | parsed output */
           <PdfSplit
@@ -725,9 +773,11 @@ function LineItemTable({ items, currency, inv }: { items: LineItem[]; currency: 
           )}
         </tbody>
       </table>
-      {/* Summary row — full GST breakdown */}
+      {/* Summary row — columnwise (Parts/Labour) when present, else stacked GST breakdown */}
       <div style={{ borderTop: `2px solid ${T.border}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-        <SummaryBreakdown inv={inv} currency={currency} />
+        {inv.summaryColumns && inv.summaryColumns.length > 0
+          ? <SummaryColumns inv={inv} currency={currency} />
+          : <SummaryBreakdown inv={inv} currency={currency} />}
       </div>
     </div>
   );
@@ -992,6 +1042,88 @@ function EditForm(props: EditFormProps) {
             + Add line
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SummaryColumnsEditor — edit the columnwise totals (Parts/Labour/…)
+// ---------------------------------------------------------------------------
+function SummaryColumnsEditor({
+  columns,
+  updateCol,
+  removeCol,
+  addCol,
+}: {
+  columns: EditSummaryColumn[];
+  updateCol: (idx: number, field: keyof EditSummaryColumn, value: string) => void;
+  removeCol: (idx: number) => void;
+  addCol: () => void;
+}) {
+  const fields: { key: keyof EditSummaryColumn; label: string; type: string }[] = [
+    { key: 'label', label: 'Label', type: 'text' },
+    { key: 'subtotal', label: 'Sub total', type: 'number' },
+    { key: 'discount', label: 'Discount', type: 'number' },
+    { key: 'cgst', label: 'CGST', type: 'number' },
+    { key: 'sgst', label: 'SGST', type: 'number' },
+    { key: 'igst', label: 'IGST', type: 'number' },
+    { key: 'total', label: 'Sub total (incl. tax)', type: 'number' },
+  ];
+  return (
+    <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{
+        padding: '10px 16px', borderBottom: `1px solid ${T.border}`, fontSize: 11, fontWeight: 700,
+        color: T.muted, letterSpacing: '0.06em', textTransform: 'uppercase', background: T.rail,
+      }}>
+        Summary columns (Parts / Labour / …)
+      </div>
+      <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {columns.length === 0 && (
+          <div style={{ fontSize: 13, color: T.muted, fontStyle: 'italic' }}>
+            No columnwise summary. Add a column to split totals (e.g. Parts, Labour).
+          </div>
+        )}
+        {columns.map((c, idx) => (
+          <div
+            key={idx}
+            style={{
+              display: 'grid', gridTemplateColumns: '1.2fr repeat(6, 1fr) 40px', gap: 8, alignItems: 'center',
+              padding: '10px 12px', background: T.rail, borderRadius: 7, border: `1px solid ${T.border}`,
+            }}
+          >
+            {fields.map((f) => (
+              <input
+                key={f.key}
+                type={f.type}
+                step={f.type === 'number' ? '0.01' : undefined}
+                style={inputStyle}
+                placeholder={f.label}
+                value={c[f.key]}
+                onChange={(e) => updateCol(idx, f.key, e.target.value)}
+              />
+            ))}
+            <button
+              onClick={() => removeCol(idx)}
+              style={{
+                background: 'none', border: `1px solid ${T.border}`, borderRadius: 6, color: T.red,
+                fontSize: 16, cursor: 'pointer', padding: '4px 8px', lineHeight: 1, fontFamily: T.font,
+              }}
+              title="Remove column"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={addCol}
+          style={{
+            alignSelf: 'flex-start', padding: '7px 16px', border: `1px dashed ${T.border}`, borderRadius: 7,
+            background: 'none', color: T.accent, fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: T.font,
+          }}
+        >
+          + Add column
+        </button>
       </div>
     </div>
   );

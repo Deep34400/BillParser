@@ -52,6 +52,28 @@ it('recovers an HSN/SAC code mis-mapped into taxRate', () => {
   expect(r.lineItems[2].hsnSac).toBe('998729');
   expect(r.lineItems[2].taxRate).toBeUndefined();
 });
+it('parses columnwise summary and corrects each column total', () => {
+  const json = JSON.stringify({
+    subtotal: 101216.70, discountAmount: 18026.72, igstAmount: 14974.19, taxAmount: 14974.19,
+    totalAmount: 116190.89, netAmount: 98164,
+    summaryColumns: [
+      // Parts column: total given as subtotal + tax (discount forgotten) -> corrected
+      { label: 'Parts', subtotal: 70766.70, discount: 7076.72, igst: 11464.19, total: 82230.89 },
+      // Labour column already correct
+      { label: 'Labour', subtotal: 30450, discount: 10950, igst: 3510, total: 23010 },
+    ],
+    lineItems: [],
+  });
+  const r = normalizeStructured(json);
+  expect(r.summaryColumns).toHaveLength(2);
+  expect(r.summaryColumns![0]).toMatchObject({ label: 'Parts', subtotal: 70766.70, total: 75154.17 });
+  expect(r.summaryColumns![1]).toMatchObject({ label: 'Labour', total: 23010 });
+  expect(r.netAmount).toBe(98164);
+});
+it('omits summaryColumns when none are given', () => {
+  const r = normalizeStructured(JSON.stringify({ subtotal: 100, totalAmount: 100, lineItems: [] }));
+  expect(r.summaryColumns).toBeUndefined();
+});
 it('subtracts a forgotten discount from the tax-inclusive sub total', () => {
   // Model read every amount but its totalAmount = subtotal + tax (discount not subtracted).
   const json = JSON.stringify({
