@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { mkdir } from 'node:fs/promises';
+import { createReadStream, existsSync } from 'node:fs';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { runExtraction } from '../extraction/run.js';
@@ -100,6 +101,18 @@ export async function invoiceRoutes(app: FastifyInstance) {
     const active = inv.runs.find((r) => r.id === inv.activeRunId) ?? inv.runs[0];
     const split = splitCost(active?.provider, active?.pageCount, active?.costEstimate);
     return { ...inv, costEstimate: active?.costEstimate ?? null, ...split };
+  });
+
+  // Stream the original uploaded PDF for in-browser viewing / side-by-side compare.
+  app.get('/api/invoices/:id/file', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const inv = await prisma.invoice.findUnique({ where: { id }, select: { storedPath: true, fileName: true } });
+    if (!inv) return reply.code(404).send({ error: 'not found' });
+    if (!existsSync(inv.storedPath)) return reply.code(404).send({ error: 'file not found' });
+    const safeName = (inv.fileName || 'invoice.pdf').replace(/"/g, '');
+    reply.header('Content-Type', 'application/pdf');
+    reply.header('Content-Disposition', `inline; filename="${safeName}"`);
+    return reply.send(createReadStream(inv.storedPath));
   });
 
   app.post('/api/invoices/bulk', async (req) => {
