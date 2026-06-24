@@ -22,7 +22,7 @@ export async function ingestPdf(buf: Buffer, fileName: string, batchId: string, 
   await writeFile(storedPath, buf);
   const inv = await prisma.invoice.create({ data: { fileName, storedPath, fileHash: hash, batchId } });
   acc.created.push(inv);
-  void runExtraction(inv.id);
+  void runExtraction(inv.id).catch((e) => console.error('[runExtraction]', e));
 }
 
 // Delete the batch when nothing was created; otherwise return the fresh batch row.
