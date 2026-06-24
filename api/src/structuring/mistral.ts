@@ -16,6 +16,6 @@ export const mistralStructModel = (model: string): StructuringModel => ({
     if (!res.ok) throw new Error(`Mistral structuring HTTP ${res.status}${await httpErrorBody(res)}`);
     const j: any = await res.json();
     const structuringCost = structuringTokenCost(model, j.usage?.prompt_tokens, j.usage?.completion_tokens);
-    return { ...normalizeStructured(j.choices?.[0]?.message?.content ?? '{}'), structuringCost };
+    return { ...normalizeStructured(j.choices?.[0]?.message?.content ?? '{}', markdown), structuringCost };
   },
 });
