@@ -23,6 +23,7 @@ async function resolveProvider(invoiceId: string): Promise<string> {
   return def;
 }
 import { deriveConfidence, estimateCost } from './confidence.js';
+import { enrichStructured } from '../structuring/index.js';
 import { pageCount } from '../lib/pdf.js';
 
 // Parse a date string safely — an unparseable date (e.g. "29.01.2026") must never
@@ -56,7 +57,13 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
     const file = await readFile(inv.storedPath);
     const pages = await pageCount(file);
     const structuring = { provider: await getSetting('structuring_provider', DEFAULTS.structuring_provider), model: await getSetting('structuring_model', DEFAULTS.structuring_model) };
-    const result = await provider.extract(file, creds, { fileName: inv.fileName, structuring, signal: controller.signal });
+    let result = await provider.extract(file, creds, { fileName: inv.fileName, structuring, signal: controller.signal });
+    // Structured providers (Azure/Textract) detect headers well but miss the GST breakdown,
+    // discount, summary columns and per-line HSN/labour. Enrich with a structuring pass over
+    // the OCR text so the bottom summary is complete. Markdown providers already structure.
+    if (provider.kind === 'structured') {
+      result = await enrichStructured(result);
+    }
     // A cancel that lands right as extraction finishes must not overwrite the FAILED/cancelled
     // status with COMPLETED — the cancel endpoint already set it.
     if (controller.signal.aborted) return;

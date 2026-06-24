@@ -155,3 +155,41 @@ export async function getStructuringModel(): Promise<{ model: StructuringModel; 
   if (!factory) throw new Error(`Unknown structuring provider: ${provider}`);
   return { model: factory(model), creds };
 }
+
+// Enrich a structured-provider result (Azure/Textract) with a structuring pass over the OCR
+// text. Structured providers detect headers well but miss the GST breakdown, discount, summary
+// columns, and per-line HSN/labour — fill those from the structuring model. Identity fields
+// keep the structured provider's values; GST/summary fields and line items come from
+// structuring. On any failure, returns the original result unchanged (extraction never breaks).
+type Structurer = (markdown: string) => Promise<Omit<CanonicalResult, 'rawText' | 'rawJson'>>;
+export async function enrichStructured(base: CanonicalResult, structurer?: Structurer): Promise<CanonicalResult> {
+  if (!base.rawText) return base;
+  try {
+    const run: Structurer = structurer ?? (async (md) => {
+      const { model, creds } = await getStructuringModel();
+      return model.structure(md, creds);
+    });
+    const s = await run(base.rawText);
+    const ident = <K extends keyof CanonicalResult>(k: K) => base[k] ?? (s as any)[k];
+    const gstField = <K extends keyof typeof s>(k: K) => (s[k] ?? (base as any)[k]);
+    return {
+      ...base,
+      // identity fields: structured provider wins
+      vendorName: ident('vendorName'), vendorAddress: ident('vendorAddress'), vendorTaxId: ident('vendorTaxId'),
+      invoiceNumber: ident('invoiceNumber'), poNumber: ident('poNumber'),
+      invoiceDate: ident('invoiceDate'), dueDate: ident('dueDate'),
+      currency: ident('currency'), paymentTerms: ident('paymentTerms'),
+      // GST/summary fields: structuring wins
+      subtotal: gstField('subtotal'), discountAmount: s.discountAmount,
+      cgstAmount: s.cgstAmount, sgstAmount: s.sgstAmount, igstAmount: s.igstAmount,
+      taxAmount: gstField('taxAmount'), totalAmount: gstField('totalAmount'), netAmount: gstField('netAmount'),
+      summaryColumns: s.summaryColumns,
+      // line items carry hsnSac/labourAmount only from structuring
+      lineItems: s.lineItems && s.lineItems.length ? s.lineItems : base.lineItems,
+      confidence: base.confidence ?? s.confidence,
+      structuringCost: s.structuringCost,
+    };
+  } catch {
+    return base;
+  }
+}
