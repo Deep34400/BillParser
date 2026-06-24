@@ -2,6 +2,7 @@ import type { Invoice } from '../types.js';
 import { T } from '../theme.js';
 import { money, dateFmt, confLabel } from '../format.js';
 import { SummaryBreakdown } from '../components/SummaryBreakdown.js';
+import { SummaryColumns } from '../components/SummaryColumns.js';
 
 // ---------------------------------------------------------------------------
 // CompareOverlay — Source ⇄ extraction
@@ -210,9 +211,11 @@ export function CompareOverlay({ invoice, onClose }: { invoice: Invoice; onClose
                 </div>
               )}
 
-              {/* GST breakdown summary */}
+              {/* GST breakdown summary — columnwise when present */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                <SummaryBreakdown inv={invoice} currency={currency} />
+                {invoice.summaryColumns && invoice.summaryColumns.length > 0
+                  ? <SummaryColumns inv={invoice} currency={currency} />
+                  : <SummaryBreakdown inv={invoice} currency={currency} />}
               </div>
             </div>
           </div>

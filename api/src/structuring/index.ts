@@ -14,6 +14,27 @@ const toNum = (v: unknown): number | undefined => {
 };
 const toStr = (v: unknown): string | undefined => (v === null || v === undefined || v === '' ? undefined : String(v));
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const approx = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.001);
+
+// Correct a forgotten discount. The model often reports the tax-inclusive total as
+// subtotal + tax, skipping the "less discount" line. When a discount exists and the given
+// total matches the un-discounted sum (or is missing), recompute as subtotal - discount + tax.
+// Only acts when a discount is present, so totals that legitimately differ from subtotal+tax
+// (shipping, other charges) are left untouched.
+function correctTotal(subtotal?: number, discount?: number, taxTotal?: number, total?: number): number | undefined {
+  if (subtotal == null || !discount) return total;
+  const t = taxTotal ?? 0;
+  const noDiscount = round2(subtotal + t);
+  if (total == null || approx(total, noDiscount)) return round2(subtotal - discount + t);
+  return total;
+}
+
+// Sum of GST components when any are present, else the single taxAmount figure.
+function taxTotalOf(cgst?: number, sgst?: number, igst?: number, taxAmount?: number): number | undefined {
+  return [cgst, sgst, igst].some((x) => x != null) ? (cgst ?? 0) + (sgst ?? 0) + (igst ?? 0) : taxAmount;
+}
+
 export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText' | 'rawJson'> {
   const start = raw.indexOf('{'); const end = raw.lastIndexOf('}');
   const json = start >= 0 && end >= 0 ? raw.slice(start, end + 1) : raw;
@@ -37,22 +58,30 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
   let totalAmount = toNum(o.totalAmount);
   let netAmount = toNum(o.netAmount);
 
-  // Correct a forgotten discount: the model often reports totalAmount/netAmount as
-  // subtotal + tax, skipping the "less discount" line. When a discount is present and the
-  // model's figure matches the un-discounted sum, replace it with subtotal - discount + tax.
-  // Only fires when a discount exists, so non-GST invoices (which may carry shipping/other
-  // charges that legitimately make total != subtotal + tax) are left untouched.
+  // Apply the forgotten-discount correction to the overall total, and to the rounded net bill.
+  const overallTax = taxTotalOf(cgstAmount, sgstAmount, igstAmount, taxAmount);
+  totalAmount = correctTotal(subtotal, discountAmount, overallTax, totalAmount);
   if (subtotal != null && discountAmount) {
-    const round2 = (n: number) => Math.round(n * 100) / 100;
-    const taxTotal = [cgstAmount, sgstAmount, igstAmount].some((x) => x != null)
-      ? (cgstAmount ?? 0) + (sgstAmount ?? 0) + (igstAmount ?? 0)
-      : (taxAmount ?? 0);
-    const noDiscount = round2(subtotal + taxTotal);
-    const withDiscount = round2(subtotal - discountAmount + taxTotal);
-    const approx = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.001);
-    if (totalAmount == null || approx(totalAmount, noDiscount)) totalAmount = withDiscount;
-    if (netAmount == null || approx(netAmount, noDiscount)) netAmount = Math.round(withDiscount);
+    const noDiscount = round2(subtotal + (overallTax ?? 0));
+    if (netAmount == null || approx(netAmount, noDiscount)) {
+      netAmount = Math.round(subtotal - discountAmount + (overallTax ?? 0));
+    }
   }
+
+  // Columnwise summary (Parts/Labour/…). Coerce each column, correct its discounted total,
+  // and drop columns with no amounts. The scalar fields above remain the overall totals.
+  const rawCols = Array.isArray(o.summaryColumns) ? o.summaryColumns : [];
+  const summaryColumns = rawCols
+    .map((c: any) => {
+      const subtotal = toNum(c.subtotal);
+      const discount = toNum(c.discount);
+      const cgst = toNum(c.cgst);
+      const sgst = toNum(c.sgst);
+      const igst = toNum(c.igst);
+      const total = correctTotal(subtotal, discount, taxTotalOf(cgst, sgst, igst), toNum(c.total));
+      return { label: toStr(c.label), subtotal, discount, cgst, sgst, igst, total };
+    })
+    .filter((c) => [c.subtotal, c.discount, c.cgst, c.sgst, c.igst, c.total].some((v) => v != null));
 
   return {
     vendorName: toStr(o.vendorName), vendorAddress: toStr(o.vendorAddress), vendorTaxId: toStr(o.vendorTaxId),
@@ -62,6 +91,7 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
     totalAmount, paymentTerms: toStr(o.paymentTerms),
     discountAmount, cgstAmount, sgstAmount,
     igstAmount, netAmount,
+    summaryColumns: summaryColumns.length ? summaryColumns : undefined,
     confidence: toNum(o.confidence),
     lineItems: items.map((it: any, i: number) => {
       let hsnSac = toStr(it.hsnSac);
