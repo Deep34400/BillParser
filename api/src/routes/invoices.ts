@@ -155,7 +155,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
         await tx.lineItem.createMany({ data: lineItems.map((li: any, i: number) => ({
           invoiceId: id, lineNumber: li.lineNumber ?? i + 1, description: li.description ?? null, sku: li.sku ?? null,
           hsnSac: li.hsnSac ?? null,
-          quantity: li.quantity ?? null, unitPrice: li.unitPrice ?? null, amount: li.amount ?? null, taxRate: li.taxRate ?? null })) });
+          quantity: li.quantity ?? null, unitPrice: li.unitPrice ?? null, amount: li.amount ?? null,
+          labourAmount: li.labourAmount ?? null, taxRate: li.taxRate ?? null })) });
       }
     });
     return prisma.invoice.findUnique({ where: { id }, include: { lineItems: { orderBy: { lineNumber: 'asc' } }, runs: { orderBy: { createdAt: 'desc' } }, batch: BATCH_SELECT } });
@@ -174,7 +175,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
       await tx.lineItem.deleteMany({ where: { invoiceId: id } });
       await tx.lineItem.createMany({ data: items.map((li, i) => ({ invoiceId: id, lineNumber: li.lineNumber ?? i + 1,
         description: li.description ?? null, sku: li.sku ?? null, hsnSac: li.hsnSac ?? null, quantity: li.quantity ?? null, unitPrice: li.unitPrice ?? null,
-        amount: li.amount ?? null, taxRate: li.taxRate ?? null })) });
+        amount: li.amount ?? null, labourAmount: li.labourAmount ?? null, taxRate: li.taxRate ?? null })) });
       await tx.invoice.update({ where: { id }, data: { ...fields, provider: run.provider, confidence: run.confidence,
         status: 'COMPLETED', activeRunId: run.id, rawText: run.rawText, rawJson: run.rawJson as any } });
     });

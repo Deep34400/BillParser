@@ -75,7 +75,8 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
       }
       return {
         lineNumber: i + 1, description: toStr(it.description), sku: toStr(it.sku), hsnSac,
-        quantity: toNum(it.quantity), unitPrice: toNum(it.unitPrice), amount: toNum(it.amount), taxRate,
+        quantity: toNum(it.quantity), unitPrice: toNum(it.unitPrice), amount: toNum(it.amount),
+        labourAmount: toNum(it.labourAmount), taxRate,
       };
     }),
   };

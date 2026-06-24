@@ -4,7 +4,7 @@ import { toCsv } from '../lib/csv.js';
 import { buildWhere } from './invoices.js';
 
 const HEADERS = ['id','status','vendorName','invoiceNumber','poNumber','invoiceDate','dueDate','currency','subtotal','discountAmount','cgstAmount','sgstAmount','igstAmount','taxAmount','totalAmount','netAmount','provider','confidence','fileName'];
-const ITEM_HEADERS = ['invoiceId','vendorName','invoiceNumber','lineNumber','description','sku','hsnSac','quantity','unitPrice','amount','taxRate'];
+const ITEM_HEADERS = ['invoiceId','vendorName','invoiceNumber','lineNumber','description','sku','hsnSac','quantity','unitPrice','amount','labourAmount','taxRate'];
 
 export async function exportRoutes(app: FastifyInstance) {
   app.get('/api/invoices/export/csv', async (req, reply) => {

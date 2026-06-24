@@ -16,7 +16,10 @@ it('maps the GST breakdown and per-line HSN/SAC', () => {
     vendorName: 'SAI', subtotal: '2,666.00', discountAmount: '266.60',
     cgstAmount: '215.95', sgstAmount: '215.95', igstAmount: null,
     taxAmount: '431.90', totalAmount: '2,831.30', netAmount: '3,997.00',
-    lineItems: [{ description: 'Gasket', sku: '0916', hsnSac: '8409', quantity: '1', amount: '9.32' }],
+    lineItems: [
+      { description: 'Gasket', sku: '0916', hsnSac: '8409', quantity: '1', amount: '9.32' },
+      { description: 'OUT SIDE LABOUR', sku: 'ZA64L0', hsnSac: '998729', labourAmount: '550' },
+    ],
   });
   const r = normalizeStructured(json);
   expect(r.subtotal).toBe(2666);
@@ -27,6 +30,9 @@ it('maps the GST breakdown and per-line HSN/SAC', () => {
   expect(r.totalAmount).toBe(2831.3);
   expect(r.netAmount).toBe(3997);
   expect(r.lineItems[0].hsnSac).toBe('8409');
+  expect(r.lineItems[0].amount).toBe(9.32);
+  expect(r.lineItems[1].labourAmount).toBe(550);
+  expect(r.lineItems[1].amount).toBeUndefined();
 });
 it('recovers an HSN/SAC code mis-mapped into taxRate', () => {
   // The OCR table puts HSN/SAC next to the Tax column; the model sometimes drops the
