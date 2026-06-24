@@ -46,6 +46,30 @@ it('recovers an HSN/SAC code mis-mapped into taxRate', () => {
   expect(r.lineItems[2].hsnSac).toBe('998729');
   expect(r.lineItems[2].taxRate).toBeUndefined();
 });
+it('subtracts a forgotten discount from the tax-inclusive sub total', () => {
+  // Model read every amount but its totalAmount = subtotal + tax (discount not subtracted).
+  const json = JSON.stringify({
+    subtotal: 101216.70, discountAmount: 18026.72, igstAmount: 14974.19, taxAmount: 14974.19,
+    totalAmount: 116190.89, netAmount: 98164, lineItems: [],
+  });
+  const r = normalizeStructured(json);
+  expect(r.totalAmount).toBe(98164.17);   // subtotal - discount + tax
+  expect(r.netAmount).toBe(98164);        // already correct, untouched
+});
+it('leaves a correctly-discounted total alone', () => {
+  const json = JSON.stringify({
+    subtotal: 2666, discountAmount: 266.6, cgstAmount: 215.95, sgstAmount: 215.95,
+    taxAmount: 431.9, totalAmount: 2831.3, netAmount: 2831, lineItems: [],
+  });
+  const r = normalizeStructured(json);
+  expect(r.totalAmount).toBe(2831.3);     // unchanged — discount already applied
+});
+it('does not touch totals when there is no discount', () => {
+  // Non-GST invoice with an extra charge: subtotal+tax != total, but no discount → leave as-is.
+  const json = JSON.stringify({ subtotal: 100, taxAmount: 8, totalAmount: 118, lineItems: [] });
+  const r = normalizeStructured(json);
+  expect(r.totalAmount).toBe(118);
+});
 it('strips code fences and tolerates surrounding prose', () => {
   const r = normalizeStructured('Here:\n```json\n{"vendorName":"X","lineItems":[]}\n```');
   expect(r.vendorName).toBe('X'); expect(r.lineItems).toEqual([]);
