@@ -34,6 +34,21 @@ export function toDate(v?: string | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// Record an extraction failure without ever throwing. These run inside fire-and-forget
+// background tasks, so an error here (e.g. the invoice was deleted mid-flight, making the
+// ExtractionRun foreign key invalid) must not escape as an unhandled rejection that crashes
+// the process. Skip silently when the invoice no longer exists; log anything else.
+async function recordFailure(invoiceId: string, providerName: string, msg: string, latencyMs?: number): Promise<void> {
+  try {
+    const exists = await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { id: true } });
+    if (!exists) return;
+    await prisma.extractionRun.create({ data: { invoiceId, provider: providerName, status: 'FAILED', error: msg, latencyMs: latencyMs ?? null } });
+    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED', error: msg, provider: providerName } });
+  } catch (e) {
+    console.error(`[runExtraction] failed to record failure for invoice ${invoiceId}:`, e);
+  }
+}
+
 function headerData(r: CanonicalResult) {
   return {
     vendorName: r.vendorName ?? null, vendorAddress: r.vendorAddress ?? null, vendorTaxId: r.vendorTaxId ?? null,
@@ -90,8 +105,7 @@ export async function runExtractionWith(invoiceId: string, provider: ExtractionP
     const latencyMs = Date.now() - started;
     const cancelled = controller.signal.aborted || isCancelError(e);
     const msg = cancelled ? 'Cancelled by user' : String(e?.message ?? e);
-    await prisma.extractionRun.create({ data: { invoiceId, provider: provider.name, status: 'FAILED', latencyMs, error: msg } });
-    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED', error: msg, provider: provider.name } });
+    await recordFailure(invoiceId, provider.name, msg, latencyMs);
   } finally {
     finishCancellable(invoiceId, controller);
   }
@@ -105,9 +119,7 @@ export async function runExtraction(invoiceId: string, providerName?: string): P
     const creds = await getProviderCredsOrThrow(name, provider);
     await runExtractionWith(invoiceId, provider, creds);
   } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    await prisma.extractionRun.create({ data: { invoiceId, provider: name, status: 'FAILED', error: msg } });
-    await prisma.invoice.update({ where: { id: invoiceId }, data: { status: 'FAILED', error: msg, provider: name } });
+    await recordFailure(invoiceId, name, String(e?.message ?? e));
   }
 }
 

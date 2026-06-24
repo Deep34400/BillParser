@@ -3,6 +3,11 @@ import { env } from './env.js';
 import { buildApp } from './app.js';
 import { seedFromEnv } from './settings/seed.js';
 
+// Last-resort safety net: a stray rejection or error from a background task (e.g. an
+// extraction) must not take the whole API down. Log it and keep serving.
+process.on('unhandledRejection', (reason) => { console.error('[unhandledRejection]', reason); });
+process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err); });
+
 async function main() {
   if (env.appSecret === 'dev-secret-change-me') {
     console.warn(
