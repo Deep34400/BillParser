@@ -91,6 +91,10 @@ export function InvoiceDetailPage() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [bakeoffOpen, setBakeoffOpen] = useState(false);
 
+  // PDF view / side-by-side state
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [comparePane, setComparePane] = useState<'fields' | 'raw'>('fields');
+
   // Edit mode state
   const [editMode, setEditMode] = useState(false);
   const [editVendorName, setEditVendorName] = useState('');
@@ -107,8 +111,17 @@ export function InvoiceDetailPage() {
   const [editTotalAmount, setEditTotalAmount] = useState('');
   const [editItems, setEditItems] = useState<EditLineItem[]>([]);
 
-  // Raw OCR toggle
+  // Raw OCR toggle (bottom section, non-split view)
   const [showRaw, setShowRaw] = useState(false);
+
+  // Collapse the PDF split to a single column on narrow viewports
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < 900);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const idRef = useRef(id);
   idRef.current = id;
@@ -390,6 +403,16 @@ export function InvoiceDetailPage() {
                   Bake-off
                 </button>
 
+                {/* View PDF toggle — splits the page PDF | parsed */}
+                <button
+                  onClick={() => setPdfOpen((v) => !v)}
+                  style={pdfOpen
+                    ? { ...actionBtn, background: T.accentSoft, color: T.accent, border: '1px solid #c7c2ff' }
+                    : actionBtn}
+                >
+                  {pdfOpen ? '✕ Hide PDF' : 'View PDF'}
+                </button>
+
                 {/* Edit fields */}
                 <button
                   onClick={enterEdit}
@@ -457,15 +480,7 @@ export function InvoiceDetailPage() {
 
       {/* Main content */}
       <div style={{ padding: '16px 30px 40px' }}>
-        {!editMode ? (
-          <>
-            {/* Canonical field grid */}
-            <FieldGrid inv={inv} currency={currency} />
-
-            {/* Line-item table */}
-            <LineItemTable items={inv.lineItems ?? []} currency={currency} inv={inv} />
-          </>
-        ) : (
+        {editMode ? (
           /* Edit mode form */
           <EditForm
             editVendorName={editVendorName} setEditVendorName={setEditVendorName}
@@ -485,50 +500,49 @@ export function InvoiceDetailPage() {
             removeEditItem={removeEditItem}
             addEditItem={addEditItem}
           />
-        )}
+        ) : pdfOpen ? (
+          /* Side-by-side: PDF | parsed output */
+          <PdfSplit
+            inv={inv}
+            currency={currency}
+            comparePane={comparePane}
+            setComparePane={setComparePane}
+            narrow={narrow}
+          />
+        ) : (
+          <>
+            {/* Canonical field grid */}
+            <FieldGrid inv={inv} currency={currency} />
 
-        {/* Raw OCR section */}
-        <div style={{ marginTop: 24 }}>
-          <button
-            onClick={() => setShowRaw((v) => !v)}
-            style={{
-              background: 'none',
-              border: `1px solid ${T.border}`,
-              borderRadius: 7,
-              padding: '6px 14px',
-              fontSize: 13,
-              fontWeight: 500,
-              color: T.muted,
-              cursor: 'pointer',
-              fontFamily: T.font,
-            }}
-          >
-            {showRaw ? 'Hide raw OCR' : 'Show raw OCR'}
-          </button>
-          {showRaw && (
-            <div style={{ marginTop: 10 }}>
-              {inv.rawText ? (
-                <pre style={{
-                  fontFamily: T.mono,
-                  fontSize: 12,
-                  background: '#1c1a17',
-                  color: '#e8e4dc',
-                  padding: '16px 18px',
-                  borderRadius: 8,
-                  overflowX: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  margin: 0,
-                  lineHeight: 1.6,
-                }}>
-                  {inv.rawText}
-                </pre>
-              ) : (
-                <div style={{ fontSize: 13, color: T.muted, fontStyle: 'italic' }}>No OCR text</div>
+            {/* Line-item table */}
+            <LineItemTable items={inv.lineItems ?? []} currency={currency} inv={inv} />
+
+            {/* Raw OCR section */}
+            <div style={{ marginTop: 24 }}>
+              <button
+                onClick={() => setShowRaw((v) => !v)}
+                style={{
+                  background: 'none',
+                  border: `1px solid ${T.border}`,
+                  borderRadius: 7,
+                  padding: '6px 14px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: T.muted,
+                  cursor: 'pointer',
+                  fontFamily: T.font,
+                }}
+              >
+                {showRaw ? 'Hide raw OCR' : 'Show raw OCR'}
+              </button>
+              {showRaw && (
+                <div style={{ marginTop: 10 }}>
+                  <RawOcrBlock rawText={inv.rawText} />
+                </div>
               )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
       {/* Overlays */}
@@ -915,6 +929,143 @@ function EditForm(props: EditFormProps) {
             + Add line
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RawOcrBlock — shared monospace raw-OCR renderer (or placeholder)
+// ---------------------------------------------------------------------------
+function RawOcrBlock({ rawText, maxHeight }: { rawText: string | null | undefined; maxHeight?: number | string }) {
+  if (!rawText) {
+    return <div style={{ fontSize: 13, color: T.muted, fontStyle: 'italic' }}>No OCR text</div>;
+  }
+  return (
+    <pre style={{
+      fontFamily: T.mono,
+      fontSize: 12,
+      background: '#1c1a17',
+      color: '#e8e4dc',
+      padding: '16px 18px',
+      borderRadius: 8,
+      overflow: 'auto',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      margin: 0,
+      lineHeight: 1.6,
+      maxHeight,
+    }}>
+      {rawText}
+    </pre>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PdfSplit — original PDF on the left, parsed output (fields | raw OCR) right
+// ---------------------------------------------------------------------------
+function PdfSplit({
+  inv,
+  currency,
+  comparePane,
+  setComparePane,
+  narrow,
+}: {
+  inv: Invoice;
+  currency: string;
+  comparePane: 'fields' | 'raw';
+  setComparePane: (v: 'fields' | 'raw') => void;
+  narrow: boolean;
+}) {
+  const pdfUrl = api.fileUrl(inv.id);
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: narrow ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)',
+      gap: 16,
+      alignItems: 'start',
+    }}>
+      {/* LEFT — original PDF */}
+      <div style={{
+        position: narrow ? 'static' : 'sticky',
+        top: 16,
+        background: T.panel,
+        border: `1px solid ${T.border}`,
+        borderRadius: 10,
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 16px',
+          borderBottom: `1px solid ${T.border}`,
+          background: T.rail,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: T.muted, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Source PDF
+          </span>
+          <a
+            href={pdfUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 12, fontWeight: 600, color: T.accent, textDecoration: 'none' }}
+          >
+            Open in new tab ↗
+          </a>
+        </div>
+        <iframe
+          title="Invoice PDF"
+          src={pdfUrl}
+          style={{
+            width: '100%',
+            height: narrow ? '70vh' : 'calc(100vh - 220px)',
+            minHeight: 520,
+            border: 'none',
+            display: 'block',
+            background: '#525659',
+          }}
+        />
+      </div>
+
+      {/* RIGHT — parsed output with Fields | Raw OCR toggle */}
+      <div>
+        <div style={{
+          display: 'inline-flex',
+          border: `1px solid ${T.border}`,
+          borderRadius: 8,
+          overflow: 'hidden',
+          marginBottom: 14,
+        }}>
+          {(['fields', 'raw'] as const).map((key) => (
+            <button
+              key={key}
+              onClick={() => setComparePane(key)}
+              style={{
+                padding: '6px 16px',
+                fontSize: 13,
+                fontWeight: 600,
+                fontFamily: T.font,
+                cursor: 'pointer',
+                border: 'none',
+                background: comparePane === key ? T.accent : T.panel,
+                color: comparePane === key ? '#fff' : T.muted,
+              }}
+            >
+              {key === 'fields' ? 'Fields' : 'Raw OCR'}
+            </button>
+          ))}
+        </div>
+
+        {comparePane === 'fields' ? (
+          <>
+            <FieldGrid inv={inv} currency={currency} />
+            <LineItemTable items={inv.lineItems ?? []} currency={currency} inv={inv} />
+          </>
+        ) : (
+          <RawOcrBlock rawText={inv.rawText} maxHeight="calc(100vh - 260px)" />
+        )}
       </div>
     </div>
   );

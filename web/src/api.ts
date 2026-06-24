@@ -9,6 +9,8 @@ export const api = {
   config: () => j<AppConfig>('/api/config'),
   list: (qs: string) => j<{ invoices: Invoice[] }>(`/api/invoices${qs}`),
   get: (id: string) => j<Invoice>(`/api/invoices/${id}`),
+  // Raw URL to the original uploaded PDF — for <iframe>/<a>, not the JSON helper.
+  fileUrl: (id: string) => `/api/invoices/${id}/file`,
   reextract: (id: string, provider?: string) => j(`/api/invoices/${id}/reextract`, { method: 'POST', body: JSON.stringify({ provider }) }),
   // Send an empty JSON body: the shared fetch helper sets content-type application/json,
   // and Fastify rejects that header with no body (400). Matches the reextract call.
