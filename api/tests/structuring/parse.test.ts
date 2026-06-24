@@ -28,6 +28,24 @@ it('maps the GST breakdown and per-line HSN/SAC', () => {
   expect(r.netAmount).toBe(3997);
   expect(r.lineItems[0].hsnSac).toBe('8409');
 });
+it('recovers an HSN/SAC code mis-mapped into taxRate', () => {
+  // The OCR table puts HSN/SAC next to the Tax column; the model sometimes drops the
+  // SAC code into taxRate. A tax rate > 100 is never a real GST % — treat it as the code.
+  const json = JSON.stringify({ lineItems: [
+    { description: 'OUT SIDE LABOUR', sku: 'ZA64L0', hsnSac: null, taxRate: 998729, amount: 550 },
+    { description: 'BOLT', sku: '0155', hsnSac: null, taxRate: 18, amount: 59.3 },
+    { description: 'PAINT', sku: 'ZF27P0', hsnSac: '998729', taxRate: 998729, amount: 1500 },
+  ] });
+  const r = normalizeStructured(json);
+  // code recovered into hsnSac, bogus taxRate dropped
+  expect(r.lineItems[0].hsnSac).toBe('998729');
+  expect(r.lineItems[0].taxRate).toBeUndefined();
+  // a legit percentage is untouched
+  expect(r.lineItems[1].taxRate).toBe(18);
+  // existing hsnSac is not overwritten; bogus taxRate still dropped
+  expect(r.lineItems[2].hsnSac).toBe('998729');
+  expect(r.lineItems[2].taxRate).toBeUndefined();
+});
 it('strips code fences and tolerates surrounding prose', () => {
   const r = normalizeStructured('Here:\n```json\n{"vendorName":"X","lineItems":[]}\n```');
   expect(r.vendorName).toBe('X'); expect(r.lineItems).toEqual([]);

@@ -36,10 +36,21 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
     discountAmount: toNum(o.discountAmount), cgstAmount: toNum(o.cgstAmount), sgstAmount: toNum(o.sgstAmount),
     igstAmount: toNum(o.igstAmount), netAmount: toNum(o.netAmount),
     confidence: toNum(o.confidence),
-    lineItems: items.map((it: any, i: number) => ({
-      lineNumber: i + 1, description: toStr(it.description), sku: toStr(it.sku), hsnSac: toStr(it.hsnSac),
-      quantity: toNum(it.quantity), unitPrice: toNum(it.unitPrice), amount: toNum(it.amount), taxRate: toNum(it.taxRate),
-    })),
+    lineItems: items.map((it: any, i: number) => {
+      let hsnSac = toStr(it.hsnSac);
+      let taxRate = toNum(it.taxRate);
+      // GST rates are percentages (≤28% in India). A "tax rate" above 100 is never a real
+      // rate — it is almost always an HSN/SAC code the model mis-mapped from the adjacent
+      // HSN/SAC column. Recover it into hsnSac when empty, and drop the bogus rate either way.
+      if (taxRate != null && taxRate > 100) {
+        if (hsnSac == null) hsnSac = String(taxRate);
+        taxRate = undefined;
+      }
+      return {
+        lineNumber: i + 1, description: toStr(it.description), sku: toStr(it.sku), hsnSac,
+        quantity: toNum(it.quantity), unitPrice: toNum(it.unitPrice), amount: toNum(it.amount), taxRate,
+      };
+    }),
   };
 }
 
