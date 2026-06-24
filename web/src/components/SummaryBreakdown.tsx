@@ -12,19 +12,24 @@ import { money } from '../format.js';
 // Renders right-aligned rows; the caller provides the surrounding container.
 // ---------------------------------------------------------------------------
 export function SummaryBreakdown({ inv, currency }: { inv: Invoice; currency: string }) {
+  // Only render once the invoice has any summary figure (skip empty invoices).
+  const hasSummary = inv.subtotal != null || inv.totalAmount != null || inv.netAmount != null;
   const rows: { label: string; value: number; strong?: boolean }[] = [];
   const add = (label: string, value: number | null | undefined, strong = false) => {
     if (value != null) rows.push({ label, value, strong });
   };
 
   add('Sub Total', inv.subtotal);
-  add('Less Discounts', inv.discountAmount);
+  // Always show the Less Discounts row, even when zero/absent.
+  if (hasSummary) rows.push({ label: 'Less Discounts', value: inv.discountAmount ?? 0 });
 
-  const hasGst = inv.cgstAmount != null || inv.sgstAmount != null || inv.igstAmount != null;
-  add('CGST', inv.cgstAmount);
-  if (inv.sgstAmount != null) add('SGST', inv.sgstAmount);
-  else add('IGST', inv.igstAmount);
-  if (!hasGst) add('Tax', inv.taxAmount);
+  // Always show a GST section: IGST when present, otherwise CGST + SGST (0 when absent).
+  if (inv.igstAmount != null) {
+    add('IGST', inv.igstAmount);
+  } else if (hasSummary) {
+    rows.push({ label: 'CGST', value: inv.cgstAmount ?? 0 });
+    rows.push({ label: 'SGST', value: inv.sgstAmount ?? 0 });
+  }
 
   if (inv.netAmount != null) {
     add('Sub Total', inv.totalAmount);

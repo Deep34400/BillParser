@@ -9,12 +9,14 @@ import { money } from '../format.js';
 // entries; otherwise callers fall back to SummaryBreakdown.
 // ---------------------------------------------------------------------------
 type Key = keyof Pick<SummaryColumn, 'subtotal' | 'discount' | 'cgst' | 'sgst' | 'igst' | 'total'>;
-const ROWS: { key: Key; label: string }[] = [
+// `forced` rows always render (showing 0.00 when absent) so the summary structure
+// is consistent; others render only when a column carries a value.
+const ALL_ROWS: { key: Key; label: string; forced?: boolean }[] = [
   { key: 'subtotal', label: 'Sub Total' },
-  { key: 'discount', label: 'Less Discounts' },
-  { key: 'cgst', label: 'CGST' },
-  { key: 'sgst', label: 'SGST' },
-  { key: 'igst', label: 'IGST' },
+  { key: 'discount', label: 'Less Discounts', forced: true },
+  { key: 'cgst', label: 'CGST', forced: true },
+  { key: 'sgst', label: 'SGST', forced: true },
+  { key: 'igst', label: 'IGST', forced: true },
   { key: 'total', label: 'Sub Total' },
 ];
 
@@ -22,10 +24,16 @@ export function SummaryColumns({ inv, currency }: { inv: Invoice; currency: stri
   const cols = (inv.summaryColumns ?? []).filter(Boolean) as SummaryColumn[];
   if (cols.length === 0) return null;
 
-  // Treat 0 like "not present": models often emit a zero in the unused tax slot
-  // (e.g. SGST=0 on an IGST invoice), which would otherwise render rows of ₹0.00.
+  // Treat 0 like "not present" for deciding which optional rows to show.
   const present = (v?: number | null) => v != null && v !== 0;
-  const rows = ROWS.filter((r) => cols.some((c) => present(c[r.key])));
+  // Regime: show IGST when any column has it, otherwise CGST + SGST.
+  const hasIgst = cols.some((c) => c.igst != null);
+  const rows = ALL_ROWS.filter((r) => {
+    if (r.key === 'igst') return hasIgst;            // GST regime: IGST...
+    if (r.key === 'cgst' || r.key === 'sgst') return !hasIgst; // ...or CGST+SGST
+    if (r.forced) return true;                       // Less Discounts always
+    return cols.some((c) => present(c[r.key]));      // subtotal / total when present
+  });
   const net = inv.netAmount ?? inv.totalAmount;
 
   const cell: React.CSSProperties = { padding: '5px 14px', fontSize: 13, textAlign: 'right', fontFamily: T.mono, color: T.text, whiteSpace: 'nowrap' };
@@ -49,7 +57,7 @@ export function SummaryColumns({ inv, currency }: { inv: Invoice; currency: stri
             <td style={labelCell}>{r.label}</td>
             {cols.map((c, i) => (
               <td key={i} style={{ ...cell, fontWeight: r.key === 'total' ? 600 : 400 }}>
-                {present(c[r.key]) ? money(c[r.key], currency) : '—'}
+                {present(c[r.key]) ? money(c[r.key], currency) : r.forced ? money(0, currency) : '—'}
               </td>
             ))}
           </tr>
