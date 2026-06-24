@@ -35,7 +35,32 @@ function taxTotalOf(cgst?: number, sgst?: number, igst?: number, taxAmount?: num
   return [cgst, sgst, igst].some((x) => x != null) ? (cgst ?? 0) + (sgst ?? 0) + (igst ?? 0) : taxAmount;
 }
 
-export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText' | 'rawJson'> {
+// Reconcile the GST type against what the source invoice actually shows. Models sometimes
+// split an inter-state IGST into CGST+SGST halves (or vice versa). When the OCR text names
+// exactly one regime, rewrite a `{cgst,sgst,igst}` bag to match it. `null` = leave as-is.
+type GstBag = { cgst?: number; sgst?: number; igst?: number };
+function gstRegime(markdown?: string): 'igst' | 'cgstsgst' | null {
+  if (!markdown) return null;
+  const hasIgst = /IGST/i.test(markdown);
+  const hasCgstSgst = /CGST/i.test(markdown) || /SGST/i.test(markdown);
+  if (hasIgst && !hasCgstSgst) return 'igst';
+  if (hasCgstSgst && !hasIgst) return 'cgstsgst';
+  return null;
+}
+function applyRegime<T extends GstBag>(bag: T, regime: 'igst' | 'cgstsgst' | null): T {
+  if (!regime) return bag;
+  if (regime === 'igst') {
+    if (bag.cgst == null && bag.sgst == null) return bag; // already IGST-only
+    const igst = round2((bag.cgst ?? 0) + (bag.sgst ?? 0) + (bag.igst ?? 0));
+    return { ...bag, igst, cgst: undefined, sgst: undefined };
+  }
+  // cgstsgst: split a lone IGST into equal CGST + SGST halves
+  if (bag.igst == null) return bag;
+  const half = round2(((bag.cgst ?? 0) + (bag.sgst ?? 0) + bag.igst) / 2);
+  return { ...bag, cgst: half, sgst: half, igst: undefined };
+}
+
+export function normalizeStructured(raw: string, markdown?: string): Omit<CanonicalResult, 'rawText' | 'rawJson'> {
   const start = raw.indexOf('{'); const end = raw.lastIndexOf('}');
   const json = start >= 0 && end >= 0 ? raw.slice(start, end + 1) : raw;
   let o: Record<string, unknown>;
@@ -68,8 +93,14 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
     }
   }
 
+  // Reconcile the GST regime against the source invoice text (models sometimes split an
+  // inter-state IGST into CGST+SGST, or vice versa).
+  const regime = gstRegime(markdown);
+  const gst = applyRegime({ cgst: cgstAmount, sgst: sgstAmount, igst: igstAmount }, regime);
+
   // Columnwise summary (Parts/Labour/…). Coerce each column, correct its discounted total,
-  // and drop columns with no amounts. The scalar fields above remain the overall totals.
+  // reconcile its GST regime, and drop columns with no amounts. The scalar fields above
+  // remain the overall totals.
   const rawCols = Array.isArray(o.summaryColumns) ? o.summaryColumns : [];
   const summaryColumns = rawCols
     .map((c: any) => {
@@ -79,7 +110,7 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
       const sgst = toNum(c.sgst);
       const igst = toNum(c.igst);
       const total = correctTotal(subtotal, discount, taxTotalOf(cgst, sgst, igst), toNum(c.total));
-      return { label: toStr(c.label), subtotal, discount, cgst, sgst, igst, total };
+      return applyRegime({ label: toStr(c.label), subtotal, discount, cgst, sgst, igst, total }, regime);
     })
     .filter((c) => [c.subtotal, c.discount, c.cgst, c.sgst, c.igst, c.total].some((v) => v != null));
 
@@ -89,8 +120,8 @@ export function normalizeStructured(raw: string): Omit<CanonicalResult, 'rawText
     invoiceDate: toStr(o.invoiceDate), dueDate: toStr(o.dueDate),
     currency: toStr(o.currency), subtotal, taxAmount,
     totalAmount, paymentTerms: toStr(o.paymentTerms),
-    discountAmount, cgstAmount, sgstAmount,
-    igstAmount, netAmount,
+    discountAmount, cgstAmount: gst.cgst, sgstAmount: gst.sgst,
+    igstAmount: gst.igst, netAmount,
     summaryColumns: summaryColumns.length ? summaryColumns : undefined,
     confidence: toNum(o.confidence),
     lineItems: items.map((it: any, i: number) => {

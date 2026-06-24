@@ -70,6 +70,30 @@ it('parses columnwise summary and corrects each column total', () => {
   expect(r.summaryColumns![1]).toMatchObject({ label: 'Labour', total: 23010 });
   expect(r.netAmount).toBe(98164);
 });
+it('folds CGST+SGST into IGST when the bill shows IGST only', () => {
+  const json = JSON.stringify({
+    cgstAmount: 7247.10, sgstAmount: 7247.10, igstAmount: null, taxAmount: 14494.19,
+    summaryColumns: [{ label: 'Parts', cgst: 5737.10, sgst: 5737.10 }],
+    lineItems: [],
+  });
+  const r = normalizeStructured(json, 'Job Card Tax Invoice ... IGST @ 18% : 14,494.19');
+  expect(r.igstAmount).toBe(14494.2);
+  expect(r.cgstAmount).toBeUndefined();
+  expect(r.sgstAmount).toBeUndefined();
+  expect(r.summaryColumns![0]).toMatchObject({ igst: 11474.2, cgst: undefined, sgst: undefined });
+});
+it('splits IGST into CGST+SGST when the bill shows CGST/SGST only', () => {
+  const json = JSON.stringify({ igstAmount: 200, taxAmount: 200, lineItems: [] });
+  const r = normalizeStructured(json, 'Tax Invoice CGST @ 9% 100 SGST @ 9% 100');
+  expect(r.cgstAmount).toBe(100);
+  expect(r.sgstAmount).toBe(100);
+  expect(r.igstAmount).toBeUndefined();
+});
+it('leaves GST type alone without markdown or when ambiguous', () => {
+  const json = JSON.stringify({ cgstAmount: 50, sgstAmount: 50, lineItems: [] });
+  expect(normalizeStructured(json).cgstAmount).toBe(50);              // no markdown
+  expect(normalizeStructured(json, 'CGST and IGST both here').cgstAmount).toBe(50); // ambiguous
+});
 it('omits summaryColumns when none are given', () => {
   const r = normalizeStructured(JSON.stringify({ subtotal: 100, totalAmount: 100, lineItems: [] }));
   expect(r.summaryColumns).toBeUndefined();

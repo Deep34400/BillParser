@@ -14,6 +14,6 @@ export const openaiModel = (model: string): StructuringModel => ({
       ],
     });
     const structuringCost = structuringTokenCost(model, res.usage?.prompt_tokens, res.usage?.completion_tokens);
-    return { ...normalizeStructured(res.choices[0]?.message?.content ?? '{}'), structuringCost };
+    return { ...normalizeStructured(res.choices[0]?.message?.content ?? '{}', markdown), structuringCost };
   },
 });

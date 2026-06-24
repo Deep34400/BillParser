@@ -13,6 +13,6 @@ export const anthropicModel = (model: string): StructuringModel => ({
     });
     const text = msg.content.map((c) => (c.type === 'text' ? c.text : '')).join('');
     const structuringCost = structuringTokenCost(model, msg.usage?.input_tokens, msg.usage?.output_tokens);
-    return { ...normalizeStructured(text), structuringCost };
+    return { ...normalizeStructured(text, markdown), structuringCost };
   },
 });
