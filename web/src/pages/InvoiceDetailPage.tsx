@@ -9,6 +9,7 @@ import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { CompareOverlay } from '../overlays/CompareOverlay.js';
 import { BakeoffOverlay } from '../overlays/BakeoffOverlay.js';
+import { SummaryBreakdown } from '../components/SummaryBreakdown.js';
 
 // ---------------------------------------------------------------------------
 // Editable line item shape
@@ -18,6 +19,7 @@ interface EditLineItem {
   lineNumber: number;
   description: string;
   sku: string;
+  hsnSac: string;
   quantity: string;
   unitPrice: string;
   amount: string;
@@ -30,6 +32,7 @@ function toEditItems(items: LineItem[]): EditLineItem[] {
     lineNumber: it.lineNumber ?? i + 1,
     description: it.description ?? '',
     sku: it.sku ?? '',
+    hsnSac: it.hsnSac ?? '',
     quantity: it.quantity != null ? String(it.quantity) : '',
     unitPrice: it.unitPrice != null ? String(it.unitPrice) : '',
     amount: it.amount != null ? String(it.amount) : '',
@@ -38,7 +41,7 @@ function toEditItems(items: LineItem[]): EditLineItem[] {
 }
 
 function blankEditItem(lineNumber: number): EditLineItem {
-  return { lineNumber, description: '', sku: '', quantity: '', unitPrice: '', amount: '', taxRate: '' };
+  return { lineNumber, description: '', sku: '', hsnSac: '', quantity: '', unitPrice: '', amount: '', taxRate: '' };
 }
 
 function parseNum(s: string): number | null {
@@ -107,8 +110,13 @@ export function InvoiceDetailPage() {
   const [editInvoiceDate, setEditInvoiceDate] = useState('');
   const [editDueDate, setEditDueDate] = useState('');
   const [editSubtotal, setEditSubtotal] = useState('');
+  const [editDiscountAmount, setEditDiscountAmount] = useState('');
+  const [editCgstAmount, setEditCgstAmount] = useState('');
+  const [editSgstAmount, setEditSgstAmount] = useState('');
+  const [editIgstAmount, setEditIgstAmount] = useState('');
   const [editTaxAmount, setEditTaxAmount] = useState('');
   const [editTotalAmount, setEditTotalAmount] = useState('');
+  const [editNetAmount, setEditNetAmount] = useState('');
   const [editItems, setEditItems] = useState<EditLineItem[]>([]);
 
   // Raw OCR toggle (bottom section, non-split view)
@@ -179,8 +187,13 @@ export function InvoiceDetailPage() {
     setEditInvoiceDate(inv.invoiceDate ?? '');
     setEditDueDate(inv.dueDate ?? '');
     setEditSubtotal(inv.subtotal != null ? String(inv.subtotal) : '');
+    setEditDiscountAmount(inv.discountAmount != null ? String(inv.discountAmount) : '');
+    setEditCgstAmount(inv.cgstAmount != null ? String(inv.cgstAmount) : '');
+    setEditSgstAmount(inv.sgstAmount != null ? String(inv.sgstAmount) : '');
+    setEditIgstAmount(inv.igstAmount != null ? String(inv.igstAmount) : '');
     setEditTaxAmount(inv.taxAmount != null ? String(inv.taxAmount) : '');
     setEditTotalAmount(inv.totalAmount != null ? String(inv.totalAmount) : '');
+    setEditNetAmount(inv.netAmount != null ? String(inv.netAmount) : '');
     setEditItems(toEditItems(inv.lineItems ?? []));
     setEditMode(true);
   }
@@ -202,13 +215,19 @@ export function InvoiceDetailPage() {
       invoiceDate: editInvoiceDate || null,
       dueDate: editDueDate || null,
       subtotal: parseNum(editSubtotal),
+      discountAmount: parseNum(editDiscountAmount),
+      cgstAmount: parseNum(editCgstAmount),
+      sgstAmount: parseNum(editSgstAmount),
+      igstAmount: parseNum(editIgstAmount),
       taxAmount: parseNum(editTaxAmount),
       totalAmount: parseNum(editTotalAmount),
+      netAmount: parseNum(editNetAmount),
       lineItems: editItems.map((it, i) => ({
         id: it.id,
         lineNumber: it.lineNumber ?? i + 1,
         description: it.description || null,
         sku: it.sku || null,
+        hsnSac: it.hsnSac || null,
         quantity: parseNum(it.quantity),
         unitPrice: parseNum(it.unitPrice),
         amount: parseNum(it.amount),
@@ -493,8 +512,13 @@ export function InvoiceDetailPage() {
             editInvoiceDate={editInvoiceDate} setEditInvoiceDate={setEditInvoiceDate}
             editDueDate={editDueDate} setEditDueDate={setEditDueDate}
             editSubtotal={editSubtotal} setEditSubtotal={setEditSubtotal}
+            editDiscountAmount={editDiscountAmount} setEditDiscountAmount={setEditDiscountAmount}
+            editCgstAmount={editCgstAmount} setEditCgstAmount={setEditCgstAmount}
+            editSgstAmount={editSgstAmount} setEditSgstAmount={setEditSgstAmount}
+            editIgstAmount={editIgstAmount} setEditIgstAmount={setEditIgstAmount}
             editTaxAmount={editTaxAmount} setEditTaxAmount={setEditTaxAmount}
             editTotalAmount={editTotalAmount} setEditTotalAmount={setEditTotalAmount}
+            editNetAmount={editNetAmount} setEditNetAmount={setEditNetAmount}
             editItems={editItems}
             updateEditItem={updateEditItem}
             removeEditItem={removeEditItem}
@@ -580,9 +604,6 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
     { label: 'Structuring cost', value: costFmt(inv.structuringCost) },
     { label: 'Total cost', value: costFmt(inv.costEstimate) },
     { label: 'Confidence', value: confLabel(inv.confidence) },
-    { label: 'Subtotal', value: money(inv.subtotal, currency) },
-    { label: 'Tax', value: money(inv.taxAmount, currency) },
-    { label: 'Total', value: money(inv.totalAmount, currency) },
   ];
 
   return (
@@ -672,6 +693,7 @@ function LineItemTable({ items, currency, inv }: { items: LineItem[]; currency: 
           <tr>
             <th style={thS}>Description</th>
             <th style={thS}>SKU</th>
+            <th style={thS}>HSN/SAC</th>
             <th style={{ ...thS, textAlign: 'right' }}>Qty</th>
             <th style={{ ...thS, textAlign: 'right' }}>Unit price</th>
             <th style={{ ...thS, textAlign: 'right' }}>Amount</th>
@@ -681,13 +703,14 @@ function LineItemTable({ items, currency, inv }: { items: LineItem[]; currency: 
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={6} style={{ ...tdS, textAlign: 'center', color: T.muted }}>No line items</td>
+              <td colSpan={7} style={{ ...tdS, textAlign: 'center', color: T.muted }}>No line items</td>
             </tr>
           ) : (
             items.map((it, i) => (
               <tr key={it.id ?? i}>
                 <td style={tdS}>{it.description ?? '—'}</td>
                 <td style={{ ...tdS, color: T.muted, fontFamily: T.mono }}>{it.sku ?? '—'}</td>
+                <td style={{ ...tdS, color: T.muted, fontFamily: T.mono }}>{it.hsnSac ?? '—'}</td>
                 <td style={numS}>{it.quantity ?? '—'}</td>
                 <td style={numS}>{money(it.unitPrice, currency)}</td>
                 <td style={numS}>{money(it.amount, currency)}</td>
@@ -697,17 +720,9 @@ function LineItemTable({ items, currency, inv }: { items: LineItem[]; currency: 
           )}
         </tbody>
       </table>
-      {/* Summary row */}
+      {/* Summary row — full GST breakdown */}
       <div style={{ borderTop: `2px solid ${T.border}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-        <div style={{ fontSize: 13, color: T.muted }}>
-          Subtotal: <span style={{ fontWeight: 600, color: T.text, fontFamily: T.mono }}>{money(inv.subtotal, currency)}</span>
-        </div>
-        <div style={{ fontSize: 13, color: T.muted }}>
-          Tax: <span style={{ fontWeight: 600, color: T.text, fontFamily: T.mono }}>{money(inv.taxAmount, currency)}</span>
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: T.text }}>
-          Total: <span style={{ fontFamily: T.mono }}>{money(inv.totalAmount, currency)}</span>
-        </div>
+        <SummaryBreakdown inv={inv} currency={currency} />
       </div>
     </div>
   );
@@ -727,8 +742,13 @@ interface EditFormProps {
   editInvoiceDate: string; setEditInvoiceDate: (v: string) => void;
   editDueDate: string; setEditDueDate: (v: string) => void;
   editSubtotal: string; setEditSubtotal: (v: string) => void;
+  editDiscountAmount: string; setEditDiscountAmount: (v: string) => void;
+  editCgstAmount: string; setEditCgstAmount: (v: string) => void;
+  editSgstAmount: string; setEditSgstAmount: (v: string) => void;
+  editIgstAmount: string; setEditIgstAmount: (v: string) => void;
   editTaxAmount: string; setEditTaxAmount: (v: string) => void;
   editTotalAmount: string; setEditTotalAmount: (v: string) => void;
+  editNetAmount: string; setEditNetAmount: (v: string) => void;
   editItems: EditLineItem[];
   updateEditItem: (idx: number, field: keyof EditLineItem, value: string) => void;
   removeEditItem: (idx: number) => void;
@@ -747,8 +767,13 @@ function EditForm(props: EditFormProps) {
     editInvoiceDate, setEditInvoiceDate,
     editDueDate, setEditDueDate,
     editSubtotal, setEditSubtotal,
+    editDiscountAmount, setEditDiscountAmount,
+    editCgstAmount, setEditCgstAmount,
+    editSgstAmount, setEditSgstAmount,
+    editIgstAmount, setEditIgstAmount,
     editTaxAmount, setEditTaxAmount,
     editTotalAmount, setEditTotalAmount,
+    editNetAmount, setEditNetAmount,
     editItems, updateEditItem, removeEditItem, addEditItem,
   } = props;
 
@@ -806,16 +831,36 @@ function EditForm(props: EditFormProps) {
             <input type="date" style={inputStyle} value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} />
           </div>
           <div>
-            <label style={labelStyle}>Subtotal</label>
+            <label style={labelStyle}>Sub total</label>
             <input type="number" step="0.01" style={inputStyle} value={editSubtotal} onChange={(e) => setEditSubtotal(e.target.value)} />
           </div>
           <div>
-            <label style={labelStyle}>Tax amount</label>
+            <label style={labelStyle}>Less discounts</label>
+            <input type="number" step="0.01" style={inputStyle} value={editDiscountAmount} onChange={(e) => setEditDiscountAmount(e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>CGST amount</label>
+            <input type="number" step="0.01" style={inputStyle} value={editCgstAmount} onChange={(e) => setEditCgstAmount(e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>SGST amount</label>
+            <input type="number" step="0.01" style={inputStyle} value={editSgstAmount} onChange={(e) => setEditSgstAmount(e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>IGST amount</label>
+            <input type="number" step="0.01" style={inputStyle} value={editIgstAmount} onChange={(e) => setEditIgstAmount(e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>Tax amount (total GST)</label>
             <input type="number" step="0.01" style={inputStyle} value={editTaxAmount} onChange={(e) => setEditTaxAmount(e.target.value)} />
           </div>
           <div>
-            <label style={labelStyle}>Total amount</label>
+            <label style={labelStyle}>Sub total (incl. tax)</label>
             <input type="number" step="0.01" style={inputStyle} value={editTotalAmount} onChange={(e) => setEditTotalAmount(e.target.value)} />
+          </div>
+          <div>
+            <label style={labelStyle}>Net bill amount</label>
+            <input type="number" step="0.01" style={inputStyle} value={editNetAmount} onChange={(e) => setEditNetAmount(e.target.value)} />
           </div>
         </div>
       </div>
@@ -843,7 +888,7 @@ function EditForm(props: EditFormProps) {
               key={idx}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '2fr 1fr 80px 100px 100px 80px 40px',
+                gridTemplateColumns: '2fr 1fr 1fr 80px 100px 100px 80px 40px',
                 gap: 8,
                 alignItems: 'center',
                 padding: '10px 12px',
@@ -863,6 +908,12 @@ function EditForm(props: EditFormProps) {
                 placeholder="SKU"
                 value={it.sku}
                 onChange={(e) => updateEditItem(idx, 'sku', e.target.value)}
+              />
+              <input
+                style={inputStyle}
+                placeholder="HSN/SAC"
+                value={it.hsnSac}
+                onChange={(e) => updateEditItem(idx, 'hsnSac', e.target.value)}
               />
               <input
                 type="number"

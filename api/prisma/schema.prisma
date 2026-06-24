@@ -38,8 +38,13 @@ model Invoice {
   dueDate       DateTime?
   currency      String?
   subtotal      Float?
+  discountAmount Float?
+  cgstAmount    Float?
+  sgstAmount    Float?
+  igstAmount    Float?
   taxAmount     Float?
   totalAmount   Float?
+  netAmount     Float?
   paymentTerms  String?
   rawText       String?
   rawJson       Json?
@@ -66,6 +71,7 @@ model LineItem {
   lineNumber  Int
   description String?
   sku         String?
+  hsnSac      String?
   quantity    Float?
   unitPrice   Float?
   amount      Float?
