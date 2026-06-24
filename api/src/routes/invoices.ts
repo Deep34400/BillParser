@@ -118,7 +118,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.post('/api/invoices/bulk', async (req) => {
     const { action, ids } = req.body as { action: 'reextract' | 'delete'; ids: string[] };
     if (action === 'delete') { await prisma.invoice.deleteMany({ where: { id: { in: ids } } }); return { ok: true, count: ids.length }; }
-    for (const id of ids) { await prisma.invoice.update({ where: { id }, data: { status: 'PENDING', error: null } }); void runExtraction(id); }
+    for (const id of ids) { await prisma.invoice.update({ where: { id }, data: { status: 'PENDING', error: null } }); void runExtraction(id).catch((e) => console.error('[runExtraction]', e)); }
     return { ok: true, count: ids.length };
   });
 
@@ -126,7 +126,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const { provider } = (req.body ?? {}) as { provider?: string };
     await prisma.invoice.update({ where: { id }, data: { status: 'PENDING', error: null } });
-    void runExtraction(id, provider);
+    void runExtraction(id, provider).catch((e) => console.error('[runExtraction]', e));
     reply.code(202); return { ok: true };
   });
 
