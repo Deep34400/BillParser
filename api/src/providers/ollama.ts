@@ -1,7 +1,7 @@
 import type { ExtractionProvider, CanonicalResult } from './types.js';
 import { getStructuringModel } from '../structuring/index.js';
 import { rasterizePdf, rasterizeTopBand } from '../lib/rasterize.js';
-import { ollamaChat } from '../lib/ollama.js';
+import { ollamaChat } from './clients/ollama.js';
 
 const OCR_PROMPT =
   'You are an OCR engine. Transcribe this invoice image to clean GitHub-flavored Markdown. ' +

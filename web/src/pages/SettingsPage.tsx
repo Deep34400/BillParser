@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api.js';
+import { api } from '../api/client.js';
 import { T } from '../theme.js';
 import { Toast } from '../components/Toast.js';
-import type { SettingsData } from '../types.js';
-import { STRUCTURING_MODEL_SUGGESTIONS, modelForProvider } from '../structuringModels.js';
+import type { SettingsData } from '../types/index.js';
+import { STRUCTURING_MODEL_SUGGESTIONS, modelForProvider, normalizeGeminiModel } from '../lib/structuringModels.js';
 
 const STRUCTURING_PROVIDERS: { name: string; label: string; keyless?: boolean }[] = [
+  { name: 'gemini', label: 'Google Gemini' },
   { name: 'anthropic', label: 'Anthropic' },
   { name: 'openai', label: 'OpenAI' },
   { name: 'mistral', label: 'Mistral' },
@@ -13,6 +14,7 @@ const STRUCTURING_PROVIDERS: { name: string; label: string; keyless?: boolean }[
 ];
 
 const STRUCTURING_CRED_LABELS: Record<string, string> = {
+  gemini: 'Gemini API key',
   anthropic: 'Anthropic API key',
   openai: 'OpenAI API key',
   mistral: 'Mistral API key',
@@ -99,10 +101,8 @@ export function SettingsPage() {
   const [extractionProvider, setExtractionProvider] = useState('');
   const [structuringProvider, setStructuringProvider] = useState('');
   const [structuringModel, setStructuringModel] = useState('');
-  // keyed by `${providerName}.${field}`
+  const [extractionModel, setExtractionModel] = useState('');
   const [credValues, setCredValues] = useState<Record<string, string>>({});
-  // structuring provider api keys keyed by provider name
-  const [structCredValues, setStructCredValues] = useState<Record<string, string>>({});
   // which secret inputs are currently revealed, keyed the same as the value maps
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState('');
@@ -120,24 +120,25 @@ export function SettingsPage() {
     setSettings(data);
     setExtractionProvider(data.extractionProvider);
     setStructuringProvider(data.structuringProvider);
-    setStructuringModel(data.structuringModel);
+    setStructuringModel(normalizeGeminiModel(data.structuringModel));
+    setExtractionModel(normalizeGeminiModel(data.extractionModel ?? data.structuringModel));
     // Prefill the credential fields with the stored (decrypted) values so they
     // persist across reloads. Best-effort: if reveal is unavailable, leave fields as-is.
     try {
       const { credentials } = await api.revealCreds();
       const cv: Record<string, string> = {};
-      const sv: Record<string, string> = {};
       for (const p of data.providers) {
         const c = credentials[p.name];
         if (c) for (const f of p.requiredCredentials ?? []) if (c[f] != null) cv[`${p.name}.${f}`] = c[f];
       }
+      for (const sp of STRUCTURING_PROVIDERS) {
+        if (!sp.keyless && credentials[sp.name]?.apiKey != null) {
+          cv[`${sp.name}.apiKey`] = credentials[sp.name].apiKey;
+        }
+      }
       if (cv['ollama.baseUrl'] == null || cv['ollama.baseUrl'] === '') cv['ollama.baseUrl'] = 'http://host.docker.internal:11434';
       if (cv['ollama.model'] == null || cv['ollama.model'] === '') cv['ollama.model'] = 'glm-ocr';
-      for (const name of STRUCTURING_PROVIDERS.map((s) => s.name)) {
-        if (credentials[name]?.apiKey != null) sv[name] = credentials[name].apiKey;
-      }
       setCredValues(cv);
-      setStructCredValues(sv);
     } catch {
       /* reveal unavailable — keep whatever is already in the fields */
     }
@@ -149,7 +150,15 @@ export function SettingsPage() {
 
   const handleSaveSelections = async () => {
     try {
-      await api.saveSettings({ extractionProvider, structuringProvider, structuringModel });
+      const bothGemini = extractionProvider === 'gemini' && structuringProvider === 'gemini';
+      const model = normalizeGeminiModel(structuringModel);
+      const ocrModel = normalizeGeminiModel(extractionModel);
+      await api.saveSettings({
+        extractionProvider,
+        structuringProvider,
+        structuringModel: model,
+        extractionModel: bothGemini ? model : ocrModel,
+      });
       await load();
       showToast('Selections saved');
     } catch (e) {
@@ -193,36 +202,6 @@ export function SettingsPage() {
     }
   };
 
-  const handleSaveStructCreds = async (providerName: string, label: string) => {
-    const val = structCredValues[providerName] ?? '';
-    if (val === '') {
-      showToast('Enter a value first');
-      return;
-    }
-    try {
-      await api.saveCreds(providerName, { apiKey: val });
-      await load();
-      showToast(`${label} key saved`);
-    } catch (e) {
-      showToast(`Could not save: ${(e as Error).message}`);
-    }
-  };
-
-  const handleClearStructCreds = async (providerName: string, label: string) => {
-    try {
-      await api.clearCreds(providerName);
-      setStructCredValues((prev) => {
-        const next = { ...prev };
-        delete next[providerName];
-        return next;
-      });
-      await load();
-      showToast(`${label} key cleared`);
-    } catch (e) {
-      showToast(`Could not clear: ${(e as Error).message}`);
-    }
-  };
-
   if (!settings) {
     return (
       <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.muted }}>
@@ -230,6 +209,13 @@ export function SettingsPage() {
       </div>
     );
   }
+
+  const extractionNames = new Set(settings.providers.map((p) => p.name));
+  const structuringOnlyProviders = STRUCTURING_PROVIDERS.filter(
+    (sp) => !sp.keyless && !extractionNames.has(sp.name),
+  );
+  const bothGemini = extractionProvider === 'gemini' && structuringProvider === 'gemini';
+  const geminiModels = STRUCTURING_MODEL_SUGGESTIONS.gemini ?? [];
 
   return (
     <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 720 }}>
@@ -248,7 +234,15 @@ export function SettingsPage() {
           <select
             style={selectStyle}
             value={extractionProvider}
-            onChange={(e) => setExtractionProvider(e.target.value)}
+            onChange={(e) => {
+              const p = e.target.value;
+              setExtractionProvider(p);
+              if (p === 'gemini') {
+                setStructuringProvider('gemini');
+                setStructuringModel((m) => modelForProvider('gemini', m));
+                setExtractionModel((m) => normalizeGeminiModel(m || 'gemini-2.5-flash'));
+              }
+            }}
           >
             {settings.providers.map((p) => (
               // Use "displayName (name)" format so bare displayName doesn't appear as option text
@@ -266,7 +260,6 @@ export function SettingsPage() {
             onChange={(e) => {
               const p = e.target.value;
               setStructuringProvider(p);
-              // Keep the model in sync so it can't be paired with the wrong provider.
               setStructuringModel((m) => modelForProvider(p, m));
             }}
           >
@@ -275,29 +268,66 @@ export function SettingsPage() {
             ))}
           </select>
         </div>
-        <div style={{ marginBottom: 18 }}>
-          <label style={labelStyle}>Structuring model</label>
-          <input
-            type="text"
-            style={inputStyle}
-            value={structuringModel}
-            onChange={(e) => setStructuringModel(e.target.value)}
-            placeholder={STRUCTURING_MODEL_SUGGESTIONS[structuringProvider]?.[0] ?? 'model id'}
-            list="structuring-model-options"
-          />
-          <datalist id="structuring-model-options">
-            {(STRUCTURING_MODEL_SUGGESTIONS[structuringProvider] ?? []).map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
-          <div style={{ fontSize: 11, color: T.muted, marginTop: 5 }}>
-            Must be a model the selected provider offers
-            {(STRUCTURING_MODEL_SUGGESTIONS[structuringProvider]?.length ?? 0) > 0 && (
-              <> — e.g. {STRUCTURING_MODEL_SUGGESTIONS[structuringProvider].join(', ')}</>
-            )}
-            .
+        {bothGemini ? (
+          <div style={{ marginBottom: 18 }}>
+            <label style={labelStyle}>Gemini model (OCR + structuring)</label>
+            <select
+              style={selectStyle}
+              value={structuringModel}
+              onChange={(e) => {
+                const m = e.target.value;
+                setStructuringModel(m);
+                setExtractionModel(m);
+              }}
+            >
+              {geminiModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: T.muted, marginTop: 5 }}>
+              One model for PDF reading and field extraction. API key is saved below.
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            {extractionProvider === 'gemini' && geminiModels.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>Extraction model (OCR)</label>
+                <select
+                  style={selectStyle}
+                  value={extractionModel}
+                  onChange={(e) => setExtractionModel(e.target.value)}
+                >
+                  {geminiModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div style={{ marginBottom: 18 }}>
+              <label style={labelStyle}>Structuring model</label>
+              {(STRUCTURING_MODEL_SUGGESTIONS[structuringProvider]?.length ?? 0) > 0 ? (
+                <select
+                  style={selectStyle}
+                  value={structuringModel}
+                  onChange={(e) => setStructuringModel(e.target.value)}
+                >
+                  {STRUCTURING_MODEL_SUGGESTIONS[structuringProvider].map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  style={inputStyle}
+                  value={structuringModel}
+                  onChange={(e) => setStructuringModel(e.target.value)}
+                  placeholder="model id"
+                />
+              )}
+            </div>
+          </>
+        )}
         <button style={btnPrimary} onClick={handleSaveSelections}>
           Save selections
         </button>
@@ -332,12 +362,12 @@ export function SettingsPage() {
             const shown = !isSecret || !!revealed[key];
             return (
               <div key={field} style={{ marginBottom: 12 }}>
-                <label style={labelStyle}>{field}</label>
+                <label style={labelStyle}>{field === 'apiKey' ? 'API key' : field}</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     type={shown ? 'text' : 'password'}
                     style={inputStyle}
-                    placeholder={field}
+                    placeholder={field === 'apiKey' ? 'Paste API key here' : field}
                     autoComplete="off"
                     value={credValues[key] ?? ''}
                     onChange={(e) =>
@@ -365,45 +395,52 @@ export function SettingsPage() {
         </div>
       ))}
 
-      {/* Section 3 — Structuring provider credentials (rendered AFTER section 2) */}
-      <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-        Structuring provider credentials
-      </h2>
-      {STRUCTURING_PROVIDERS.filter((sp) => !sp.keyless).map((sp) => {
-        const key = `struct.${sp.name}`;
-        const shown = !!revealed[key];
-        return (
-          <div key={sp.name} style={cardStyle}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{sp.label}</div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={labelStyle}>API Key</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type={shown ? 'text' : 'password'}
-                  style={inputStyle}
-                  placeholder={STRUCTURING_CRED_LABELS[sp.name]}
-                  autoComplete="off"
-                  value={structCredValues[sp.name] ?? ''}
-                  onChange={(e) =>
-                    setStructCredValues((prev) => ({ ...prev, [sp.name]: e.target.value }))
-                  }
-                />
-                <button type="button" style={toggleBtn} onClick={() => toggleReveal(key)}>
-                  {shown ? 'Hide' : 'Show'}
-                </button>
+      {structuringOnlyProviders.length > 0 && (
+        <>
+          <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Structuring-only credentials
+          </h2>
+          <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px' }}>
+            For providers used only in the structuring step (not PDF OCR). Gemini and Mistral keys live in Provider credentials above.
+          </p>
+          {structuringOnlyProviders.map((sp) => {
+            const key = `struct.${sp.name}`;
+            const shown = !!revealed[key];
+            const credKey = `${sp.name}.apiKey`;
+            return (
+              <div key={sp.name} style={cardStyle}>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{sp.label}</div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={labelStyle}>API key</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type={shown ? 'text' : 'password'}
+                      style={inputStyle}
+                      placeholder={STRUCTURING_CRED_LABELS[sp.name]}
+                      autoComplete="off"
+                      value={credValues[credKey] ?? ''}
+                      onChange={(e) =>
+                        setCredValues((prev) => ({ ...prev, [credKey]: e.target.value }))
+                      }
+                    />
+                    <button type="button" style={toggleBtn} onClick={() => toggleReveal(key)}>
+                      {shown ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={btnPrimary} onClick={() => handleSaveCreds(sp.name, sp.label)}>
+                    Save
+                  </button>
+                  <button style={btnSecondary} onClick={() => handleClearCreds(sp.name, sp.label)}>
+                    Clear
+                  </button>
+                </div>
               </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button style={btnPrimary} onClick={() => handleSaveStructCreds(sp.name, sp.label)}>
-                Save
-              </button>
-              <button style={btnSecondary} onClick={() => handleClearStructCreds(sp.name, sp.label)}>
-                Clear
-              </button>
-            </div>
-          </div>
-        );
-      })}
+            );
+          })}
+        </>
+      )}
 
       <Toast message={toast} />
     </div>

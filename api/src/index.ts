@@ -1,7 +1,8 @@
 import { mkdir } from 'node:fs/promises';
-import { env } from './env.js';
+import { env } from './config/env.js';
 import { buildApp } from './app.js';
 import { seedFromEnv } from './settings/seed.js';
+import { migrateDeprecatedSettings } from './settings/migrate.js';
 
 // Last-resort safety net: a stray rejection or error from a background task (e.g. an
 // extraction) must not take the whole API down. Log it and keep serving.
@@ -18,6 +19,7 @@ async function main() {
   }
   await mkdir(env.uploadDir, { recursive: true });
   await seedFromEnv();
+  await migrateDeprecatedSettings();
   const app = await buildApp();
   await app.listen({ port: env.port, host: '0.0.0.0' });
 }

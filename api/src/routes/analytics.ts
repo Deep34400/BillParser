@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { prisma } from '../db.js';
+import { prisma } from '../config/db.js';
 const THRESHOLD = 0.75;
 export async function analyticsRoutes(app: FastifyInstance) {
   app.get('/api/analytics', async () => {

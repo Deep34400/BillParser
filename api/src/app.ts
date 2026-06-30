@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { configRoutes } from './routes/config.js';
 import { invoiceRoutes } from './routes/invoices.js';
+import { parseRoutes } from './routes/parse.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { settingsRoutes } from './routes/settings.js';
 import { exportRoutes } from './routes/export.js';
@@ -14,6 +15,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 50 } });
   await app.register(configRoutes);
   await app.register(invoiceRoutes);
+  await app.register(parseRoutes);
   await app.register(batchesRoutes);
   await app.register(exportRoutes);
   await app.register(analyticsRoutes);

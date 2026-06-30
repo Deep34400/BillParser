@@ -1,3 +1,5 @@
+import type { ParsedInvoiceData } from '../parsing/types.js';
+
 export interface CanonicalLineItem {
   lineNumber: number; description?: string; sku?: string; hsnSac?: string;
   quantity?: number; unitPrice?: number; amount?: number; labourAmount?: number; taxRate?: number;
@@ -21,6 +23,8 @@ export interface CanonicalResult {
   costEstimate?: number; latencyMs?: number; pageCount?: number;
   // USD cost of the structuring (LLM) step, from its token usage. 0 for local/un-priced.
   structuringCost?: number;
+  /** Full central-schema parsed_data — saved to Invoice.parsedData in DB. */
+  parsedData?: ParsedInvoiceData | null;
 }
 export interface ExtractCtx {
   fileName: string;

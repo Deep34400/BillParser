@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 beforeEach(async () => { await prisma.invoice.deleteMany(); await prisma.providerConfig.deleteMany(); });
 it('bakeoff with no configured providers returns empty runs', async () => {
   const app = await buildApp();

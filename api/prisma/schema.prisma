@@ -46,6 +46,7 @@ model Invoice {
   totalAmount   Float?
   netAmount     Float?
   summaryColumns Json?
+  parsedData    Json?
   paymentTerms  String?
   rawText       String?
   rawJson       Json?

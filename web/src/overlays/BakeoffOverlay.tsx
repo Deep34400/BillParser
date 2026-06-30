@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import type { Invoice, ExtractionRun } from '../types.js';
-import { api } from '../api.js';
+import type { Invoice, ExtractionRun } from '../types/index.js';
+import { api } from '../api/client.js';
 import { T, STATUS } from '../theme.js';
-import { money, confLabel, confColor } from '../format.js';
+import { money, confLabel, confColor } from '../lib/format.js';
 
 // ---------------------------------------------------------------------------
 // Provider reference data (representative / static — no API call needed)
 // ---------------------------------------------------------------------------
 const PROVIDER_LABELS: Record<string, string> = {
+  gemini: 'Gemini',
   mistral: 'Mistral',
   azure: 'Azure',
   llamaparse: 'LlamaParse',
@@ -16,6 +17,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 const PROVIDER_REF: Record<string, { costPer1k: number; headerAcc: number; lineAcc: number; pattern: string }> = {
+  gemini: { costPer1k: 2, headerAcc: 0.88, lineAcc: 0.84, pattern: 'OCR→md + LLM' },
   mistral: { costPer1k: 2, headerAcc: 0.9, lineAcc: 0.85, pattern: 'OCR→md + LLM' },
   azure: { costPer1k: 10, headerAcc: 0.93, lineAcc: 0.87, pattern: 'prebuilt invoice' },
   llamaparse: { costPer1k: 9, headerAcc: 0.9, lineAcc: 0.85, pattern: 'OCR→md + LLM' },

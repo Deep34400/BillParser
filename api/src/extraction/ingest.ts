@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
-import { prisma } from '../db.js';
-import { env } from '../env.js';
+import { prisma } from '../config/db.js';
+import { env } from '../config/env.js';
 import { sha256 } from '../lib/hash.js';
 import { isPdf } from '../lib/pdf.js';
 import { runExtraction } from './run.js';

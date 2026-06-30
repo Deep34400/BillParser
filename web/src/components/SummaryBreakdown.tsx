@@ -1,6 +1,6 @@
-import type { Invoice } from '../types.js';
+import type { Invoice } from '../types/index.js';
 import { T } from '../theme.js';
-import { money } from '../format.js';
+import { money } from '../lib/format.js';
 
 // ---------------------------------------------------------------------------
 // SummaryBreakdown — the ordered GST totals block:

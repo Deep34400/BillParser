@@ -1,7 +1,7 @@
 import type { StructuringModel } from './types.js';
 import { STRUCTURING_PROMPT } from './types.js';
-import { normalizeStructured } from './index.js';
-import { ollamaChat } from '../lib/ollama.js';
+import { structureFromLlmResponse } from '../parsing/index.js';
+import { ollamaChat } from '../providers/clients/ollama.js';
 
 const DEFAULT_BASE_URL = 'http://host.docker.internal:11434';
 
@@ -29,7 +29,7 @@ export const ollamaStructModel = (model: string): StructuringModel => ({
     // temperature 0 (greedy) makes structuring deterministic — at the default 0.8 the same
     // OCR markdown yields wildly different results run-to-run (e.g. 0 vs 10 line items).
     const { content } = await ollamaChat(baseUrl, useModel, prompt, { json: true, numCtx, temperature: 0 });
-    return { ...normalizeStructured(content, markdown), structuringCost: 0 }; // local model: free
+    return structureFromLlmResponse(content, markdown, 0);
 
   },
 });

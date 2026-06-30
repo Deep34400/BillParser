@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 beforeEach(async () => { await prisma.invoice.deleteMany(); await prisma.batch.deleteMany(); });
 async function seed() {
   await prisma.invoice.create({ data: { fileName: 'a.pdf', storedPath: '/a', fileHash: 'ha', status: 'COMPLETED', vendorName: 'Acme', totalAmount: 100, invoiceDate: new Date('2026-01-05') } });

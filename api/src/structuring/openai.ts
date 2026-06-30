@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { StructuringModel } from './types.js';
 import { STRUCTURING_PROMPT } from './types.js';
-import { normalizeStructured } from './index.js';
+import { structureFromLlmResponse } from '../parsing/index.js';
 import { structuringTokenCost } from './pricing.js';
 export const openaiModel = (model: string): StructuringModel => ({
   provider: 'openai', model,
@@ -14,6 +14,6 @@ export const openaiModel = (model: string): StructuringModel => ({
       ],
     });
     const structuringCost = structuringTokenCost(model, res.usage?.prompt_tokens, res.usage?.completion_tokens);
-    return { ...normalizeStructured(res.choices[0]?.message?.content ?? '{}', markdown), structuringCost };
+    return structureFromLlmResponse(res.choices[0]?.message?.content ?? '{}', markdown, structuringCost);
   },
 });

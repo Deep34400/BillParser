@@ -2,7 +2,7 @@ import { it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { InvoicesPage } from '../src/pages/InvoicesPage.js';
-import { api } from '../src/api.js';
+import { api } from '../src/api/client.js';
 
 beforeEach(() => {
   vi.spyOn(api, 'list').mockResolvedValue({ invoices: [

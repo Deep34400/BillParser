@@ -1,10 +1,14 @@
-// Out-of-the-box defaults: fully local (Ollama), so the app runs with no cloud API keys.
-// Precedence: a saved Setting (changed in the UI) > the matching env var seeded on first
-// boot (see seed.ts) > these constants. Switch to a hosted provider any time in Settings.
+// Out-of-the-box defaults: Google Gemini (API key in Settings). Ollama remains available
+// for fully local runs. Precedence: saved Setting > env var seeded on first boot > here.
 export const DEFAULTS = {
-  extraction_provider: 'ollama',
-  structuring_provider: 'ollama',
-  structuring_model: 'qwen2.5:3b',
+  // Mistral OCR = one API call; Gemini only for JSON structuring (faster than multi-page Gemini OCR).
+  extraction_provider: 'mistral',
+  structuring_provider: 'gemini',
+  structuring_model: 'gemini-2.5-flash',
+} as const;
+
+export const DEFAULT_GEMINI = {
+  model: 'gemini-2.5-flash',
 } as const;
 
 // Default Ollama connection seeded so the local provider is "configured" on first boot.

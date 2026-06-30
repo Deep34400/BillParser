@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { prisma } from '../db.js';
+import { prisma } from '../config/db.js';
 import type { CanonicalResult, ExtractionProvider } from '../providers/types.js';
 import { allProviders, getProvider } from '../providers/registry.js';
 import { getCredentials, getProviderCredsOrThrow, getSetting } from '../settings/store.js';
@@ -59,6 +59,7 @@ function headerData(r: CanonicalResult) {
     discountAmount: r.discountAmount ?? null, cgstAmount: r.cgstAmount ?? null, sgstAmount: r.sgstAmount ?? null,
     igstAmount: r.igstAmount ?? null, netAmount: r.netAmount ?? null,
     summaryColumns: (r.summaryColumns ?? null) as any,
+    parsedData: (r.parsedData ?? null) as any,
     rawText: r.rawText ?? null, rawJson: (r.rawJson ?? null) as any,
   };
 }

@@ -1,5 +1,5 @@
-import { prisma } from '../db.js';
-import { env } from '../env.js';
+import { prisma } from '../config/db.js';
+import { env } from '../config/env.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import type { ExtractionProvider } from '../providers/types.js';
 

@@ -1,6 +1,6 @@
-import type { Invoice, SummaryColumn } from '../types.js';
+import type { Invoice, SummaryColumn } from '../types/index.js';
 import { T } from '../theme.js';
-import { money } from '../format.js';
+import { money } from '../lib/format.js';
 
 // ---------------------------------------------------------------------------
 // SummaryColumns — columnwise totals (e.g. Parts | Labour), with the overall

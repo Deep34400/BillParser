@@ -3,7 +3,7 @@ import { writeFile, mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PDFDocument } from 'pdf-lib';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 import { runExtraction, runExtractionWith } from '../../src/extraction/run.js';
 import { requestCancel } from '../../src/extraction/cancel.js';
 import { setCredentials, setSetting } from '../../src/settings/store.js';

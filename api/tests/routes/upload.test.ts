@@ -1,6 +1,6 @@
 import { it, expect, beforeEach, vi } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 import { PDFDocument } from 'pdf-lib';
 import * as run from '../../src/extraction/run.js';
 

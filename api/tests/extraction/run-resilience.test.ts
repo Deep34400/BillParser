@@ -1,5 +1,5 @@
 import { it, expect, beforeEach } from 'vitest';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 import { runExtraction } from '../../src/extraction/run.js';
 
 beforeEach(async () => { await prisma.invoice.deleteMany(); });

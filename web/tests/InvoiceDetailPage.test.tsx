@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { InvoiceDetailPage } from '../src/pages/InvoiceDetailPage.js';
-import { api } from '../src/api.js';
+import { api } from '../src/api/client.js';
 const inv = { id: '1', status: 'COMPLETED', vendorName: 'Acme', vendorAddress: '1 St', vendorTaxId: 'TX1', fileName: 'a.pdf',
   invoiceNumber: 'INV-1', poNumber: 'PO-1', invoiceDate: '2026-01-05', dueDate: '2026-02-05', currency: 'USD',
   subtotal: 90, taxAmount: 10, totalAmount: 100, confidence: 0.9, provider: 'azure', verified: false, error: null,

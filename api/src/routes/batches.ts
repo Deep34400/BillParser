@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { prisma } from '../db.js';
+import { prisma } from '../config/db.js';
 
 // Per-batch processing roll-up: total invoices and how many are COMPLETED / FAILED /
 // still in flight (PENDING or PROCESSING). Powers the batch dropdown + progress banner.

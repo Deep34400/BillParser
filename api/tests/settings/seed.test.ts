@@ -1,5 +1,5 @@
 import { it, expect, beforeEach } from 'vitest';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 import { seedFromEnv } from '../../src/settings/seed.js';
 import { getCredentials, getSetting } from '../../src/settings/store.js';
 

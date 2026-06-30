@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 beforeEach(async () => { await prisma.providerConfig.deleteMany(); await prisma.setting.deleteMany(); });
 it('GET settings returns selections + masked provider status', async () => {
   const app = await buildApp();
@@ -9,12 +9,12 @@ it('GET settings returns selections + masked provider status', async () => {
   expect(b.providers.find((p: any) => p.name === 'azure')).toMatchObject({ configured: false });
   await app.close();
 });
-it('defaults to fully-local providers (ollama) when nothing is configured', async () => {
+it('defaults to Gemini providers when nothing is configured', async () => {
   const app = await buildApp();
   const b = (await app.inject({ url: '/api/settings' })).json();
-  expect(b.extractionProvider).toBe('ollama');
-  expect(b.structuringProvider).toBe('ollama');
-  expect(b.structuringModel).toBe('qwen2.5:3b');
+  expect(b.extractionProvider).toBe('gemini');
+  expect(b.structuringProvider).toBe('gemini');
+  expect(b.structuringModel).toBe('gemini-2.5-flash');
   await app.close();
 });
 it('PUT credentials stores encrypted + masks on read; never returns raw', async () => {

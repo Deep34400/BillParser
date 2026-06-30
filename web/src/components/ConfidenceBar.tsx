@@ -1,5 +1,5 @@
 import { T } from '../theme.js';
-import { confColor, confLabel } from '../format.js';
+import { confColor, confLabel } from '../lib/format.js';
 
 export function ConfidenceBar({ value, verified }: { value?: number | null; verified?: boolean }) {
   if (verified) {

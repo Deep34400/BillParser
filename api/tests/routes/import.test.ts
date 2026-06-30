@@ -1,6 +1,6 @@
 import { it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 import { PDFDocument } from 'pdf-lib';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

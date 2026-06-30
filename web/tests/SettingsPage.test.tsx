@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { SettingsPage } from '../src/pages/SettingsPage.js';
-import { api } from '../src/api.js';
+import { api } from '../src/api/client.js';
 beforeEach(() => {
   vi.spyOn(api, 'settings').mockResolvedValue({ extractionProvider: 'mistral', structuringProvider: 'anthropic', structuringModel: 'claude-sonnet-4-6',
     providers: [{ name: 'azure', displayName: 'Azure', kind: 'structured', requiredCredentials: ['endpoint','apiKey'], configured: false, masked: {} }] } as any);

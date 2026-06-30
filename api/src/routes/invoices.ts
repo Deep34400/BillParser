@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { mkdir } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
-import { prisma } from '../db.js';
-import { env } from '../env.js';
+import { prisma } from '../config/db.js';
+import { env } from '../config/env.js';
 import { runExtraction } from '../extraction/run.js';
 import { requestCancel } from '../extraction/cancel.js';
 import { splitCost } from '../extraction/confidence.js';

@@ -8,6 +8,10 @@ const PRICING_PER_1M: Record<string, [number, number]> = {
   'gpt-4o': [2.5, 10],
   'gpt-4o-mini': [0.15, 0.6],
   'claude-sonnet-4-6': [3, 15],
+  'gemini-2.5-flash': [0.15, 0.60],
+  'gemini-2.5-flash-lite': [0.075, 0.30],
+  'gemini-2.5-pro': [1.25, 5.00],
+  'gemini-flash-latest': [0.15, 0.60],
 };
 
 // USD cost of a structuring call given the model and its input/output token counts.

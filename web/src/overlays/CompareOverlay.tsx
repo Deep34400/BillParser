@@ -1,6 +1,6 @@
-import type { Invoice } from '../types.js';
+import type { Invoice } from '../types/index.js';
 import { T } from '../theme.js';
-import { money, dateFmt, confLabel } from '../format.js';
+import { money, dateFmt, confLabel } from '../lib/format.js';
 import { SummaryBreakdown } from '../components/SummaryBreakdown.js';
 import { SummaryColumns } from '../components/SummaryColumns.js';
 

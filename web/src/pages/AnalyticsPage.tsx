@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { Analytics } from '../types.js';
-import { api } from '../api.js';
+import type { Analytics } from '../types/index.js';
+import { api } from '../api/client.js';
 import { T } from '../theme.js';
-import { money, confLabel } from '../format.js';
+import { money, confLabel } from '../lib/format.js';
 
 export function AnalyticsPage() {
   const [data, setData] = useState<Analytics | null>(null);

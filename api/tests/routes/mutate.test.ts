@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 import * as run from '../../src/extraction/run.js';
 beforeEach(async () => { await prisma.invoice.deleteMany(); vi.spyOn(run, 'runExtraction').mockResolvedValue(); });
 

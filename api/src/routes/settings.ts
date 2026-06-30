@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { allProviders } from '../providers/registry.js';
 import { getSetting, setSetting, getCredentials, setCredentials, clearCredentials } from '../settings/store.js';
 import { maskValue } from '../lib/crypto.js';
-import { DEFAULTS } from '../settings/defaults.js';
+import { DEFAULTS, DEFAULT_GEMINI } from '../settings/defaults.js';
+import { normalizeGeminiModel } from '../settings/migrate.js';
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/api/settings', async () => {
@@ -15,7 +16,8 @@ export async function settingsRoutes(app: FastifyInstance) {
     return {
       extractionProvider: await getSetting('extraction_provider', DEFAULTS.extraction_provider),
       structuringProvider: await getSetting('structuring_provider', DEFAULTS.structuring_provider),
-      structuringModel: await getSetting('structuring_model', DEFAULTS.structuring_model),
+      structuringModel: normalizeGeminiModel(await getSetting('structuring_model', DEFAULTS.structuring_model)),
+      extractionModel: normalizeGeminiModel(await getSetting('extraction_model', DEFAULT_GEMINI.model)),
       providers,
     };
   });
@@ -24,7 +26,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   // trusted, single-tenant, no-auth self-hosted deployment this tool targets.
   // (The default GET /api/settings stays masked; only this endpoint reveals.)
   app.get('/api/settings/reveal', async () => {
-    const names = new Set<string>([...allProviders().map((p) => p.name), 'anthropic', 'openai', 'mistral']);
+    const names = new Set<string>([...allProviders().map((p) => p.name), 'anthropic', 'openai', 'mistral', 'gemini']);
     const credentials: Record<string, Record<string, string>> = {};
     for (const name of names) {
       const creds = await getCredentials(name);
@@ -36,7 +38,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     const b = req.body as any;
     if (b.extractionProvider) await setSetting('extraction_provider', b.extractionProvider);
     if (b.structuringProvider) await setSetting('structuring_provider', b.structuringProvider);
-    if (b.structuringModel) await setSetting('structuring_model', b.structuringModel);
+    if (b.structuringModel) await setSetting('structuring_model', normalizeGeminiModel(b.structuringModel));
+    if (b.extractionModel) await setSetting('extraction_model', normalizeGeminiModel(b.extractionModel));
+    // When both layers use Gemini, one model picker drives OCR + structuring.
+    if (b.extractionProvider === 'gemini' && b.structuringProvider === 'gemini' && b.structuringModel) {
+      const model = normalizeGeminiModel(b.structuringModel);
+      await setSetting('extraction_model', model);
+      await setSetting('structuring_model', model);
+    }
     return { ok: true };
   });
   app.put('/api/settings/providers/:provider', async (req) => {

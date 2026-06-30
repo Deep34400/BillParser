@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.env.local
+.env.*.local
 *.log
 uploads/
 api/prisma/*.db
@@ -8,3 +10,11 @@ coverage/
 .claude/
 import/*
 !import/.gitkeep
+
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+
+# Local scratch / temp bill fixtures
+**/tmp_bills/
+api/tmp_*.ts

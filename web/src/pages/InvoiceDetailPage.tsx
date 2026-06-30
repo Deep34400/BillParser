@@ -1,16 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '../api.js';
-import type { Invoice, AppConfig, LineItem, SummaryColumn } from '../types.js';
+import { api } from '../api/client.js';
+import type { Invoice, AppConfig, LineItem, SummaryColumn } from '../types/index.js';
 import { T } from '../theme.js';
-import { money, dateFmt, confLabel, costFmt } from '../format.js';
+import { money, dateFmt, confLabel, costFmt } from '../lib/format.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { CompareOverlay } from '../overlays/CompareOverlay.js';
 import { BakeoffOverlay } from '../overlays/BakeoffOverlay.js';
-import { SummaryBreakdown } from '../components/SummaryBreakdown.js';
-import { SummaryColumns } from '../components/SummaryColumns.js';
+import { InvoiceBreakdown } from '../components/InvoiceBreakdown.js';
 
 // ---------------------------------------------------------------------------
 // Editable line item shape
@@ -343,7 +342,7 @@ export function InvoiceDetailPage() {
     );
   }
 
-  const currency = inv.currency ?? 'USD';
+  const currency = inv.currency ?? 'INR';
 
   return (
     <div style={{ background: T.bg, minHeight: '100vh', fontFamily: T.font }}>
@@ -589,8 +588,8 @@ export function InvoiceDetailPage() {
             {/* Canonical field grid */}
             <FieldGrid inv={inv} currency={currency} />
 
-            {/* Line-item table */}
-            <LineItemTable items={inv.lineItems ?? []} currency={currency} inv={inv} />
+            {/* Parts / labour breakdown */}
+            <InvoiceBreakdown inv={inv} currency={currency} />
 
             {/* Raw OCR section */}
             <div style={{ marginTop: 24 }}>
@@ -696,88 +695,6 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
             <div style={{ fontSize: 14, color: T.text, fontWeight: 500 }}>{value}</div>
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// LineItemTable sub-component
-// ---------------------------------------------------------------------------
-function LineItemTable({ items, currency, inv }: { items: LineItem[]; currency: string; inv: Invoice }) {
-  const thS: React.CSSProperties = {
-    padding: '9px 12px',
-    textAlign: 'left',
-    fontSize: 11,
-    fontWeight: 600,
-    color: T.muted,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
-    background: T.rail,
-    borderBottom: `1px solid ${T.border}`,
-  };
-  const tdS: React.CSSProperties = {
-    padding: '10px 12px',
-    fontSize: 13,
-    color: T.text,
-    borderBottom: `1px solid ${T.border}`,
-    verticalAlign: 'middle',
-  };
-  const numS: React.CSSProperties = { ...tdS, textAlign: 'right', fontFamily: T.mono };
-
-  return (
-    <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden', marginBottom: 20 }}>
-      <div style={{
-        padding: '10px 16px',
-        borderBottom: `1px solid ${T.border}`,
-        fontSize: 11,
-        fontWeight: 700,
-        color: T.muted,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        background: T.rail,
-      }}>
-        Line items
-      </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: T.font }}>
-        <thead>
-          <tr>
-            <th style={thS}>Description</th>
-            <th style={thS}>SKU</th>
-            <th style={thS}>HSN/SAC</th>
-            <th style={{ ...thS, textAlign: 'right' }}>Qty</th>
-            <th style={{ ...thS, textAlign: 'right' }}>Unit price</th>
-            <th style={{ ...thS, textAlign: 'right' }}>Amount</th>
-            <th style={{ ...thS, textAlign: 'right' }}>Labour</th>
-            <th style={{ ...thS, textAlign: 'right' }}>Tax rate</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.length === 0 ? (
-            <tr>
-              <td colSpan={8} style={{ ...tdS, textAlign: 'center', color: T.muted }}>No line items</td>
-            </tr>
-          ) : (
-            items.map((it, i) => (
-              <tr key={it.id ?? i}>
-                <td style={tdS}>{it.description ?? '—'}</td>
-                <td style={{ ...tdS, color: T.muted, fontFamily: T.mono }}>{it.sku ?? '—'}</td>
-                <td style={{ ...tdS, color: T.muted, fontFamily: T.mono }}>{it.hsnSac ?? '—'}</td>
-                <td style={numS}>{it.quantity ?? '—'}</td>
-                <td style={numS}>{money(it.unitPrice, currency)}</td>
-                <td style={numS}>{it.amount != null ? money(it.amount, currency) : '—'}</td>
-                <td style={numS}>{it.labourAmount != null ? money(it.labourAmount, currency) : '—'}</td>
-                <td style={numS}>{it.taxRate != null ? `${it.taxRate}%` : '—'}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-      {/* Summary row — columnwise (Parts/Labour) when present, else stacked GST breakdown */}
-      <div style={{ borderTop: `2px solid ${T.border}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-        {inv.summaryColumns && inv.summaryColumns.length > 0
-          ? <SummaryColumns inv={inv} currency={currency} />
-          : <SummaryBreakdown inv={inv} currency={currency} />}
       </div>
     </div>
   );
@@ -1256,7 +1173,7 @@ function PdfSplit({
         {comparePane === 'fields' ? (
           <>
             <FieldGrid inv={inv} currency={currency} />
-            <LineItemTable items={inv.lineItems ?? []} currency={currency} inv={inv} />
+            <InvoiceBreakdown inv={inv} currency={currency} />
           </>
         ) : (
           <RawOcrBlock rawText={inv.rawText} maxHeight="calc(100vh - 260px)" />

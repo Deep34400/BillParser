@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 import { getSetting, setSetting, getCredentials, setCredentials, clearCredentials } from '../../src/settings/store.js';
 
 beforeEach(async () => { await prisma.providerConfig.deleteMany(); await prisma.setting.deleteMany(); });

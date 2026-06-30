@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { prisma } from '../db.js';
+import { prisma } from '../config/db.js';
 import { toCsv } from '../lib/csv.js';
 import { buildWhere } from './invoices.js';
 

@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
-import { env } from '../../src/env.js';
+import { prisma } from '../../src/config/db.js';
+import { env } from '../../src/config/env.js';
 
 const PDF_BYTES = Buffer.from('%PDF-1.4\n%fake test pdf\n');
 

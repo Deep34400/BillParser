@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../../src/app.js';
-import { prisma } from '../../src/db.js';
+import { prisma } from '../../src/config/db.js';
 beforeEach(async () => { await prisma.invoice.deleteMany(); });
 it('exports header csv with content-type and rows', async () => {
   const app = await buildApp();
