@@ -49,10 +49,31 @@ export interface Invoice {
   batchId?: string | null; batch?: { id: string; name: string } | null;
   itemCount?: number; costEstimate?: number | null;
   extractionCost?: number | null; structuringCost?: number | null;
+  extractionTokens?: number | null; structuringTokens?: number | null; totalTokens?: number | null;
+  extractionProvider?: string | null; structuringProvider?: string | null;
+  extractionModel?: string | null; structuringModel?: string | null;
+  extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;
   lineItems?: LineItem[]; runs?: ExtractionRun[];
+  reviewReasons?: string[] | null;
 }
 export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; }
 export interface ProviderInfo { name: string; displayName: string; kind: string; configured: boolean; requiredCredentials?: string[]; masked?: Record<string, string>; }
 export interface AppConfig { providers: ProviderInfo[]; activeProvider: string; structuringProvider: string; structuringModel: string; }
 export interface SettingsData { extractionProvider: string; structuringProvider: string; structuringModel: string; extractionModel?: string; providers: ProviderInfo[]; }
-export interface Analytics { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; byVendor: { name: string; amount: number }[]; byMonth: { label: string; amount: number }[]; }
+export interface VehicleSpend { vehicle_id: string; registration_number: string | null; total_bills: number; total_amount: number; parts_amount: number; labour_amount: number; total_tax: number; }
+export interface CostPerKm { vehicle_id: string; registration_number: string | null; total_spend: number; km_range: number | null; cost_per_km: number | null; }
+export interface OcrCostSummary {
+  total_ocr_count: number;
+  total_extraction_cost_usd: number;
+  total_structuring_cost_usd: number;
+  total_cost_usd: number;
+  total_extraction_tokens: number;
+  total_structuring_tokens: number;
+  total_tokens: number;
+  avg_cost_per_ocr_usd: number;
+  avg_tokens_per_ocr: number;
+  by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
+}
+export interface Analytics { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; byVendor: { name: string; amount: number }[]; byMonth: { label: string; amount: number }[]; vehicleSpend: VehicleSpend[]; costPerKm: CostPerKm[]; ocrCosts?: OcrCostSummary; }
+export interface FraudAlert { type: string; severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; message: string; bill_ids: string[]; details: Record<string, unknown>; }
+export interface FraudScanResult { success: boolean; message: string; data: FraudAlert[]; metadata?: { total: number; by_type?: Record<string, number>; by_severity?: Record<string, number> }; }

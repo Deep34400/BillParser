@@ -5,16 +5,14 @@ dist/
 .env.*.local
 *.log
 uploads/
-api/prisma/*.db
 coverage/
 .claude/
-import/*
-!import/.gitkeep
 
 # OS / editor junk
 .DS_Store
 **/.DS_Store
 
-# Local scratch / temp bill fixtures
-**/tmp_bills/
-api/tmp_*.ts
+# Firebase / GCP
+firebase-debug.log
+firestore-debug.log
+*.key.json

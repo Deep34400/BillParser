@@ -1,140 +1,125 @@
-# Invoice OCR
+# BillParser — Fleet Maintenance OCR Platform
 
-A self-hosted web application that turns PDF invoices/bills into structured data. Upload PDFs through the browser, extract fields via your choice of OCR/AI provider, review and edit results, then search and export from a persistent Postgres ledger.
+GCP-native, Firebase-based backend for automotive invoice OCR extraction, analytics, and fraud detection.
 
-## What it does
+## Architecture
 
-- **Upload & extract** — drop one or more PDFs on the Invoices page; the API sends each to the active extraction provider and stores the result in a canonical schema (vendor, dates, amounts, line items, tax, currency, etc.).
-- **Ledger UI** — searchable, filterable table of all processed invoices with status badges (PENDING / PROCESSING / COMPLETED / FAILED).
-- **Detail view** — per-invoice field view with inline edit + verify workflow; see raw provider output alongside structured fields.
-- **Analytics** — spending summaries, vendor breakdowns, and trends across the ledger.
-- **Live provider bake-off** — re-extract any invoice against any configured provider without re-uploading.
-- **CSV export** — download the full ledger or a filtered slice.
-- **Settings** — configure provider credentials, choose the active extraction provider, and (for markdown providers) the structuring model.
+```
+Frontend Upload / URL
+        ↓
+  Bill Processing Service (Cloud Run)
+        ↓
+  Cloud Storage (PDF/Image)
+        ↓
+  Mistral OCR → Raw Markdown
+        ↓
+  Gemini Normalization → toApiParsed() schema
+        ↓
+  Firestore (bills + bill_parts)
+```
 
-## Stack
+## Tech Stack
 
-| Layer    | Technology                           |
-|----------|--------------------------------------|
-| Frontend | React 18 + Vite 5, TypeScript        |
-| Backend  | Fastify 4 + Prisma 5, TypeScript     |
-| Database | Postgres 16                          |
-| Runtime  | Node 20 (api), nginx alpine (web)    |
-| Packaging| Docker Compose                       |
+| Component       | Technology              |
+|----------------|------------------------|
+| Runtime        | Node.js 20 + TypeScript |
+| Framework      | Fastify                 |
+| Database       | Cloud Firestore         |
+| File Storage   | Cloud Storage           |
+| OCR Provider   | Mistral OCR             |
+| Normalization  | Google Gemini           |
+| Frontend       | React + Vite            |
+| Deployment     | Cloud Run (Docker)      |
 
-## Quick start (Docker)
+## Project Structure
+
+```
+├── platform/           # Backend (GCP/Firebase)
+│   ├── src/
+│   │   ├── config/     # env.ts, firebase.ts
+│   │   ├── models/     # Firestore types + CRUD (bills, bill_parts, settings)
+│   │   ├── services/   # Business logic
+│   │   │   ├── billing/     # Upload → OCR → Normalize → Store
+│   │   │   ├── analytics/   # Dashboard, vehicle spend, vendor, cost/km
+│   │   │   └── fraud/       # Duplicates, GST, price, odometer checks
+│   │   ├── routes/     # All API endpoints
+│   │   └── lib/        # Shared utilities
+│   └── tests/          # 42 tests
+│
+├── web/                # Frontend (React)
+│   ├── src/
+│   │   ├── pages/      # InvoicesPage, InvoiceDetailPage, AnalyticsPage, SettingsPage
+│   │   ├── components/ # UI components
+│   │   ├── api/        # API client
+│   │   └── types/      # TypeScript interfaces
+│   └── tests/
+│
+└── docker-compose.yml  # api + web (no PostgreSQL)
+```
+
+## Quick Start
 
 ```bash
+# Backend
+cd platform
 cp .env.example .env
-# Edit .env and set a strong, STABLE APP_SECRET, e.g. generate one once:
-#   APP_SECRET=$(openssl rand -hex 32)   # paste the value into .env
-docker compose up --build
-```
+npm install
+npm run dev
 
-- Web UI: http://localhost:8080
-- API: http://localhost:4000
-
-> **Important — keep `APP_SECRET` stable.** Provider credentials are encrypted at
-> rest with `APP_SECRET`. If the value changes between runs, previously-saved
-> credentials can no longer be decrypted and show up as **"not configured"**.
-> Always set it **once** in `.env` (which Docker Compose loads automatically) —
-> do **not** pass a freshly-generated `APP_SECRET=...` on each `docker compose up`.
-
-The API container runs `prisma migrate deploy` automatically on startup, so the database schema is applied before the server begins accepting traffic.
-
-## Configure a provider
-
-Open **Settings** in the app and enter credentials for at least one provider, then choose the active extraction provider (and, for markdown providers, the structuring model provider and model). After saving, uploaded PDFs will be extracted and structured automatically.
-
-If no credentials are configured for the active provider, uploads are accepted but extraction moves to **FAILED** with a clear "no credentials configured" error message — this is by design; there is no mock/stub provider.
-
-## Provider matrix
-
-| Provider              | Key         | Output type | Status                        |
-|-----------------------|-------------|-------------|-------------------------------|
-| GLM-OCR (Ollama)      | `ollama`    | Markdown    | Built, **default** (fully local) |
-| Mistral OCR           | `mistral`   | Markdown    | Built                         |
-| Azure Document Intelligence | `azure` | Structured | Built                        |
-| LlamaParse            | `llamaparse`| Markdown    | Built                         |
-| AWS Textract          | `textract`  | Structured  | Built                         |
-| Google Document AI    | `google`    | Structured  | Stubbed — returns "not implemented" error |
-
-The app defaults to the **fully local** Ollama path (`ollama` OCR + `ollama` structuring, e.g. `qwen2.5:3b`) so it runs with no cloud API keys. Switch any provider to a hosted one in **Settings → Selections** at any time.
-
-**Markdown providers** (Ollama, Mistral, LlamaParse) produce raw markdown from the PDF, then run a second LLM structuring pass to extract canonical fields. The structuring model is configurable in Settings (local Ollama, Anthropic, OpenAI, or Mistral).
-
-**Structured providers** (Azure, Textract) return pre-parsed field maps that are mapped directly to the canonical schema without a second LLM call.
-
-## Local development
-
-### 1. Start a dev Postgres
-
-```bash
-docker run -d --name ioc-pg \
-  -e POSTGRES_USER=invoice \
-  -e POSTGRES_PASSWORD=invoice \
-  -e POSTGRES_DB=invoice \
-  -p 5432:5432 \
-  postgres:16
-```
-
-### 2. Start the API
-
-```bash
-cd api
-cp ../.env.example .env   # edit DATABASE_URL / APP_SECRET / provider keys as needed
-npx prisma migrate dev
-npm run dev               # tsx watch — hot-reloads on save
-```
-
-### 3. Start the web dev server
-
-```bash
+# Frontend
 cd web
 npm install
-npm run dev               # Vite proxies /api/* to http://localhost:4000
+npm run dev
 ```
 
-Vite's dev proxy is configured in `web/vite.config.ts`; set `VITE_API_BASE` in `.env` only for non-Vite builds.
+## Docker
+
+```bash
+docker compose up --build
+# API: http://localhost:4000
+# Web: http://localhost:8081
+```
+
+## API Endpoints
+
+### Bills
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /api/invoices/upload | Upload PDF/image |
+| POST | /api/invoices/import | Import from URLs |
+| GET | /api/invoices | List all bills |
+| GET | /api/invoices/:id | Get bill detail |
+| GET | /api/invoices/:id/file | Get original PDF |
+| PATCH | /api/invoices/:id | Edit & verify |
+| DELETE | /api/invoices/:id | Delete bill |
+| POST | /api/parse | One-shot stateless parse |
+
+### Analytics & Fraud
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/analytics | Dashboard summary |
+| GET | /api/fraud/scan | Run all fraud checks |
+| GET | /api/fraud/duplicates | Duplicate invoices |
+| GET | /api/fraud/gst-anomalies | GST mismatch |
+
+### Settings
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/config | App configuration |
+| GET | /api/settings | Provider settings |
+| PUT | /api/settings | Save settings |
 
 ## Tests
 
 ```bash
-# API — 38 tests (Vitest against a live Postgres; requires DB running)
-cd api && npm test
-
-# Web — 8 tests (Vitest + jsdom, no network required)
-cd web && npm test
+cd platform && npm test
+# 42 tests, 6 test files, all passing
 ```
 
-## Security notes
+## Cloud Run Deploy
 
-- **Credential storage**: provider credentials entered in Settings are stored in Postgres encrypted with AES-256-GCM, keyed from `APP_SECRET`. The default `GET /api/settings` returns only masked hints (e.g. `••••abcd`) and never the raw key.
-- **Credential reveal**: a dedicated `GET /api/settings/reveal` endpoint returns the **decrypted** credentials so the Settings UI can repopulate fields across reloads. This intentionally sends plaintext secrets to the client — it is safe only because v1 is single-tenant with no auth (see below). If you add authentication, gate this endpoint.
-- **No authentication**: v1 has no login/session system. Deploy on trusted or internal infrastructure only. Authentication is on the roadmap.
-- **`APP_SECRET`**: must be set to a strong random value in production. The Docker Compose default (`dev-secret-change-me`) is intentionally weak and must be replaced before exposing the service externally.
-
-## Environment variables
-
-All variables live in `.env` (copy from `.env.example`).
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | Postgres connection string |
-| `APP_SECRET` | Yes | Secret key for AES-256-GCM credential encryption |
-| `UPLOAD_DIR` | No | Directory for uploaded PDFs (default `./uploads`) |
-| `PORT` | No | API listen port (default `4000`) |
-| `EXTRACTION_PROVIDER` | No | Seed the active extraction provider on first boot (default `ollama`; also `mistral`, `azure`, `llamaparse`, `textract`, `google`) |
-| `STRUCTURING_MODEL_PROVIDER` | No | Seed the structuring model provider (default `ollama`; also `anthropic`, `openai`, `mistral`) |
-| `STRUCTURING_MODEL` | No | Seed the structuring model ID (default `qwen2.5:3b`; e.g. `claude-sonnet-4-6` for hosted) |
-| `OLLAMA_BASE_URL` | No | Seed the local Ollama URL for the `ollama` provider (default `http://host.docker.internal:11434`) |
-| `OLLAMA_MODEL` | No | Seed the local Ollama OCR model (default `glm-ocr`) |
-| `MISTRAL_API_KEY` | No | Seed Mistral API key |
-| `AZURE_DI_ENDPOINT` | No | Seed Azure Document Intelligence endpoint URL |
-| `AZURE_DI_KEY` | No | Seed Azure Document Intelligence API key |
-| `LLAMAPARSE_API_KEY` | No | Seed LlamaParse API key |
-| `ANTHROPIC_API_KEY` | No | Seed Anthropic API key (for structuring) |
-| `OPENAI_API_KEY` | No | Seed OpenAI API key (for structuring) |
-| `VITE_API_BASE` | No | API base URL for the web build (Vite dev server uses its proxy instead) |
-
-Seed variables are applied only if no matching setting already exists in the database; the Settings UI always takes precedence after the first boot.
+```bash
+docker build -t billparser-platform platform/
+docker push gcr.io/PROJECT_ID/billparser-platform
+gcloud run deploy billparser --image gcr.io/PROJECT_ID/billparser-platform --region asia-south1
+```

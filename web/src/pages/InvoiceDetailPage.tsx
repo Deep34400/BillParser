@@ -523,6 +523,32 @@ export function InvoiceDetailPage() {
         </div>
       </div>
 
+      {/* Review warnings — OCR could not confirm some fields (e.g. handwritten bill, no GST/PAN) */}
+      {!editMode && !inv.verified && (inv.reviewReasons?.length ?? 0) > 0 && (
+        <div style={{
+          margin: '12px 30px 0',
+          padding: '14px 18px',
+          background: '#fff8ec',
+          borderLeft: `4px solid ${T.amber}`,
+          borderRadius: 6,
+          fontSize: 13,
+          color: '#7a5a00',
+          fontFamily: T.font,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+            ⚠ Needs review — please verify these fields against the document
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {inv.reviewReasons!.map((r, i) => (
+              <li key={i} style={{ marginBottom: 2 }}>{r}</li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
+            Use <b>Edit fields</b> to correct, then <b>Save &amp; verify</b> to clear this warning.
+          </div>
+        </div>
+      )}
+
       {/* Failed error box */}
       {inv.status === 'FAILED' && inv.error && (
         <div style={{
@@ -649,10 +675,10 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
     { label: 'Invoice date', value: dateFmt(inv.invoiceDate) },
     { label: 'Due date', value: dateFmt(inv.dueDate) },
     { label: 'Currency', value: inv.currency ?? '—' },
-    { label: 'Provider', value: inv.provider ?? '—' },
-    { label: 'Extraction cost', value: costFmt(inv.extractionCost) },
-    { label: 'Structuring cost', value: costFmt(inv.structuringCost) },
-    { label: 'Total cost', value: costFmt(inv.costEstimate) },
+    { label: 'Provider', value: inv.extractionProvider ? `${inv.extractionProvider} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)` : (inv.provider ?? '—') },
+    { label: 'Extraction cost', value: inv.extractionCost != null ? `${costFmt(inv.extractionCost)} · ${(inv.extractionTokens ?? 0).toLocaleString()} tokens · ${inv.extractionModel ?? '—'}` : '—' },
+    { label: 'Structuring cost', value: inv.structuringCost != null ? `${costFmt(inv.structuringCost)} · ${(inv.structuringTokens ?? 0).toLocaleString()} tokens · ${inv.structuringModel ?? '—'}` : '—' },
+    { label: 'Total cost', value: inv.costEstimate != null ? `${costFmt(inv.costEstimate)} · ${(inv.totalTokens ?? 0).toLocaleString()} tokens · ${((inv.totalLatencyMs ?? 0) / 1000).toFixed(1)}s` : '—' },
     { label: 'Confidence', value: confLabel(inv.confidence) },
   ];
 

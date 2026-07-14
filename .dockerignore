@@ -1,7 +1,8 @@
-web/node_modules
-web/dist
-api/node_modules
-api/dist
+node_modules
+dist
 .git
 .env
-*.md
+.env.local
+.DS_Store
+coverage
+*.log
