@@ -60,7 +60,7 @@ interface ProvDef {
 
 const ALL_PROVIDERS: ProvDef[] = [
   { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest', 'pixtral-12b-2409'], canStructure: true, canSingle: true, desc: 'Mistral — Single: PDF uses OCR+structure (stays Single mode); images use Pixtral' },
-  { id: 'gemini', label: 'Google Gemini', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'], canStructure: true, canSingle: true, desc: 'Gemini — split structuring or single PDF/image call (ADC on Cloud Run)' },
+  { id: 'gemini', label: 'Google Gemini', models: ['gemini-flash-latest', 'gemini-pro-latest', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], canStructure: true, canSingle: true, desc: 'Gemini — split structuring or single PDF/image call (ADC on Cloud Run)' },
   { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: true, desc: 'Claude — structuring or single PDF/image call' },
   { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: true, desc: 'OpenAI — structuring or single image call (PDF: use Split/Gemini/Claude)' },
 ];

@@ -18,6 +18,9 @@ export const env = {
   /** Firestore collection prefix (enables multi-tenant or staging isolation) */
   firestorePrefix: opt('FIRESTORE_PREFIX', ''),
 
+  /** Firestore database ID (named database, not the project's "(default)" database) */
+  firestoreDatabaseId: opt('FIRESTORE_DATABASE_ID', 'billparser-db'),
+
   /** Mistral API key for OCR extraction + normalization */
   mistralApiKey: opt('MISTRAL_API_KEY', ''),
 

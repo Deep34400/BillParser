@@ -107,7 +107,7 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     id: bill.bill_id,
     fileName: bill.storage_path?.split('/').pop() ?? 'invoice.pdf',
     status: STATUS_MAP[bill.ocr_status] ?? 'PENDING',
-    provider: 'mistral',
+    provider: bill.structuring_provider ?? bill.extraction_provider ?? 'mistral',
     confidence: bill.confidence_score,
     error: bill.ocr_status === 'FAILED' ? (bill.processing_status ?? 'Processing failed') : null,
     vendorName: bill.vendor_name ?? bill.company_name,

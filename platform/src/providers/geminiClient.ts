@@ -7,17 +7,46 @@ import { GoogleAuth } from 'google-auth-library';
 import { env } from '../config/env.js';
 import type { LlmUsage, OcrStepCost } from './types.js';
 
-const GEMINI_PRICING = { input: 0.00015, output: 0.0006 };
+/**
+ * Per-model $/1K token pricing (converted from ai.google.dev/gemini-api/docs/pricing,
+ * checked 2026-07). Only the ≤200k-token input/output tier is used — Pro models charge
+ * more above 200k context, which isn't tracked separately here.
+ */
+const GEMINI_MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'gemini-3.5-flash': { input: 0.0015, output: 0.009 },
+  'gemini-3.1-flash-lite': { input: 0.00025, output: 0.0015 },
+  'gemini-3.1-pro-preview': { input: 0.002, output: 0.012 },
+  'gemini-3-flash-preview': { input: 0.0005, output: 0.003 },
+  'gemini-2.5-pro': { input: 0.00125, output: 0.01 },
+  'gemini-2.5-flash': { input: 0.0003, output: 0.0025 },
+  'gemini-2.5-flash-lite': { input: 0.0001, output: 0.0004 },
+};
+
+/**
+ * "-latest" aliases get hot-swapped by Google without notice to the exact underlying
+ * model, so there's no fixed price for them. Point at today's newest stable model in
+ * each tier — update this mapping when Google promotes a new stable release.
+ */
+const GEMINI_ALIAS_PRICING: Record<string, string> = {
+  'gemini-flash-latest': 'gemini-3.5-flash',
+  'gemini-pro-latest': 'gemini-2.5-pro',
+};
+
 const TIMEOUT_MS = 120_000;
 
 const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],
 });
 
-export function estimateGeminiCostUsd(usage: LlmUsage): number {
+export function estimateGeminiCostUsd(usage: LlmUsage, model: string): number {
+  const resolved = GEMINI_MODEL_PRICING[model] ?? GEMINI_MODEL_PRICING[GEMINI_ALIAS_PRICING[model]];
+  if (!resolved) {
+    console.warn(`[gemini] no pricing entry for model "${model}" — falling back to gemini-2.5-pro rate (conservative overestimate)`);
+  }
+  const pricing = resolved ?? GEMINI_MODEL_PRICING['gemini-2.5-pro'];
   return (
-    (usage.prompt_tokens / 1000) * GEMINI_PRICING.input +
-    (usage.completion_tokens / 1000) * GEMINI_PRICING.output
+    (usage.prompt_tokens / 1000) * pricing.input +
+    (usage.completion_tokens / 1000) * pricing.output
   );
 }
 
@@ -121,7 +150,7 @@ export function toGeminiStepCost(r: GeminiGenerateResult): OcrStepCost {
     provider: 'gemini',
     model: r.model,
     usage: r.usage,
-    cost_usd: estimateGeminiCostUsd(r.usage),
+    cost_usd: estimateGeminiCostUsd(r.usage, r.model),
     latency_ms: r.latency_ms,
   };
 }
