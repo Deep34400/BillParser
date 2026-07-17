@@ -78,6 +78,7 @@ steps:
           --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/web:$COMMIT_SHA \
           --region=${_REGION} \
           --platform=managed \
+          --service-account=${_RUNTIME_SA} \
           --allow-unauthenticated \
           --set-env-vars=API_BASE_URL=$$PLATFORM_URL
     waitFor: ['push-web', 'get-platform-url']
