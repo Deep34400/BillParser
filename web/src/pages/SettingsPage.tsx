@@ -59,10 +59,10 @@ interface ProvDef {
 }
 
 const ALL_PROVIDERS: ProvDef[] = [
-  { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest'], canStructure: true, canSingle: false, desc: 'Mistral AI — OCR extraction + structuring' },
-  { id: 'gemini', label: 'Google Gemini', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'], canStructure: true, canSingle: true, desc: 'Google Gemini — fast, supports single mode' },
-  { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: false, desc: 'Anthropic Claude — high accuracy structuring' },
-  { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: false, desc: 'OpenAI GPT — reliable JSON structuring' },
+  { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest', 'pixtral-12b-2409'], canStructure: true, canSingle: true, desc: 'Mistral — OCR extract + structure; single mode uses Pixtral (images)' },
+  { id: 'gemini', label: 'Google Gemini', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'], canStructure: true, canSingle: true, desc: 'Gemini — split structuring or single PDF/image call (ADC on Cloud Run)' },
+  { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: true, desc: 'Claude — structuring or single PDF/image call' },
+  { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: true, desc: 'OpenAI — structuring or single image call (PDF: use Split/Gemini/Claude)' },
 ];
 
 export function SettingsPage() {
@@ -207,7 +207,7 @@ export function SettingsPage() {
         <div style={{ fontSize: 12, color: T.muted, marginBottom: 16, lineHeight: 1.5 }}>
           {mode === 'split'
             ? 'Split: Step 1 Mistral OCR (PDF → markdown), Step 2 any LLM converts markdown → JSON.'
-            : 'Single: One Gemini call — PDF/image goes directly to the model and returns structured JSON.'}
+            : 'Single: One multimodal call — pick Gemini, Claude, OpenAI, or Mistral Pixtral. PDF best with Gemini/Claude.'}
         </div>
 
         {mode === 'split' ? (
@@ -248,13 +248,17 @@ export function SettingsPage() {
                 const id = e.target.value;
                 setSingleProv(id);
                 const def = ALL_PROVIDERS.find((p) => p.id === id);
-                if (def?.models[0]) setSingleModel(def.models[0]);
+                if (id === 'mistral') setSingleModel('pixtral-12b-2409');
+                else if (def?.models[0]) setSingleModel(def.models[0]);
               }}>
                 {ALL_PROVIDERS.filter((p) => p.canSingle).map((p) => (
                   <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>
-              <div style={note}>PDF/image sent directly. Falls back to Split (Mistral+Mistral) if it fails.</div>
+              <div style={note}>
+                Document sent directly to the model. Gemini/Claude: PDF+image. OpenAI/Mistral: images only.
+                Falls back to Split (Mistral+Mistral) if it fails.
+              </div>
             </div>
             <div style={{ marginBottom: 18 }}>
               <div style={lbl}>Model</div>
@@ -340,10 +344,11 @@ export function SettingsPage() {
           1. Mistral OCR reads PDF/image → markdown<br />
           2. Selected LLM (Gemini / Mistral / Claude / GPT) → structured JSON
           <br /><br />
-          <strong>Single</strong> — 1 API call:<br />
-          PDF/image → Gemini → structured JSON directly.
+          <strong>Single</strong> — 1 API call (<code>singleProvider</code> + <code>singleModel</code>):<br />
+          Gemini or Claude: PDF/image → JSON<br />
+          OpenAI or Mistral Pixtral: image → JSON (PDF: use Split or Gemini/Claude)
           <br /><br />
-          On failure, system auto-falls back to Mistral.
+          On failure, system auto-falls back to Split (Mistral OCR + Mistral structure).
         </div>
       </div>
 
