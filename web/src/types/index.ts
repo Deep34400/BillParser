@@ -48,6 +48,8 @@ export interface Invoice {
   rawText?: string | null; verified: boolean; editedAt?: string | null; activeRunId?: string | null;
   batchId?: string | null; batch?: { id: string; name: string } | null;
   itemCount?: number; costEstimate?: number | null;
+  /** 'split' | 'single' — how OCR was run */
+  pipelineMode?: 'split' | 'single' | null;
   extractionCost?: number | null; structuringCost?: number | null;
   extractionTokens?: number | null; structuringTokens?: number | null; totalTokens?: number | null;
   extractionProvider?: string | null; structuringProvider?: string | null;

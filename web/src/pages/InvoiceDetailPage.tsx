@@ -669,16 +669,50 @@ export function InvoiceDetailPage() {
 // FieldGrid sub-component
 // ---------------------------------------------------------------------------
 function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
+  const isSingle = inv.pipelineMode === 'single';
   const fields: { label: string; value: React.ReactNode }[] = [
     { label: 'Invoice #', value: inv.invoiceNumber ?? '—' },
     { label: 'PO #', value: inv.poNumber ?? '—' },
     { label: 'Invoice date', value: dateFmt(inv.invoiceDate) },
     { label: 'Due date', value: dateFmt(inv.dueDate) },
     { label: 'Currency', value: inv.currency ?? '—' },
-    { label: 'Provider', value: inv.extractionProvider ? `${inv.extractionProvider} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)` : (inv.provider ?? '—') },
-    { label: 'Extraction cost', value: inv.extractionCost != null ? `${costFmt(inv.extractionCost)} · ${(inv.extractionTokens ?? 0).toLocaleString()} tokens · ${inv.extractionModel ?? '—'}` : '—' },
-    { label: 'Structuring cost', value: inv.structuringCost != null ? `${costFmt(inv.structuringCost)} · ${(inv.structuringTokens ?? 0).toLocaleString()} tokens · ${inv.structuringModel ?? '—'}` : '—' },
-    { label: 'Total cost', value: inv.costEstimate != null ? `${costFmt(inv.costEstimate)} · ${(inv.totalTokens ?? 0).toLocaleString()} tokens · ${((inv.totalLatencyMs ?? 0) / 1000).toFixed(1)}s` : '—' },
+    {
+      label: 'Pipeline',
+      value: isSingle
+        ? `Single — ${inv.extractionProvider ?? inv.provider ?? '—'} (${inv.extractionModel ?? '—'})`
+        : inv.extractionProvider
+          ? `Split — ${inv.extractionProvider} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)`
+          : (inv.provider ?? '—'),
+    },
+    ...(isSingle
+      ? [
+          {
+            label: 'Single-call cost',
+            value: inv.costEstimate != null
+              ? `${costFmt(inv.costEstimate)} · ${(inv.totalTokens ?? inv.extractionTokens ?? 0).toLocaleString()} tokens · ${inv.extractionModel ?? '—'}`
+              : '—',
+          },
+        ]
+      : [
+          {
+            label: 'Extraction cost',
+            value: inv.extractionCost != null
+              ? `${costFmt(inv.extractionCost)} · ${(inv.extractionTokens ?? 0).toLocaleString()} tokens · ${inv.extractionModel ?? '—'}`
+              : '—',
+          },
+          {
+            label: 'Structuring cost',
+            value: inv.structuringCost != null
+              ? `${costFmt(inv.structuringCost)} · ${(inv.structuringTokens ?? 0).toLocaleString()} tokens · ${inv.structuringModel ?? '—'}`
+              : '—',
+          },
+        ]),
+    {
+      label: 'Total cost',
+      value: inv.costEstimate != null
+        ? `${costFmt(inv.costEstimate)} · ${(inv.totalTokens ?? 0).toLocaleString()} tokens · ${((inv.totalLatencyMs ?? 0) / 1000).toFixed(1)}s`
+        : '—',
+    },
     { label: 'Confidence', value: confLabel(inv.confidence) },
   ];
 

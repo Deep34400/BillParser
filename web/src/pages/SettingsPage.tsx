@@ -59,7 +59,7 @@ interface ProvDef {
 }
 
 const ALL_PROVIDERS: ProvDef[] = [
-  { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest', 'pixtral-12b-2409'], canStructure: true, canSingle: true, desc: 'Mistral — OCR extract + structure; single mode uses Pixtral (images)' },
+  { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest', 'pixtral-12b-2409'], canStructure: true, canSingle: true, desc: 'Mistral — Single: PDF uses OCR+structure (stays Single mode); images use Pixtral' },
   { id: 'gemini', label: 'Google Gemini', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'], canStructure: true, canSingle: true, desc: 'Gemini — split structuring or single PDF/image call (ADC on Cloud Run)' },
   { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: true, desc: 'Claude — structuring or single PDF/image call' },
   { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: true, desc: 'OpenAI — structuring or single image call (PDF: use Split/Gemini/Claude)' },
@@ -256,8 +256,9 @@ export function SettingsPage() {
                 ))}
               </select>
               <div style={note}>
-                Document sent directly to the model. Gemini/Claude: PDF+image. OpenAI/Mistral: images only.
-                Falls back to Split (Mistral+Mistral) if it fails.
+                Document sent as Single mode. Gemini/Claude: true one-call PDF/image.
+                Mistral PDF: OCR + structure (still Single setting, not Split). OpenAI: images only.
+                Falls back to Split only if the provider API fails.
               </div>
             </div>
             <div style={{ marginBottom: 18 }}>

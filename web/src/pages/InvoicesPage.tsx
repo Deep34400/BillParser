@@ -1122,7 +1122,11 @@ export function InvoicesPage() {
                     {/* Cost (total; hover for the extraction/structuring split) */}
                     <td
                       style={{ ...tdBase, textAlign: 'right', color: row.costEstimate ? T.text : T.green, fontWeight: 500 }}
-                      title={`Extraction ${costFmt(row.extractionCost)} + Structuring ${costFmt(row.structuringCost)}`}
+                      title={
+                        row.pipelineMode === 'single'
+                          ? `Single call ${costFmt(row.costEstimate)}`
+                          : `Extraction ${costFmt(row.extractionCost)} + Structuring ${costFmt(row.structuringCost)}`
+                      }
                     >
                       {costFmt(row.costEstimate)}
                     </td>
