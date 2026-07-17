@@ -30,6 +30,12 @@ export const env = {
   /** Gemini model for structuring (fallback) */
   geminiModel: opt('GEMINI_MODEL', 'gemini-2.5-flash'),
 
+  /**
+   * Vertex AI region for Gemini when using ADC (no API key).
+   * Cloud Run production should rely on ADC + this location.
+   */
+  vertexLocation: opt('VERTEX_LOCATION', 'us-central1'),
+
   /** Server port */
   port: Number(opt('PORT', '4000')),
 

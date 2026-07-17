@@ -6,7 +6,6 @@ import { getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillPa
 import { billToInvoice } from '../lib/billToInvoice.js';
 import { toApiParsed } from '../lib/toApiParsed.js';
 import { isPdf, isImage, uploadFile, getStoredFile } from '../lib/storage.js';
-import { mistralOcr } from '../providers/mistralOcr.js';
 import { env } from '../config/env.js';
 import { mapParsedToBill } from '../services/billing/billMapper.js';
 import type { BillType, ParsedInvoiceData } from '../models/types.js';
@@ -14,11 +13,11 @@ import type { OcrCostInfo, OcrStepCost } from '../providers/types.js';
 import { deductTokens, updateUser, getUser } from '../models/users.js';
 import type { UserDoc } from '../models/users.js';
 import { enrichParsedInvoice } from '../billing/normalize.js';
-import { runStructuring } from '../services/billing/structuringService.js';
+import { runPipeline } from '../services/billing/structuringService.js';
 
 /**
  * Run OCR pipeline in the background (fire-and-forget).
- * Captures token usage + cost from each API step.
+ * Uses runPipeline() which reads settings from DB for mode + providers.
  */
 function processInBackground(
   billId: string,
@@ -33,30 +32,14 @@ function processInBackground(
 
   (async () => {
     try {
-      console.log(`[OCR] ${billId} — calling Mistral OCR...`);
-      const ocrResult = await mistralOcr(buf, true);
-      const rawOcr = ocrResult.markdown;
-      const extractionCost: OcrStepCost = ocrResult.cost;
-      console.log(`[OCR] ${billId} — Mistral OCR done (${extractionCost.latency_ms}ms, ${extractionCost.usage.total_tokens} tokens, $${extractionCost.cost_usd.toFixed(4)})`);
+      const result = await runPipeline(buf, billId);
+      const { costInfo, rawOcr, providers } = result;
 
-      const structured = await runStructuring(rawOcr, billId);
-      const rawParsed = structured.parsed;
-      const structuringCost = structured.cost;
-      const normName = structured.provider === 'gemini' ? 'Gemini' : 'Mistral';
-
-      console.log(`[OCR] ${billId} — ${normName} structuring saved (${structuringCost.latency_ms}ms, ${structuringCost.usage.total_tokens} tokens, $${structuringCost.cost_usd.toFixed(4)})`);
-      if (structured.geminiError) {
-        console.warn(`[OCR] ${billId} — used Mistral fallback because Gemini failed: ${structured.geminiError}`);
+      if (result.fallbackReason) {
+        console.warn(`[OCR] ${billId} — fallback used: ${result.fallbackReason}`);
       }
 
-      const costInfo: OcrCostInfo = {
-        extraction: extractionCost,
-        structuring: structuringCost,
-        total_cost_usd: extractionCost.cost_usd + structuringCost.cost_usd,
-        total_tokens: extractionCost.usage.total_tokens + structuringCost.usage.total_tokens,
-      };
-
-      const enriched = enrichParsedInvoice(rawParsed, rawOcr);
+      const enriched = enrichParsedInvoice(result.parsed, rawOcr);
       const parsed = toApiParsed(enriched) as unknown as ParsedInvoiceData;
 
       const bill = mapParsedToBill(billId, parsed, {
@@ -86,7 +69,7 @@ function processInBackground(
         }
       }
 
-      console.log(`[OCR] ${billId} — DONE in ${((Date.now() - t0) / 1000).toFixed(1)}s (${parts.length} parts, total $${costInfo.total_cost_usd.toFixed(4)}, ${costInfo.total_tokens} tokens)`);
+      console.log(`[OCR] ${billId} — DONE in ${((Date.now() - t0) / 1000).toFixed(1)}s (mode=${providers.mode}, extract=${providers.extraction}, struct=${providers.structuring}, parts=${parts.length}, $${costInfo.total_cost_usd.toFixed(4)})`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[OCR] ${billId} — FAILED after ${((Date.now() - t0) / 1000).toFixed(1)}s:`, msg);
@@ -454,9 +437,8 @@ export async function billRoutes(app: FastifyInstance) {
       const buf = await extractBuffer(req);
       if (!buf) return reply.code(400).send({ error: 'provide a PDF file or JSON { "source": "<url>" }' });
 
-      const rawOcr = await mistralOcr(buf);
-      const { parsed: rawParsed } = await runStructuring(rawOcr, 'parse');
-      const parsed = enrichParsedInvoice(rawParsed, rawOcr);
+      const result = await runPipeline(buf, 'parse');
+      const parsed = enrichParsedInvoice(result.parsed, result.rawOcr);
 
       return { output: { entries: [{ id: uuid(), parsed_data: toApiParsed(parsed) }] } };
     } catch (err) {
@@ -482,24 +464,11 @@ export async function billRoutes(app: FastifyInstance) {
       if (!buf) return reply.code(400).send({ success: false, message: 'Provide a PDF/image file or JSON { "url": "<url>" }' });
 
       const t0 = Date.now();
-      const ocrResult = await mistralOcr(buf, true);
-      const rawOcr = ocrResult.markdown;
-      const extractionCost: OcrStepCost = ocrResult.cost;
+      const result = await runPipeline(buf, 'sync');
+      const { costInfo, rawOcr, providers } = result;
 
-      const structured = await runStructuring(rawOcr, 'sync');
-      const rawParsed = structured.parsed;
-      const structuringCost = structured.cost;
-
-      const totalCostUsd = extractionCost.cost_usd + structuringCost.cost_usd;
-      const enriched = enrichParsedInvoice(rawParsed, rawOcr);
+      const enriched = enrichParsedInvoice(result.parsed, rawOcr);
       const parsed = toApiParsed(enriched) as unknown as ParsedInvoiceData;
-
-      const costInfo: OcrCostInfo = {
-        extraction: extractionCost,
-        structuring: structuringCost,
-        total_cost_usd: totalCostUsd,
-        total_tokens: extractionCost.usage.total_tokens + structuringCost.usage.total_tokens,
-      };
 
       const billId = uuid();
       const fileName = 'api-sync-upload';
@@ -520,11 +489,11 @@ export async function billRoutes(app: FastifyInstance) {
       await saveBillParts(parts);
 
       if (user.role !== 'admin') {
-        const amt = Math.round(totalCostUsd * 10000) / 10000 || 0.001;
+        const amt = Math.round(costInfo.total_cost_usd * 10000) / 10000 || 0.001;
         try { await deductTokens(user.user_id, amt, `API OCR sync ($${amt.toFixed(4)})`, billId); } catch { /* ignore */ }
         try {
           const u = await getUser(user.user_id);
-          if (u) await updateUser(user.user_id, { total_cost_usd: Math.round(((u.total_cost_usd ?? 0) + totalCostUsd) * 10000) / 10000 });
+          if (u) await updateUser(user.user_id, { total_cost_usd: Math.round(((u.total_cost_usd ?? 0) + costInfo.total_cost_usd) * 10000) / 10000 });
         } catch { /* ignore */ }
       }
 
@@ -535,12 +504,14 @@ export async function billRoutes(app: FastifyInstance) {
           parsed_data: toApiParsed(enriched),
           raw_ocr: rawOcr,
           cost: {
-            extraction_usd: extractionCost.cost_usd,
-            structuring_usd: structuringCost.cost_usd,
-            structuring_provider: structured.provider,
-            gemini_fallback_reason: structured.geminiError ?? null,
-            total_usd: totalCostUsd,
-            total_inr: Math.round(totalCostUsd * 83 * 100) / 100,
+            extraction_usd: costInfo.extraction?.cost_usd ?? 0,
+            structuring_usd: costInfo.structuring?.cost_usd ?? 0,
+            mode: providers.mode,
+            extraction_provider: providers.extraction,
+            structuring_provider: providers.structuring,
+            fallback_reason: result.fallbackReason ?? null,
+            total_usd: costInfo.total_cost_usd,
+            total_inr: Math.round(costInfo.total_cost_usd * 83 * 100) / 100,
           },
           latency_ms: Date.now() - t0,
         },

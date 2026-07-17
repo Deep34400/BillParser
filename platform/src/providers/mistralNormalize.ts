@@ -2,11 +2,11 @@
  * Mistral normalization — maps raw OCR markdown to ParsedInvoiceData.
  * Uses Mistral chat completion API.
  */
-import { env } from '../config/env.js';
 import { STRUCTURING_PROMPT } from '../parsing/prompt.js';
 import { structureFromLlmResponse } from '../parsing/index.js';
 import type { ParsedInvoiceData } from '../parsing/types.js';
 import type { LlmUsage, OcrStepCost } from './types.js';
+import { resolveProviderKey } from './resolveKey.js';
 
 const MISTRAL_CHAT_URL = 'https://api.mistral.ai/v1/chat/completions';
 
@@ -28,10 +28,7 @@ export interface MistralNormalizeResult {
 export async function mistralNormalize(rawOcr: string): Promise<ParsedInvoiceData>;
 export async function mistralNormalize(rawOcr: string, returnCost: true): Promise<MistralNormalizeResult>;
 export async function mistralNormalize(rawOcr: string, returnCost?: boolean): Promise<ParsedInvoiceData | MistralNormalizeResult> {
-  const apiKey = env.mistralApiKey;
-  if (!apiKey) throw new Error('MISTRAL_API_KEY is not set');
-
-  const model = env.mistralModel;
+  const { apiKey, model } = await resolveProviderKey('mistral');
   const t0 = Date.now();
   let totalUsage: LlmUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 

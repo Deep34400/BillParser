@@ -2,9 +2,9 @@
  * Mistral OCR — extract markdown from PDF/image using Mistral's dedicated OCR endpoint.
  * POST https://api.mistral.ai/v1/ocr (NOT chat/completions)
  */
-import { env } from '../config/env.js';
 import type { LlmUsage, OcrStepCost } from './types.js';
 import { isPdf, isImage } from '../lib/storage.js';
+import { resolveProviderKey } from './resolveKey.js';
 
 const MISTRAL_OCR_URL = 'https://api.mistral.ai/v1/ocr';
 const OCR_MODEL = 'mistral-ocr-latest';
@@ -63,8 +63,7 @@ interface OcrResponse {
 export async function mistralOcr(buf: Buffer): Promise<string>;
 export async function mistralOcr(buf: Buffer, returnCost: true): Promise<MistralOcrResult>;
 export async function mistralOcr(buf: Buffer, returnCost?: boolean): Promise<string | MistralOcrResult> {
-  const apiKey = env.mistralApiKey;
-  if (!apiKey) throw new Error('MISTRAL_API_KEY is not set');
+  const { apiKey } = await resolveProviderKey('mistral');
 
   const t0 = Date.now();
   const document = buildDocumentPayload(buf);

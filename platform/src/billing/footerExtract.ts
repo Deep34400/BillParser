@@ -165,7 +165,7 @@ function isGoodsTableGstAdjustment(line: string): boolean {
   return /less\s*:\s*.*\bo-?[cs]?gst\b/i.test(line) || /^\s*less\s*:/i.test(line);
 }
 
-function isTallyOutputGstLine(line: string, kind: 'cgst' | 'sgst'): boolean {
+function isTallyOutputGstLine(line: string, kind: 'cgst' | 'sgst' | 'igst'): boolean {
   return kind === 'cgst' ? /\bo-?cgst\b/i.test(line) : /\bo-?sgst\b/i.test(line);
 }
 

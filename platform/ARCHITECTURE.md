@@ -241,6 +241,58 @@ UPLOADED → PROCESSING → OCR_COMPLETED → VERIFIED
 
 ## OCR Pipeline — Step by Step
 
+### Two Pipeline Modes
+
+The pipeline mode is configured via **Settings UI** (stored in DB):
+
+| Mode | Steps | Use Case |
+|------|-------|----------|
+| **Split** (default) | Mistral OCR → Any LLM structuring | Best accuracy, most flexible |
+| **Single** | Gemini reads + structures in one call | Faster, fewer API calls |
+
+#### Split Mode Flow
+
+```
+PDF/Image → [Mistral OCR] → markdown → [LLM Structuring] → JSON
+                                         ↑
+                                  Gemini / Mistral / Claude / OpenAI
+                                  (configurable from Settings UI)
+```
+
+#### Single Mode Flow
+
+```
+PDF/Image → [Gemini] → JSON (one call, no intermediate markdown)
+```
+
+#### Supported Structuring Providers
+
+| Provider | API | Models | Single Mode |
+|----------|-----|--------|-------------|
+| **Mistral** | `/v1/chat/completions` | mistral-small, medium, large | No |
+| **Gemini** | Generative Language API | gemini-2.5-flash, 2.5-pro, 2.0-flash | Yes |
+| **Claude** | Anthropic Messages API | claude-sonnet-4, 3.5-sonnet, 3-haiku | No |
+| **OpenAI** | `/v1/chat/completions` | gpt-4o, gpt-4o-mini, gpt-4-turbo | No |
+
+All providers use the **same STRUCTURING_PROMPT** and **same JSON parsing logic**.
+Only the API format differs — handled by `providers/llmNormalize.ts`.
+
+#### API Key Resolution
+
+```
+Settings DB (provider_credentials/{provider}.apiKey)
+    ↓ (if empty)
+Environment variable fallback (MISTRAL_API_KEY, GEMINI_API_KEY)
+```
+
+Managed via `providers/resolveKey.ts`.
+
+#### Automatic Fallback
+
+If the selected structuring provider fails (e.g. Gemini 429 quota):
+- Split mode: falls back to Mistral structuring automatically
+- Single mode: falls back to split mode (Mistral OCR + Mistral structuring)
+
 ### What happens when you upload a PDF
 
 Everything below runs in the **background** — the HTTP response returns in ~500ms. The frontend polls every 3 seconds to see the result.
@@ -282,23 +334,25 @@ Everything below runs in the **background** — the HTTP response returns in ~50
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  STEP 3 — AI NORMALIZATION  (~3-7 seconds)                               │
-│  providers/mistralNormalize.ts  OR  providers/geminiNormalize.ts         │
-│  (controlled by NORMALIZE_PROVIDER env var)                              │
+│  STEP 3 — AI STRUCTURING  (~3-7 seconds)                                 │
+│  services/billing/structuringService.ts → runPipeline()                  │
+│  providers/llmNormalize.ts (unified multi-provider interface)            │
 │                                                                          │
 │  What: Maps raw markdown → structured JSON (ParsedInvoiceData)           │
-│  How:                                                                    │
-│    Mistral: POST /v1/chat/completions (model: mistral-small-latest)      │
-│    Gemini:  POST generativelanguage.googleapis.com (gemini-2.5-flash)    │
+│  Provider: Configured in Settings UI (DB), any of:                       │
+│    • Mistral: POST /v1/chat/completions                                  │
+│    • Gemini:  POST generativelanguage.googleapis.com                     │
+│    • Claude:  POST api.anthropic.com/v1/messages                         │
+│    • OpenAI:  POST api.openai.com/v1/chat/completions                    │
 │                                                                          │
-│  System prompt: STRUCTURING_PROMPT (parsing/prompt.ts)                   │
+│  All use the same STRUCTURING_PROMPT (parsing/prompt.ts)                 │
 │  Key rules in the prompt:                                                │
 │    • Return JSON matching ParsedInvoiceData schema                       │
 │    • Line items are GROSS (before discount)                              │
 │    • GST amounts copied from footer — never calculated                   │
 │    • CGST+SGST for intra-state, IGST for inter-state                     │
-│    • confidence: 0..1                                                    │
 │                                                                          │
+│  If selected provider fails → automatic Mistral fallback                 │
 │  If JSON is invalid → retry with error message → parse again             │
 └──────────────────────────────────────────────────────────────────────────┘
                               │
@@ -1044,35 +1098,60 @@ docker compose up --build
 # Web: http://localhost:8081
 ```
 
-### Cloud Run (GCP)
+### Cloud Run (GCP) — Firestore + Vertex Gemini (ADC)
+
+**Gemini auth:** On Cloud Run, do **not** set `GEMINI_API_KEY`. The runtime service account
+uses Application Default Credentials (ADC) to call **Vertex AI Gemini**.
 
 ```bash
-# Build
-docker build -t gcr.io/PROJECT_ID/billparser platform/
+# 1. Enable APIs
+gcloud services enable run.googleapis.com firestore.googleapis.com \
+  storage.googleapis.com aiplatform.googleapis.com artifactregistry.googleapis.com \
+  --project=PROJECT_ID
 
-# Push
-docker push gcr.io/PROJECT_ID/billparser
+# 2. Create Firestore (Native mode) + Storage bucket if needed
+# 3. Grant Cloud Run SA roles:
+#    roles/datastore.user
+#    roles/storage.objectAdmin
+#    roles/aiplatform.user
 
-# Deploy
-gcloud run deploy billparser \
-  --image gcr.io/PROJECT_ID/billparser \
+# 4. Build & push backend
+cd platform
+gcloud builds submit --tag gcr.io/PROJECT_ID/billparser-api
+
+# 5. Deploy backend (NO GEMINI_API_KEY — uses ADC)
+gcloud run deploy billparser-api \
+  --image gcr.io/PROJECT_ID/billparser-api \
   --region asia-south1 \
-  --set-env-vars GCP_PROJECT_ID=PROJECT_ID,STORAGE_BUCKET=your-bucket,MISTRAL_API_KEY=...,GEMINI_API_KEY=...
+  --allow-unauthenticated \
+  --set-env-vars "GCP_PROJECT_ID=PROJECT_ID,STORAGE_BUCKET=your-bucket,VERTEX_LOCATION=asia-south1,GEMINI_MODEL=gemini-2.5-flash,JWT_SECRET=...,ADMIN_EMAIL=...,ADMIN_PASSWORD=..." \
+  --set-secrets "MISTRAL_API_KEY=mistral-api-key:latest"
+```
+
+**Local ADC test (no API key):**
+```bash
+gcloud auth application-default login
+# unset GEMINI_API_KEY in platform/.env
+# set LOCAL_DEV=false and use a real GCP project, OR keep LOCAL_DEV=true for DB but Gemini still needs ADC/key
 ```
 
 ### Environment Variables (Production)
 
 
-| Variable           | Required | Description                    |
-| ------------------ | -------- | ------------------------------ |
-| `GCP_PROJECT_ID`   | Yes      | GCP project for Firestore      |
-| `STORAGE_BUCKET`   | Yes      | Cloud Storage bucket           |
-| `MISTRAL_API_KEY`  | Yes      | Mistral OCR API key            |
-| `GEMINI_API_KEY`   | Yes      | Gemini API key                 |
-| `GEMINI_MODEL`     | No       | Default: `gemini-2.5-flash`    |
-| `LOCAL_DEV`        | No       | `true` for in-memory mode      |
+| Variable           | Required | Description |
+| ------------------ | -------- | ----------- |
+| `GCP_PROJECT_ID`   | Yes      | GCP project for Firestore + Vertex |
+| `STORAGE_BUCKET`   | Yes      | Cloud Storage bucket |
+| `MISTRAL_API_KEY`  | Yes      | Mistral OCR API key (Secret Manager) |
+| `GEMINI_API_KEY`   | No       | Optional. If set → AI Studio key. If empty → Vertex + ADC |
+| `GEMINI_MODEL`     | No       | Default: `gemini-2.5-flash` |
+| `VERTEX_LOCATION`  | No       | Vertex region, default `us-central1` |
+| `JWT_SECRET`       | Yes      | Session JWT secret |
+| `ADMIN_EMAIL`      | Yes      | Bootstrap admin |
+| `ADMIN_PASSWORD`   | Yes      | Bootstrap admin password |
+| `LOCAL_DEV`        | No       | Must be unset/`false` for Firestore |
 | `FIRESTORE_PREFIX` | No       | Multi-tenant collection prefix |
-| `PORT`             | No       | Default: `4000`                |
+| `PORT`             | No       | Default: `4000` (Cloud Run sets `$PORT`) |
 
 
 ---

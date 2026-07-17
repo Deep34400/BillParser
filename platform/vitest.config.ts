@@ -6,5 +6,8 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     pool: 'forks',
     poolOptions: { forks: { singleFork: true } },
+    env: {
+      LOCAL_DEV: 'true',
+    },
   },
 });

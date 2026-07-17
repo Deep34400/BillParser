@@ -9,16 +9,24 @@ const SETTINGS_DOC = 'app_settings';
 const CREDS_COLLECTION = 'provider_credentials';
 
 export interface AppSettings {
+  /** 'split' = separate extraction + structuring, 'single' = one provider does both */
+  pipelineMode: 'split' | 'single';
   extractionProvider: string;
   structuringProvider: string;
   structuringModel: string;
   extractionModel?: string;
+  /** For single mode: which provider handles both extraction + structuring */
+  singleProvider?: string;
+  singleModel?: string;
 }
 
 const DEFAULTS: AppSettings = {
+  pipelineMode: 'split',
   extractionProvider: 'mistral',
   structuringProvider: 'gemini',
   structuringModel: 'gemini-2.5-flash',
+  singleProvider: 'gemini',
+  singleModel: 'gemini-2.5-flash',
 };
 
 export async function getSettings(): Promise<AppSettings> {

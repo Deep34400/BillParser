@@ -32,10 +32,13 @@ export async function settingsRoutes(app: FastifyInstance) {
     }));
 
     return {
+      pipelineMode: settings.pipelineMode ?? 'split',
       extractionProvider: settings.extractionProvider,
       structuringProvider: settings.structuringProvider,
       structuringModel: settings.structuringModel,
       extractionModel: settings.extractionModel ?? settings.structuringModel,
+      singleProvider: settings.singleProvider ?? 'gemini',
+      singleModel: settings.singleModel ?? 'gemini-2.5-flash',
       providers,
     };
   });
@@ -45,13 +48,25 @@ export async function settingsRoutes(app: FastifyInstance) {
    */
   app.put('/api/settings', async (req) => {
     const body = req.body as Record<string, string>;
-    await saveSettings({
-      extractionProvider: body.extractionProvider,
-      structuringProvider: body.structuringProvider,
-      structuringModel: body.structuringModel,
-      extractionModel: body.extractionModel,
-    });
-    return { ok: true };
+    const patch: Record<string, string> = {};
+    if (body.pipelineMode === 'split' || body.pipelineMode === 'single') {
+      patch.pipelineMode = body.pipelineMode;
+    }
+    if (body.extractionProvider) patch.extractionProvider = body.extractionProvider;
+    if (body.structuringProvider) patch.structuringProvider = body.structuringProvider;
+    if (body.structuringModel) patch.structuringModel = body.structuringModel;
+    if (body.extractionModel) patch.extractionModel = body.extractionModel;
+    if (body.singleProvider) patch.singleProvider = body.singleProvider;
+    if (body.singleModel) patch.singleModel = body.singleModel;
+    const saved = await saveSettings(patch);
+    return {
+      ok: true,
+      pipelineMode: saved.pipelineMode,
+      structuringProvider: saved.structuringProvider,
+      structuringModel: saved.structuringModel,
+      singleProvider: saved.singleProvider,
+      singleModel: saved.singleModel,
+    };
   });
 
   /**

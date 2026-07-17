@@ -37,6 +37,13 @@ export interface VehicleDetails {
   mileage_odometer_reading?: number | null;
 }
 
+export interface GstBreakdownLine {
+  kind: 'CGST' | 'SGST' | 'IGST';
+  rate?: number | null;
+  parts?: number | null;
+  labour?: number | null;
+}
+
 export interface TotalsAndTaxSummary {
   parts_total?: number | null;
   labour_total?: number | null;
@@ -60,6 +67,8 @@ export interface TotalsAndTaxSummary {
   labour_special_discount?: number | null;
   deductibles?: number | null;
   salvage?: number | null;
+  /** Per-kind GST amounts captured from footer (authoritative when present). */
+  gst_breakdown?: GstBreakdownLine[] | null;
 }
 
 export interface ParsedInvoiceData {

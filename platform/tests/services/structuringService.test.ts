@@ -1,25 +1,25 @@
-import { describe, expect, it, afterEach, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { devStore } from '../../src/lib/devStore.js';
 
-describe('resolveStructuringProvider', () => {
-  const orig = process.env.NORMALIZE_PROVIDER;
-
-  afterEach(() => {
-    if (orig === undefined) delete process.env.NORMALIZE_PROVIDER;
-    else process.env.NORMALIZE_PROVIDER = orig;
-    vi.resetModules();
+describe('pipeline settings from devStore', () => {
+  it('default pipelineMode is split', () => {
+    const s = devStore.getSettings();
+    expect(s.pipelineMode).toBe('split');
   });
 
-  it('uses NORMALIZE_PROVIDER env when set to gemini', async () => {
-    process.env.NORMALIZE_PROVIDER = 'gemini';
-    vi.resetModules();
-    const { resolveStructuringProvider } = await import('../../src/services/billing/structuringService.js');
-    await expect(resolveStructuringProvider()).resolves.toBe('gemini');
+  it('default extraction provider is mistral', () => {
+    const s = devStore.getSettings();
+    expect(s.extractionProvider).toBe('mistral');
   });
 
-  it('uses NORMALIZE_PROVIDER env when set to mistral', async () => {
-    process.env.NORMALIZE_PROVIDER = 'mistral';
-    vi.resetModules();
-    const { resolveStructuringProvider } = await import('../../src/services/billing/structuringService.js');
-    await expect(resolveStructuringProvider()).resolves.toBe('mistral');
+  it('default structuring provider is gemini', () => {
+    const s = devStore.getSettings();
+    expect(s.structuringProvider).toBe('gemini');
+  });
+
+  it('saveSettings updates pipelineMode', () => {
+    devStore.saveSettings({ pipelineMode: 'single' });
+    expect(devStore.getSettings().pipelineMode).toBe('single');
+    devStore.saveSettings({ pipelineMode: 'split' });
   });
 });
