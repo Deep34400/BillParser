@@ -19,7 +19,7 @@ steps:
     waitFor: ['build-platform']
 
   # 3. Deploy platform to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdk/cloud-sdk'
+  - name: 'gcr.io/cloud-builders/gcloud'
     id: deploy-platform
     entrypoint: gcloud
     args:
@@ -36,7 +36,7 @@ steps:
     waitFor: ['push-platform']
 
   # 4. Capture the deployed platform URL for the web build to proxy to
-  - name: 'gcr.io/google.com/cloudsdk/cloud-sdk'
+  - name: 'gcr.io/cloud-builders/gcloud'
     id: get-platform-url
     entrypoint: bash
     args:
@@ -67,7 +67,7 @@ steps:
     waitFor: ['build-web']
 
   # 7. Deploy web to Cloud Run, pointing its nginx proxy at the platform service URL
-  - name: 'gcr.io/google.com/cloudsdk/cloud-sdk'
+  - name: 'gcr.io/cloud-builders/gcloud'
     id: deploy-web
     entrypoint: bash
     args:
