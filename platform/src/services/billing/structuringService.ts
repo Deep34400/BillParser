@@ -1,12 +1,12 @@
 /**
  * OCR pipeline orchestrator.
  * Reads settings from DB to decide pipeline mode and providers.
- * Supports: Mistral, Gemini, Claude, OpenAI — any model for structuring.
+ * Supports: Mistral, Gemini, Claude, OpenAI — split or single call.
  */
 import { getSettings } from '../../models/settings.js';
 import { llmNormalize, SUPPORTED_PROVIDERS } from '../../providers/llmNormalize.js';
 import { mistralOcr } from '../../providers/mistralOcr.js';
-import { geminiSingle } from '../../providers/geminiSingle.js';
+import { llmSingle, SINGLE_PROVIDERS } from '../../providers/llmSingle.js';
 import type { ParsedInvoiceData } from '../../models/types.js';
 import type { OcrStepCost, OcrCostInfo } from '../../providers/types.js';
 
@@ -21,15 +21,23 @@ export interface PipelineResult {
 /**
  * Run the full OCR pipeline based on DB settings.
  * - split: Mistral OCR → any LLM for structuring
- * - single: Gemini does both in one call
+ * - single: one multimodal LLM (Gemini / Claude / OpenAI / Mistral) does both
  */
 export async function runPipeline(buf: Buffer, contextId = 'ocr'): Promise<PipelineResult> {
   const settings = await getSettings();
   const mode = settings.pipelineMode ?? 'split';
-  console.log(`[OCR] ${contextId} — settings: mode=${mode}, structProv=${settings.structuringProvider}, structModel=${settings.structuringModel}, singleProv=${settings.singleProvider}`);
+  console.log(
+    `[OCR] ${contextId} — settings: mode=${mode}, structProv=${settings.structuringProvider}, ` +
+    `structModel=${settings.structuringModel}, singleProv=${settings.singleProvider}, singleModel=${settings.singleModel}`,
+  );
 
   if (mode === 'single') {
-    return runSingleMode(buf, settings.singleProvider ?? 'gemini', contextId);
+    return runSingleMode(
+      buf,
+      settings.singleProvider ?? 'gemini',
+      settings.singleModel,
+      contextId,
+    );
   }
 
   return runSplitMode(
@@ -40,31 +48,43 @@ export async function runPipeline(buf: Buffer, contextId = 'ocr'): Promise<Pipel
   );
 }
 
-async function runSingleMode(buf: Buffer, provider: string, contextId: string): Promise<PipelineResult> {
-  console.log(`[OCR] ${contextId} — single mode using ${provider}...`);
+async function runSingleMode(
+  buf: Buffer,
+  provider: string,
+  model: string | undefined,
+  contextId: string,
+): Promise<PipelineResult> {
+  console.log(`[OCR] ${contextId} — single mode using ${provider} (model=${model ?? 'default'})...`);
 
-  if (provider === 'gemini') {
-    try {
-      const r = await geminiSingle(buf);
-      console.log(`[OCR] ${contextId} — Gemini single done (${r.cost.latency_ms}ms, ${r.cost.usage.total_tokens} tokens, $${r.cost.cost_usd.toFixed(4)})`);
-      const zeroCost: OcrStepCost = { ...r.cost, cost_usd: 0, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
-      return {
-        parsed: r.parsed,
-        rawOcr: r.rawOcr,
-        costInfo: { extraction: r.cost, structuring: zeroCost, total_cost_usd: r.cost.cost_usd, total_tokens: r.cost.usage.total_tokens },
-        providers: { extraction: 'gemini', structuring: 'gemini', mode: 'single' },
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[OCR] ${contextId} — Gemini single FAILED: ${msg}`);
-      console.warn(`[OCR] ${contextId} — falling back to split mode (Mistral OCR + Mistral structure)...`);
-      const result = await runSplitMode(buf, 'mistral', undefined, contextId);
-      return { ...result, fallbackReason: `Gemini single failed: ${msg}` };
-    }
+  try {
+    const r = await llmSingle(buf, provider, model);
+    console.log(
+      `[OCR] ${contextId} — ${provider} single done (${r.cost.latency_ms}ms, ` +
+      `${r.cost.usage.total_tokens} tokens, $${r.cost.cost_usd.toFixed(4)})`,
+    );
+    const zeroCost: OcrStepCost = {
+      ...r.cost,
+      cost_usd: 0,
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    };
+    return {
+      parsed: r.parsed,
+      rawOcr: r.rawOcr,
+      costInfo: {
+        extraction: r.cost,
+        structuring: zeroCost,
+        total_cost_usd: r.cost.cost_usd,
+        total_tokens: r.cost.usage.total_tokens,
+      },
+      providers: { extraction: provider, structuring: provider, mode: 'single' },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[OCR] ${contextId} — ${provider} single FAILED: ${msg}`);
+    console.warn(`[OCR] ${contextId} — falling back to split mode (Mistral OCR + Mistral structure)...`);
+    const result = await runSplitMode(buf, 'mistral', undefined, contextId);
+    return { ...result, fallbackReason: `${provider} single failed: ${msg}` };
   }
-
-  console.warn(`[OCR] ${contextId} — single mode only supports gemini, falling back to split mode`);
-  return runSplitMode(buf, 'mistral', undefined, contextId);
 }
 
 async function runSplitMode(
@@ -132,4 +152,4 @@ async function runStructuring(
   }
 }
 
-export { SUPPORTED_PROVIDERS };
+export { SUPPORTED_PROVIDERS, SINGLE_PROVIDERS };

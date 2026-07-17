@@ -10,6 +10,15 @@ import type { LlmUsage, OcrStepCost } from './types.js';
 import { resolveProviderKey } from './resolveKey.js';
 import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
 
+const TIMEOUT_MS = 120_000;
+
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 interface ModelDef {
   provider: string;
   apiUrl: string | ((model: string, apiKey: string) => string);
@@ -136,7 +145,7 @@ export async function llmNormalize(rawOcr: string, providerName: string, modelOv
   const headers = def.buildHeaders(apiKey);
   const body = def.buildBody(model, STRUCTURING_PROMPT, rawOcr);
 
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  const res = await fetchWithTimeout(url, { method: 'POST', headers, body: JSON.stringify(body) });
   const latency_ms = Date.now() - t0;
 
   if (!res.ok) {

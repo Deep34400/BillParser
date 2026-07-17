@@ -8,6 +8,7 @@ import { resolveProviderKey } from './resolveKey.js';
 
 const MISTRAL_OCR_URL = 'https://api.mistral.ai/v1/ocr';
 const OCR_MODEL = 'mistral-ocr-latest';
+const TIMEOUT_MS = 120_000;
 
 /** ~$2 per 1000 pages (Mistral OCR pricing). */
 const MISTRAL_OCR_PRICE_PER_PAGE = 0.002;
@@ -68,17 +69,25 @@ export async function mistralOcr(buf: Buffer, returnCost?: boolean): Promise<str
   const t0 = Date.now();
   const document = buildDocumentPayload(buf);
 
-  const res = await fetch(MISTRAL_OCR_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: OCR_MODEL,
-      document,
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(MISTRAL_OCR_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: OCR_MODEL,
+        document,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   const latency_ms = Date.now() - t0;
 

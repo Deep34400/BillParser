@@ -8,6 +8,7 @@ import { env } from '../config/env.js';
 import type { LlmUsage, OcrStepCost } from './types.js';
 
 const GEMINI_PRICING = { input: 0.00015, output: 0.0006 };
+const TIMEOUT_MS = 120_000;
 
 const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],
@@ -93,7 +94,14 @@ export async function geminiGenerateContent(opts: {
     authMode = 'adc';
   }
 
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
   const latency_ms = Date.now() - t0;
 
   if (!res.ok) {

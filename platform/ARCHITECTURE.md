@@ -248,7 +248,7 @@ The pipeline mode is configured via **Settings UI** (stored in DB):
 | Mode | Steps | Use Case |
 |------|-------|----------|
 | **Split** (default) | Mistral OCR → Any LLM structuring | Best accuracy, most flexible |
-| **Single** | Gemini reads + structures in one call | Faster, fewer API calls |
+| **Single** | One multimodal LLM reads + structures in one call | Faster, fewer API calls |
 
 #### Split Mode Flow
 
@@ -256,14 +256,20 @@ The pipeline mode is configured via **Settings UI** (stored in DB):
 PDF/Image → [Mistral OCR] → markdown → [LLM Structuring] → JSON
                                          ↑
                                   Gemini / Mistral / Claude / OpenAI
-                                  (configurable from Settings UI)
 ```
 
 #### Single Mode Flow
 
 ```
-PDF/Image → [Gemini] → JSON (one call, no intermediate markdown)
+PDF/Image → [Gemini | Claude | OpenAI | Mistral Pixtral] → JSON (one call)
 ```
+
+| Provider | PDF | Image | Notes |
+|----------|-----|-------|-------|
+| Gemini | Yes | Yes | ADC on Cloud Run |
+| Claude | Yes | Yes | Needs Anthropic API key |
+| OpenAI | No | Yes | gpt-4o vision; PDF → use Split |
+| Mistral | No | Yes | Pixtral; PDF → use Split (Mistral OCR) |
 
 #### Supported Structuring Providers
 
