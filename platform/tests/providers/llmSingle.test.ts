@@ -12,10 +12,16 @@ describe('llmSingle providers', () => {
 
   it('rejects OpenAI single for PDF', async () => {
     const pdf = Buffer.from('%PDF-1.4 fake');
-    // Will fail on key or PDF check — PDF check comes after resolveKey which needs key
-    // Save a fake key so we hit the PDF validation
     const { devStore } = await import('../../src/lib/devStore.js');
     devStore.saveCreds('openai', { apiKey: 'sk-test' });
     await expect(llmSingle(pdf, 'openai')).rejects.toThrow(/images only/);
+  });
+
+  it('does not reject Mistral single for PDF with images-only error', async () => {
+    const pdf = Buffer.from('%PDF-1.4 fake');
+    const { devStore } = await import('../../src/lib/devStore.js');
+    devStore.saveCreds('mistral', { apiKey: 'sk-test' });
+    // Will fail on real API, but must NOT be the old "images only" message
+    await expect(llmSingle(pdf, 'mistral')).rejects.not.toThrow(/images only/);
   });
 });

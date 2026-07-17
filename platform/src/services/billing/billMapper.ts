@@ -29,6 +29,7 @@ export function mapParsedToBill(
     fleetId?: string;
     vehicleId?: string;
     costInfo?: OcrCostInfo;
+    pipelineMode?: 'split' | 'single';
   } = {},
 ): BillDoc {
   const t = parsed.totals_and_tax_summary;
@@ -100,6 +101,7 @@ export function mapParsedToBill(
     raw_ocr_reference: opts.rawOcrReference ?? null,
     parsed_data: parsed,
 
+    pipeline_mode: opts.pipelineMode ?? (opts.costInfo?.structuring == null && opts.costInfo?.extraction != null ? 'single' : 'split'),
     extraction_cost_usd: opts.costInfo?.extraction?.cost_usd ?? null,
     structuring_cost_usd: opts.costInfo?.structuring?.cost_usd ?? null,
     total_cost_usd: opts.costInfo?.total_cost_usd ?? null,
@@ -112,7 +114,9 @@ export function mapParsedToBill(
     structuring_model: opts.costInfo?.structuring?.model ?? null,
     extraction_latency_ms: opts.costInfo?.extraction?.latency_ms ?? null,
     structuring_latency_ms: opts.costInfo?.structuring?.latency_ms ?? null,
-    total_latency_ms: (opts.costInfo?.extraction?.latency_ms ?? 0) + (opts.costInfo?.structuring?.latency_ms ?? 0) || null,
+    total_latency_ms: opts.costInfo
+      ? (opts.costInfo.extraction?.latency_ms ?? 0) + (opts.costInfo.structuring?.latency_ms ?? 0) || null
+      : null,
 
     schema_version: SCHEMA_VERSION,
 

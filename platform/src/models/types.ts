@@ -179,6 +179,8 @@ export interface BillDoc {
   parsed_data?: ParsedInvoiceData | null;
 
   // ─── OCR cost tracking ──────────────────────────────────────────────────────
+  /** 'split' = extract + structure; 'single' = one multimodal call */
+  pipeline_mode?: 'split' | 'single' | null;
   extraction_cost_usd?: number | null;
   structuring_cost_usd?: number | null;
   total_cost_usd?: number | null;

@@ -52,6 +52,7 @@ export interface FrontendInvoice {
   batch?: { id: string; name: string } | null;
   itemCount?: number;
   costEstimate?: number | null;
+  pipelineMode?: 'split' | 'single' | null;
   extractionCost?: number | null;
   structuringCost?: number | null;
   extractionTokens?: number | null;
@@ -136,6 +137,7 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     batch: null,
     itemCount: lineItems.length || undefined,
     costEstimate: bill.total_cost_usd ?? null,
+    pipelineMode: bill.pipeline_mode ?? null,
     extractionCost: bill.extraction_cost_usd ?? null,
     structuringCost: bill.structuring_cost_usd ?? null,
     extractionTokens: bill.extraction_tokens ?? null,

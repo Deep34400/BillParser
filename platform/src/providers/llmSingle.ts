@@ -179,12 +179,39 @@ async function openaiSingle(buf: Buffer, modelOverride?: string): Promise<Single
 }
 
 async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<SingleResult> {
-  const { apiKey, model } = await resolveProviderKey('mistral', modelOverride ?? 'pixtral-12b-2409');
   const mime = detectMime(buf);
+
+  // PDF: Mistral has no true one-shot PDF→JSON. Honour Settings "Single + Mistral"
+  // by running OCR + structure with Mistral only (no fallback to "split" mode).
   if (mime === 'application/pdf') {
-    throw new Error('Mistral single mode supports images only. Use Split mode (Mistral OCR) for PDF.');
+    const { mistralOcr } = await import('./mistralOcr.js');
+    const { llmNormalize } = await import('./llmNormalize.js');
+    const t0 = Date.now();
+
+    const ocr = await mistralOcr(buf, true);
+    const structModel =
+      modelOverride && !modelOverride.startsWith('pixtral') && !modelOverride.includes('vision')
+        ? modelOverride
+        : 'mistral-small-latest';
+    const structured = await llmNormalize(ocr.markdown, 'mistral', structModel);
+    const latency_ms = Date.now() - t0;
+
+    const usage: LlmUsage = {
+      prompt_tokens: (ocr.cost.usage.prompt_tokens ?? 0) + (structured.cost.usage.prompt_tokens ?? 0),
+      completion_tokens: (ocr.cost.usage.completion_tokens ?? 0) + (structured.cost.usage.completion_tokens ?? 0),
+      total_tokens: (ocr.cost.usage.total_tokens ?? 0) + (structured.cost.usage.total_tokens ?? 0),
+    };
+    const cost: OcrStepCost = {
+      provider: 'mistral',
+      model: `mistral-ocr+${structModel}`,
+      usage,
+      cost_usd: ocr.cost.cost_usd + structured.cost.cost_usd,
+      latency_ms,
+    };
+    return { parsed: structured.parsed, rawOcr: ocr.markdown, cost };
   }
 
+  const { apiKey, model } = await resolveProviderKey('mistral', modelOverride ?? 'pixtral-12b-2409');
   const t0 = Date.now();
   const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
   const visionModel = model.startsWith('pixtral') || model.includes('vision') ? model : 'pixtral-12b-2409';

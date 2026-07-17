@@ -47,6 +47,7 @@ function processInBackground(
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
         costInfo,
+        pipelineMode: providers.mode,
       });
       bill.ocr_status = 'OCR_COMPLETED';
 
@@ -482,6 +483,7 @@ export async function billRoutes(app: FastifyInstance) {
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
         costInfo,
+        pipelineMode: providers.mode,
       });
       bill.ocr_status = 'OCR_COMPLETED';
       await createBill(bill);
@@ -504,9 +506,10 @@ export async function billRoutes(app: FastifyInstance) {
           parsed_data: toApiParsed(enriched),
           raw_ocr: rawOcr,
           cost: {
-            extraction_usd: costInfo.extraction?.cost_usd ?? 0,
-            structuring_usd: costInfo.structuring?.cost_usd ?? 0,
             mode: providers.mode,
+            extraction_usd: providers.mode === 'single' ? (costInfo.total_cost_usd ?? 0) : (costInfo.extraction?.cost_usd ?? 0),
+            structuring_usd: providers.mode === 'single' ? null : (costInfo.structuring?.cost_usd ?? 0),
+            single_call_usd: providers.mode === 'single' ? costInfo.total_cost_usd : null,
             extraction_provider: providers.extraction,
             structuring_provider: providers.structuring,
             fallback_reason: result.fallbackReason ?? null,

@@ -62,17 +62,13 @@ async function runSingleMode(
       `[OCR] ${contextId} — ${provider} single done (${r.cost.latency_ms}ms, ` +
       `${r.cost.usage.total_tokens} tokens, $${r.cost.cost_usd.toFixed(4)})`,
     );
-    const zeroCost: OcrStepCost = {
-      ...r.cost,
-      cost_usd: 0,
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    };
     return {
       parsed: r.parsed,
       rawOcr: r.rawOcr,
       costInfo: {
+        // Single call: all cost lives on extraction; structuring is null (UI shows one row)
         extraction: r.cost,
-        structuring: zeroCost,
+        structuring: null,
         total_cost_usd: r.cost.cost_usd,
         total_tokens: r.cost.usage.total_tokens,
       },
