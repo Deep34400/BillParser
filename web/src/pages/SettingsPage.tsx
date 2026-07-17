@@ -2,445 +2,350 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client.js';
 import { T } from '../theme.js';
 import { Toast } from '../components/Toast.js';
-import type { SettingsData } from '../types/index.js';
-import { STRUCTURING_MODEL_SUGGESTIONS, modelForProvider, normalizeGeminiModel } from '../lib/structuringModels.js';
 
-const STRUCTURING_PROVIDERS: { name: string; label: string; keyless?: boolean }[] = [
-  { name: 'gemini', label: 'Google Gemini' },
-  { name: 'anthropic', label: 'Anthropic' },
-  { name: 'openai', label: 'OpenAI' },
-  { name: 'mistral', label: 'Mistral' },
-  { name: 'ollama', label: 'GLM-OCR (Ollama)', keyless: true },
+const card: React.CSSProperties = {
+  background: T.panel, border: `1px solid ${T.border}`,
+  borderRadius: 10, padding: '20px 24px', marginBottom: 16,
+};
+const lbl: React.CSSProperties = {
+  display: 'block', fontSize: 12, fontWeight: 600, color: T.muted,
+  marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em',
+};
+const inp: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', border: `1px solid ${T.border}`,
+  borderRadius: 6, fontSize: 13, fontFamily: T.font, color: T.text,
+  background: T.bg, boxSizing: 'border-box',
+};
+const sel: React.CSSProperties = { ...inp, cursor: 'pointer' };
+const btnP: React.CSSProperties = {
+  background: T.accent, color: '#fff', border: 'none', borderRadius: 6,
+  padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
+};
+const btnS: React.CSSProperties = {
+  background: 'transparent', color: T.muted, border: `1px solid ${T.border}`,
+  borderRadius: 6, padding: '7px 16px', fontSize: 13, fontWeight: 600,
+  cursor: 'pointer', fontFamily: T.font,
+};
+const toggleWrap: React.CSSProperties = {
+  display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden',
+  border: `1px solid ${T.border}`, marginBottom: 12,
+};
+function togBtn(active: boolean): React.CSSProperties {
+  return {
+    flex: 1, padding: '12px 16px', fontSize: 13, fontWeight: 600,
+    border: 'none', cursor: 'pointer', fontFamily: T.font,
+    background: active ? T.accent : T.bg, color: active ? '#fff' : T.text,
+    transition: 'background 0.15s',
+  };
+}
+const note: React.CSSProperties = { fontSize: 11, color: T.muted, marginTop: 6 };
+const badge = (ok: boolean): React.CSSProperties => ({
+  display: 'inline-block', fontSize: 11, fontWeight: 700, padding: '3px 10px',
+  borderRadius: 12, background: ok ? '#d4f7e7' : '#fff3cd',
+  color: ok ? T.green : '#856404', letterSpacing: '0.03em',
+});
+const dot = (ok: boolean): React.CSSProperties => ({
+  width: 8, height: 8, borderRadius: '50%', background: ok ? T.green : T.border,
+  display: 'inline-block', marginRight: 6,
+});
+
+interface ProvDef {
+  id: string;
+  label: string;
+  models: string[];
+  canStructure: boolean;
+  canSingle: boolean;
+  desc: string;
+}
+
+const ALL_PROVIDERS: ProvDef[] = [
+  { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest'], canStructure: true, canSingle: false, desc: 'Mistral AI — OCR extraction + structuring' },
+  { id: 'gemini', label: 'Google Gemini', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'], canStructure: true, canSingle: true, desc: 'Google Gemini — fast, supports single mode' },
+  { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: false, desc: 'Anthropic Claude — high accuracy structuring' },
+  { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: false, desc: 'OpenAI GPT — reliable JSON structuring' },
 ];
 
-const STRUCTURING_CRED_LABELS: Record<string, string> = {
-  gemini: 'Gemini API key',
-  anthropic: 'Anthropic API key',
-  openai: 'OpenAI API key',
-  mistral: 'Mistral API key',
-};
-
-// Fields that hold secrets are masked by default and get a show/hide toggle.
-// Everything else (endpoint, region, ids, location) is a plain visible text field.
-const SECRET_FIELDS = new Set(['apiKey', 'secretAccessKey', 'keyJson']);
-
-const cardStyle: React.CSSProperties = {
-  background: T.panel,
-  border: `1px solid ${T.border}`,
-  borderRadius: 10,
-  padding: '20px 24px',
-  marginBottom: 16,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 12,
-  fontWeight: 600,
-  color: T.muted,
-  marginBottom: 4,
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-};
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '8px 10px',
-  border: `1px solid ${T.border}`,
-  borderRadius: 6,
-  fontSize: 13,
-  fontFamily: T.font,
-  color: T.text,
-  background: T.bg,
-  boxSizing: 'border-box',
-};
-
-const selectStyle: React.CSSProperties = {
-  ...inputStyle,
-  cursor: 'pointer',
-};
-
-const btnPrimary: React.CSSProperties = {
-  background: T.accent,
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  padding: '7px 16px',
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: 'pointer',
-  fontFamily: T.font,
-};
-
-const btnSecondary: React.CSSProperties = {
-  background: 'transparent',
-  color: T.muted,
-  border: `1px solid ${T.border}`,
-  borderRadius: 6,
-  padding: '7px 16px',
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: 'pointer',
-  fontFamily: T.font,
-};
-
-const toggleBtn: React.CSSProperties = {
-  flex: 'none',
-  background: 'transparent',
-  color: T.accent,
-  border: `1px solid ${T.border}`,
-  borderRadius: 6,
-  padding: '0 12px',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-  fontFamily: T.font,
-};
-
 export function SettingsPage() {
-  const [settings, setSettings] = useState<SettingsData | null>(null);
-  const [extractionProvider, setExtractionProvider] = useState('');
-  const [structuringProvider, setStructuringProvider] = useState('');
-  const [structuringModel, setStructuringModel] = useState('');
-  const [extractionModel, setExtractionModel] = useState('');
-  const [credValues, setCredValues] = useState<Record<string, string>>({});
-  // which secret inputs are currently revealed, keyed the same as the value maps
+  const [mode, setMode] = useState<'split' | 'single'>('split');
+  const [savedMode, setSavedMode] = useState<'split' | 'single'>('split');
+  const [savedStructProv, setSavedStructProv] = useState('gemini');
+  const [savedStructModel, setSavedStructModel] = useState('gemini-2.5-flash');
+  const [savedSingleProv, setSavedSingleProv] = useState('gemini');
+  const [savedSingleModel, setSavedSingleModel] = useState('gemini-2.5-flash');
+  const [structProv, setStructProv] = useState('gemini');
+  const [structModel, setStructModel] = useState('gemini-2.5-flash');
+  const [singleProv, setSingleProv] = useState('gemini');
+  const [singleModel, setSingleModel] = useState('gemini-2.5-flash');
+  const [creds, setCreds] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(''), 3000);
-  };
-
-  const toggleReveal = (key: string) =>
-    setRevealed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+  const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
 
   const load = useCallback(async () => {
-    const data = await api.settings();
-    setSettings(data);
-    setExtractionProvider(data.extractionProvider);
-    setStructuringProvider(data.structuringProvider);
-    setStructuringModel(normalizeGeminiModel(data.structuringModel));
-    setExtractionModel(normalizeGeminiModel(data.extractionModel ?? data.structuringModel));
-    // Prefill the credential fields with the stored (decrypted) values so they
-    // persist across reloads. Best-effort: if reveal is unavailable, leave fields as-is.
     try {
-      const { credentials } = await api.revealCreds();
-      const cv: Record<string, string> = {};
-      for (const p of data.providers) {
-        const c = credentials[p.name];
-        if (c) for (const f of p.requiredCredentials ?? []) if (c[f] != null) cv[`${p.name}.${f}`] = c[f];
-      }
-      for (const sp of STRUCTURING_PROVIDERS) {
-        if (!sp.keyless && credentials[sp.name]?.apiKey != null) {
-          cv[`${sp.name}.apiKey`] = credentials[sp.name].apiKey;
+      const s = await api.settings();
+      const pm = s.pipelineMode === 'single' ? 'single' : 'split';
+      const sp = s.structuringProvider || 'gemini';
+      const sm = s.structuringModel || 'gemini-2.5-flash';
+      const snp = s.singleProvider || 'gemini';
+      const snm = s.singleModel || 'gemini-2.5-flash';
+      setMode(pm);
+      setSavedMode(pm);
+      setStructProv(sp); setStructModel(sm);
+      setSingleProv(snp); setSingleModel(snm);
+      setSavedStructProv(sp); setSavedStructModel(sm);
+      setSavedSingleProv(snp); setSavedSingleModel(snm);
+      try {
+        const { credentials } = await api.revealCreds();
+        const cv: Record<string, string> = {};
+        for (const p of ALL_PROVIDERS) {
+          if (credentials[p.id]?.apiKey) cv[`${p.id}.apiKey`] = credentials[p.id].apiKey;
         }
-      }
-      if (cv['ollama.baseUrl'] == null || cv['ollama.baseUrl'] === '') cv['ollama.baseUrl'] = 'http://host.docker.internal:11434';
-      if (cv['ollama.model'] == null || cv['ollama.model'] === '') cv['ollama.model'] = 'glm-ocr';
-      setCredValues(cv);
-    } catch {
-      /* reveal unavailable — keep whatever is already in the fields */
-    }
+        setCreds(cv);
+      } catch { /* no reveal */ }
+      setLoaded(true);
+    } catch (e) { flash(`Load failed: ${(e as Error).message}`); }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  const handleSaveSelections = async () => {
+  const handleSave = async () => {
+    setSaving(true);
     try {
-      const bothGemini = extractionProvider === 'gemini' && structuringProvider === 'gemini';
-      const model = normalizeGeminiModel(structuringModel);
-      const ocrModel = normalizeGeminiModel(extractionModel);
       await api.saveSettings({
-        extractionProvider,
-        structuringProvider,
-        structuringModel: model,
-        extractionModel: bothGemini ? model : ocrModel,
+        pipelineMode: mode,
+        extractionProvider: 'mistral',
+        structuringProvider: structProv,
+        structuringModel: structModel,
+        singleProvider: singleProv,
+        singleModel: singleModel,
       });
-      await load();
-      showToast('Selections saved');
-    } catch (e) {
-      showToast(`Could not save: ${(e as Error).message}`);
-    }
+      setSavedMode(mode);
+      setSavedStructProv(structProv); setSavedStructModel(structModel);
+      setSavedSingleProv(singleProv); setSavedSingleModel(singleModel);
+      flash(`Saved — ${mode === 'split' ? `Split: Mistral OCR → ${structProv} (${structModel})` : `Single: ${singleProv} (${singleModel})`}`);
+    } catch (e) { flash(`Error: ${(e as Error).message}`); }
+    finally { setSaving(false); }
   };
 
-  const handleSaveCreds = async (providerName: string, displayName: string) => {
-    const body: Record<string, string> = {};
-    const provider = settings?.providers.find((p) => p.name === providerName);
-    provider?.requiredCredentials?.forEach((field) => {
-      const val = credValues[`${providerName}.${field}`];
-      // only send fields the user actually typed; blanks are left untouched (merge on the server)
-      if (val !== undefined && val !== '') body[field] = val;
-    });
-    if (Object.keys(body).length === 0) {
-      showToast('Enter a value first');
-      return;
-    }
+  const handleSaveCreds = async (provId: string) => {
+    const val = creds[`${provId}.apiKey`];
+    if (!val) { flash('Enter an API key first'); return; }
     try {
-      await api.saveCreds(providerName, body);
+      await api.saveCreds(provId, { apiKey: val });
       await load();
-      showToast(`${displayName} credentials saved`);
-    } catch (e) {
-      showToast(`Could not save: ${(e as Error).message}`);
-    }
+      flash(`${provId} key saved`);
+    } catch (e) { flash(`Error: ${(e as Error).message}`); }
   };
 
-  const handleClearCreds = async (providerName: string, displayName: string) => {
+  const handleClearCreds = async (provId: string) => {
     try {
-      await api.clearCreds(providerName);
-      setCredValues((prev) => {
-        const next = { ...prev };
-        for (const k of Object.keys(next)) if (k.startsWith(`${providerName}.`)) delete next[k];
-        return next;
-      });
+      await api.clearCreds(provId);
+      setCreds((p) => { const n = { ...p }; delete n[`${provId}.apiKey`]; return n; });
       await load();
-      showToast(`${displayName} credentials cleared`);
-    } catch (e) {
-      showToast(`Could not clear: ${(e as Error).message}`);
-    }
+      flash(`${provId} key cleared`);
+    } catch (e) { flash(`Error: ${(e as Error).message}`); }
   };
 
-  if (!settings) {
-    return (
-      <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.muted }}>
-        Loading…
-      </div>
-    );
-  }
+  const currentStructDef = ALL_PROVIDERS.find((p) => p.id === structProv) ?? ALL_PROVIDERS[0];
+  const currentSingleDef = ALL_PROVIDERS.find((p) => p.id === singleProv) ?? ALL_PROVIDERS[1];
+  const dirty = mode !== savedMode || structProv !== savedStructProv || structModel !== savedStructModel || singleProv !== savedSingleProv || singleModel !== savedSingleModel;
 
-  const extractionNames = new Set(settings.providers.map((p) => p.name));
-  const structuringOnlyProviders = STRUCTURING_PROVIDERS.filter(
-    (sp) => !sp.keyless && !extractionNames.has(sp.name),
-  );
-  const bothGemini = extractionProvider === 'gemini' && structuringProvider === 'gemini';
-  const geminiModels = STRUCTURING_MODEL_SUGGESTIONS.gemini ?? [];
+  if (!loaded) return <div style={{ padding: 24, fontFamily: T.font, color: T.muted }}>Loading...</div>;
 
   return (
-    <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 720 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>Settings</h1>
-      <p style={{ fontSize: 13, color: T.muted, margin: '0 0 28px' }}>
-        Provider integrations &amp; extraction engine
+    <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 740 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>OCR Pipeline Settings</h1>
+      <p style={{ fontSize: 13, color: T.muted, margin: '0 0 24px' }}>
+        Choose Split or Single mode. Setting is stored as <code>pipelineMode</code> in DB.
       </p>
 
-      {/* Section 1 — Selections */}
-      <h2 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-        Selections
-      </h2>
-      <div style={cardStyle}>
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Active extraction provider</label>
-          <select
-            style={selectStyle}
-            value={extractionProvider}
-            onChange={(e) => {
-              const p = e.target.value;
-              setExtractionProvider(p);
-              if (p === 'gemini') {
-                setStructuringProvider('gemini');
-                setStructuringModel((m) => modelForProvider('gemini', m));
-                setExtractionModel((m) => normalizeGeminiModel(m || 'gemini-2.5-flash'));
-              }
-            }}
-          >
-            {settings.providers.map((p) => (
-              // Use "displayName (name)" format so bare displayName doesn't appear as option text
-              <option key={p.name} value={p.name}>
-                {p.displayName} ({p.name})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Structuring model provider</label>
-          <select
-            style={selectStyle}
-            value={structuringProvider}
-            onChange={(e) => {
-              const p = e.target.value;
-              setStructuringProvider(p);
-              setStructuringModel((m) => modelForProvider(p, m));
-            }}
-          >
-            {STRUCTURING_PROVIDERS.map((p) => (
-              <option key={p.name} value={p.name}>{p.label}</option>
-            ))}
-          </select>
-        </div>
-        {bothGemini ? (
-          <div style={{ marginBottom: 18 }}>
-            <label style={labelStyle}>Gemini model (OCR + structuring)</label>
-            <select
-              style={selectStyle}
-              value={structuringModel}
-              onChange={(e) => {
-                const m = e.target.value;
-                setStructuringModel(m);
-                setExtractionModel(m);
-              }}
-            >
-              {geminiModels.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-            <div style={{ fontSize: 11, color: T.muted, marginTop: 5 }}>
-              One model for PDF reading and field extraction. API key is saved below.
-            </div>
+      {/* Active mode banner */}
+      <div style={{
+        ...card,
+        display: 'flex', alignItems: 'center', gap: 14,
+        background: savedMode === 'single' ? '#eef6ff' : '#f0faf4',
+        borderColor: savedMode === 'single' ? '#b3d4fc' : '#b7e4c7',
+        marginBottom: 16,
+      }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+            Currently active (stored)
           </div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>
+            {savedMode === 'split' ? 'Split — Extract + Structure' : 'Single — One API Call'}
+          </div>
+          <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
+            {savedMode === 'split'
+              ? `Mistral OCR → ${savedStructProv} (${savedStructModel})`
+              : `${savedSingleProv} (${savedSingleModel}) does OCR + structure together`}
+          </div>
+        </div>
+        <span style={badge(true)}>{savedMode.toUpperCase()}</span>
+      </div>
+
+      {/* ─── Pipeline mode picker ─── */}
+      <div style={card}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div style={lbl}>Select Pipeline Mode</div>
+          {dirty && <span style={badge(false)}>Unsaved change</span>}
+        </div>
+
+        <div style={toggleWrap}>
+          <button type="button" style={togBtn(mode === 'split')} onClick={() => setMode('split')}>
+            Split (2 API calls)
+          </button>
+          <button type="button" style={togBtn(mode === 'single')} onClick={() => setMode('single')}>
+            Single (1 API call)
+          </button>
+        </div>
+
+        <div style={{ fontSize: 12, color: T.muted, marginBottom: 16, lineHeight: 1.5 }}>
+          {mode === 'split'
+            ? 'Split: Step 1 Mistral OCR (PDF → markdown), Step 2 any LLM converts markdown → JSON.'
+            : 'Single: One Gemini call — PDF/image goes directly to the model and returns structured JSON.'}
+        </div>
+
+        {mode === 'split' ? (
+          <>
+            <div style={{ marginBottom: 14 }}>
+              <div style={lbl}>Step 1 — Extraction (OCR)</div>
+              <select style={sel} disabled value="mistral">
+                <option value="mistral">Mistral OCR (mistral-ocr-latest)</option>
+              </select>
+              <div style={note}>Always uses Mistral dedicated OCR for best PDF/image reading.</div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={lbl}>Step 2 — Structuring Provider</div>
+              <select style={sel} value={structProv} onChange={(e) => {
+                const id = e.target.value;
+                setStructProv(id);
+                const def = ALL_PROVIDERS.find((p) => p.id === id);
+                if (def?.models[0]) setStructModel(def.models[0]);
+              }}>
+                {ALL_PROVIDERS.filter((p) => p.canStructure).map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+              <div style={note}>{currentStructDef.desc}. Falls back to Mistral if this fails.</div>
+            </div>
+            <div style={{ marginBottom: 18 }}>
+              <div style={lbl}>Structuring Model</div>
+              <select style={sel} value={structModel} onChange={(e) => setStructModel(e.target.value)}>
+                {currentStructDef.models.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </>
         ) : (
           <>
-            {extractionProvider === 'gemini' && geminiModels.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>Extraction model (OCR)</label>
-                <select
-                  style={selectStyle}
-                  value={extractionModel}
-                  onChange={(e) => setExtractionModel(e.target.value)}
-                >
-                  {geminiModels.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            <div style={{ marginBottom: 14 }}>
+              <div style={lbl}>Provider (OCR + Structuring in one call)</div>
+              <select style={sel} value={singleProv} onChange={(e) => {
+                const id = e.target.value;
+                setSingleProv(id);
+                const def = ALL_PROVIDERS.find((p) => p.id === id);
+                if (def?.models[0]) setSingleModel(def.models[0]);
+              }}>
+                {ALL_PROVIDERS.filter((p) => p.canSingle).map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+              <div style={note}>PDF/image sent directly. Falls back to Split (Mistral+Mistral) if it fails.</div>
+            </div>
             <div style={{ marginBottom: 18 }}>
-              <label style={labelStyle}>Structuring model</label>
-              {(STRUCTURING_MODEL_SUGGESTIONS[structuringProvider]?.length ?? 0) > 0 ? (
-                <select
-                  style={selectStyle}
-                  value={structuringModel}
-                  onChange={(e) => setStructuringModel(e.target.value)}
-                >
-                  {STRUCTURING_MODEL_SUGGESTIONS[structuringProvider].map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  style={inputStyle}
-                  value={structuringModel}
-                  onChange={(e) => setStructuringModel(e.target.value)}
-                  placeholder="model id"
-                />
-              )}
+              <div style={lbl}>Model</div>
+              <select style={sel} value={singleModel} onChange={(e) => setSingleModel(e.target.value)}>
+                {currentSingleDef.models.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
             </div>
           </>
         )}
-        <button style={btnPrimary} onClick={handleSaveSelections}>
-          Save selections
+
+        <button style={btnP} disabled={saving} onClick={() => void handleSave()}>
+          {saving ? 'Saving...' : `Save as ${mode.toUpperCase()} mode`}
         </button>
       </div>
 
-      {/* Section 2 — Provider credentials (rendered BEFORE section 3) */}
+      {/* ─── API Keys ─── */}
       <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-        Provider credentials
+        API Keys
       </h2>
-      {settings.providers.map((provider) => (
-        <div key={provider.name} style={cardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <span style={{ fontSize: 15, fontWeight: 700 }}>{provider.displayName}</span>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                padding: '2px 8px',
-                borderRadius: 20,
-                background: provider.configured ? '#d4f7e7' : T.border,
-                color: provider.configured ? T.green : T.muted,
-              }}
-            >
-              {provider.configured ? 'Configured' : 'Not configured'}
-            </span>
-            <span style={{ fontSize: 11, color: T.faint, marginLeft: 'auto' }}>{provider.kind}</span>
-          </div>
+      <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px' }}>
+        Save your API key for each provider you use. Env vars are used as fallback.
+        Gemini on Cloud Run: leave key empty — service account (ADC) uses Vertex AI.
+      </p>
 
-          {provider.requiredCredentials?.map((field) => {
-            const key = `${provider.name}.${field}`;
-            const isSecret = SECRET_FIELDS.has(field);
-            const shown = !isSecret || !!revealed[key];
-            return (
-              <div key={field} style={{ marginBottom: 12 }}>
-                <label style={labelStyle}>{field === 'apiKey' ? 'API key' : field}</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    type={shown ? 'text' : 'password'}
-                    style={inputStyle}
-                    placeholder={field === 'apiKey' ? 'Paste API key here' : field}
-                    autoComplete="off"
-                    value={credValues[key] ?? ''}
-                    onChange={(e) =>
-                      setCredValues((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
-                  />
-                  {isSecret && (
-                    <button type="button" style={toggleBtn} onClick={() => toggleReveal(key)}>
-                      {shown ? 'Hide' : 'Show'}
-                    </button>
-                  )}
-                </div>
+      {ALL_PROVIDERS.map((prov) => {
+        const keyField = `${prov.id}.apiKey`;
+        const shown = !!revealed[keyField];
+        const hasKey = !!(creds[keyField]);
+        const isActive = mode === 'split'
+          ? (prov.id === 'mistral' || prov.id === structProv)
+          : (prov.id === singleProv);
+
+        return (
+          <div key={prov.id} style={{ ...card, opacity: isActive ? 1 : 0.55 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={dot(hasKey)} />
+              <span style={{ fontSize: 15, fontWeight: 700 }}>{prov.label}</span>
+              <span style={{
+                fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 12,
+                background: hasKey ? '#d4f7e7' : T.border,
+                color: hasKey ? T.green : T.muted,
+                marginLeft: 4,
+              }}>{hasKey ? 'Key saved' : 'No key'}</span>
+              {isActive && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 12,
+                  background: T.accent, color: '#fff', marginLeft: 'auto',
+                }}>ACTIVE</span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>{prov.desc}</div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={lbl}>API Key</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type={shown ? 'text' : 'password'}
+                  style={inp}
+                  placeholder={`Paste ${prov.label} API key`}
+                  autoComplete="off"
+                  value={creds[keyField] ?? ''}
+                  onChange={(e) => setCreds((p) => ({ ...p, [keyField]: e.target.value }))}
+                />
+                <button type="button" style={btnS} onClick={() => toggle(keyField)}>
+                  {shown ? 'Hide' : 'Show'}
+                </button>
               </div>
-            );
-          })}
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            <button style={btnPrimary} onClick={() => handleSaveCreds(provider.name, provider.displayName)}>
-              Save
-            </button>
-            <button style={btnSecondary} onClick={() => handleClearCreds(provider.name, provider.displayName)}>
-              Clear
-            </button>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={btnP} onClick={() => void handleSaveCreds(prov.id)}>Save</button>
+              <button style={btnS} onClick={() => void handleClearCreds(prov.id)}>Clear</button>
+            </div>
           </div>
+        );
+      })}
+
+      {/* ─── How it works ─── */}
+      <div style={{ ...card, background: '#f8f9fb' }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>How it works</div>
+        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7 }}>
+          Setting key: <code>pipelineMode</code> = <code>"split"</code> or <code>"single"</code> (stored in DB).
+          <br /><br />
+          <strong>Split</strong> — 2 API calls:<br />
+          1. Mistral OCR reads PDF/image → markdown<br />
+          2. Selected LLM (Gemini / Mistral / Claude / GPT) → structured JSON
+          <br /><br />
+          <strong>Single</strong> — 1 API call:<br />
+          PDF/image → Gemini → structured JSON directly.
+          <br /><br />
+          On failure, system auto-falls back to Mistral.
         </div>
-      ))}
-
-      {structuringOnlyProviders.length > 0 && (
-        <>
-          <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Structuring-only credentials
-          </h2>
-          <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px' }}>
-            For providers used only in the structuring step (not PDF OCR). Gemini and Mistral keys live in Provider credentials above.
-          </p>
-          {structuringOnlyProviders.map((sp) => {
-            const key = `struct.${sp.name}`;
-            const shown = !!revealed[key];
-            const credKey = `${sp.name}.apiKey`;
-            return (
-              <div key={sp.name} style={cardStyle}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{sp.label}</div>
-                <div style={{ marginBottom: 12 }}>
-                  <label style={labelStyle}>API key</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input
-                      type={shown ? 'text' : 'password'}
-                      style={inputStyle}
-                      placeholder={STRUCTURING_CRED_LABELS[sp.name]}
-                      autoComplete="off"
-                      value={credValues[credKey] ?? ''}
-                      onChange={(e) =>
-                        setCredValues((prev) => ({ ...prev, [credKey]: e.target.value }))
-                      }
-                    />
-                    <button type="button" style={toggleBtn} onClick={() => toggleReveal(key)}>
-                      {shown ? 'Hide' : 'Show'}
-                    </button>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button style={btnPrimary} onClick={() => handleSaveCreds(sp.name, sp.label)}>
-                    Save
-                  </button>
-                  <button style={btnSecondary} onClick={() => handleClearCreds(sp.name, sp.label)}>
-                    Clear
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </>
-      )}
+      </div>
 
       <Toast message={toast} />
     </div>

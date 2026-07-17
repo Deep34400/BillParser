@@ -2,23 +2,55 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { SettingsPage } from '../src/pages/SettingsPage.js';
 import { api } from '../src/api/client.js';
+
 beforeEach(() => {
-  vi.spyOn(api, 'settings').mockResolvedValue({ extractionProvider: 'mistral', structuringProvider: 'anthropic', structuringModel: 'claude-sonnet-4-6',
-    providers: [{ name: 'azure', displayName: 'Azure', kind: 'structured', requiredCredentials: ['endpoint','apiKey'], configured: false, masked: {} }] } as any);
+  vi.spyOn(api, 'settings').mockResolvedValue({
+    pipelineMode: 'split',
+    extractionProvider: 'mistral',
+    structuringProvider: 'gemini',
+    structuringModel: 'gemini-2.5-flash',
+    singleProvider: 'gemini',
+    singleModel: 'gemini-2.5-flash',
+    providers: [],
+  } as any);
   vi.spyOn(api, 'revealCreds').mockResolvedValue({ credentials: {} } as any);
 });
-it('prefills credential fields from revealed stored values', async () => {
-  vi.spyOn(api, 'revealCreds').mockResolvedValue({ credentials: { azure: { endpoint: 'https://stored', apiKey: 'sk-stored-1234' } } } as any);
+
+it('shows stored pipeline mode as SPLIT', async () => {
   render(<SettingsPage />);
-  await waitFor(() => expect((screen.getByPlaceholderText('endpoint') as HTMLInputElement).value).toBe('https://stored'));
-  expect((screen.getByPlaceholderText('apiKey') as HTMLInputElement).value).toBe('sk-stored-1234');
+  await waitFor(() => expect(screen.getByText('SPLIT')).toBeTruthy());
+  expect(screen.getByText(/Split — Extract \+ Structure/)).toBeTruthy();
 });
-it('renders provider credential forms and saves', async () => {
-  const save = vi.spyOn(api, 'saveCreds').mockResolvedValue({} as any);
+
+it('shows stored pipeline mode as SINGLE when saved', async () => {
+  vi.spyOn(api, 'settings').mockResolvedValue({
+    pipelineMode: 'single',
+    extractionProvider: 'mistral',
+    structuringProvider: 'gemini',
+    structuringModel: 'gemini-2.5-flash',
+    singleProvider: 'gemini',
+    singleModel: 'gemini-2.5-flash',
+    providers: [],
+  } as any);
   render(<SettingsPage />);
-  await waitFor(() => expect(screen.getByText('Azure')).toBeTruthy());
-  fireEvent.change(screen.getByPlaceholderText('endpoint'), { target: { value: 'https://x' } });
-  fireEvent.change(screen.getByPlaceholderText('apiKey'), { target: { value: 'sk-1' } });
-  fireEvent.click(screen.getAllByText('Save')[0]);
-  await waitFor(() => expect(save).toHaveBeenCalledWith('azure', { endpoint: 'https://x', apiKey: 'sk-1' }));
+  await waitFor(() => expect(screen.getByText('SINGLE')).toBeTruthy());
+  expect(screen.getByText(/Single — One API Call/)).toBeTruthy();
+});
+
+it('saves pipelineMode when Save is clicked', async () => {
+  const save = vi.spyOn(api, 'saveSettings').mockResolvedValue({} as any);
+  render(<SettingsPage />);
+  await waitFor(() => expect(screen.getByText('Save as SPLIT mode')).toBeTruthy());
+  fireEvent.click(screen.getByText('Single (1 API call)'));
+  fireEvent.click(screen.getByText('Save as SINGLE mode'));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+    pipelineMode: 'single',
+  })));
+});
+
+it('renders provider API key forms', async () => {
+  render(<SettingsPage />);
+  await waitFor(() => expect(screen.getAllByText('Google Gemini').length).toBeGreaterThan(0));
+  expect(screen.getAllByText('Anthropic Claude').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('OpenAI GPT').length).toBeGreaterThan(0);
 });

@@ -59,7 +59,16 @@ export interface Invoice {
 export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; }
 export interface ProviderInfo { name: string; displayName: string; kind: string; configured: boolean; requiredCredentials?: string[]; masked?: Record<string, string>; }
 export interface AppConfig { providers: ProviderInfo[]; activeProvider: string; structuringProvider: string; structuringModel: string; }
-export interface SettingsData { extractionProvider: string; structuringProvider: string; structuringModel: string; extractionModel?: string; providers: ProviderInfo[]; }
+export interface SettingsData {
+  pipelineMode: 'split' | 'single';
+  extractionProvider: string;
+  structuringProvider: string;
+  structuringModel: string;
+  extractionModel?: string;
+  singleProvider?: string;
+  singleModel?: string;
+  providers: ProviderInfo[];
+}
 export interface VehicleSpend { vehicle_id: string; registration_number: string | null; total_bills: number; total_amount: number; parts_amount: number; labour_amount: number; total_tax: number; }
 export interface CostPerKm { vehicle_id: string; registration_number: string | null; total_spend: number; km_range: number | null; cost_per_km: number | null; }
 export interface OcrCostSummary {
