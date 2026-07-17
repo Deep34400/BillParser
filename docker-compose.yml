@@ -1,6 +1,6 @@
 services:
   api:
-    build: { context: ., dockerfile: platform/Dockerfile }
+    build: { context: platform, dockerfile: Dockerfile }
     environment:
       GCP_PROJECT_ID: ${GCP_PROJECT_ID:-billparser-dev}
       STORAGE_BUCKET: ${STORAGE_BUCKET:-billparser-uploads}
@@ -13,4 +13,7 @@ services:
   web:
     build: { context: ., dockerfile: web/Dockerfile }
     depends_on: [ api ]
-    ports: [ "8081:80" ]
+    environment:
+      PORT: 8080
+      API_BASE_URL: http://api:4000
+    ports: [ "8081:8080" ]

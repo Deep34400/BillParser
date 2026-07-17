@@ -1,0 +1,99 @@
+steps:
+  # 1. Build platform (backend) image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-platform
+    args:
+      - build
+      - -t
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/platform:$COMMIT_SHA'
+      - -f
+      - platform/Dockerfile
+      - platform
+
+  # 2. Push platform image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-platform
+    args:
+      - push
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/platform:$COMMIT_SHA'
+    waitFor: ['build-platform']
+
+  # 3. Deploy platform to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdk/cloud-sdk'
+    id: deploy-platform
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_PLATFORM_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/platform:$COMMIT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--service-account=${_RUNTIME_SA}'
+      - '--allow-unauthenticated'
+      - '--port=4000'
+      - '--set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,STORAGE_BUCKET=${_STORAGE_BUCKET},FIRESTORE_DATABASE_ID=${_FIRESTORE_DB},VERTEX_LOCATION=${_VERTEX_LOCATION},NODE_ENV=production,LOCAL_DEV=false'
+    waitFor: ['push-platform']
+
+  # 4. Capture the deployed platform URL for the web build to proxy to
+  - name: 'gcr.io/google.com/cloudsdk/cloud-sdk'
+    id: get-platform-url
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud run services describe ${_PLATFORM_SERVICE} --region=${_REGION} --format='value(status.url)' > /workspace/platform_url.txt
+        echo "Platform URL: $(cat /workspace/platform_url.txt)"
+    waitFor: ['deploy-platform']
+
+  # 5. Build web (frontend) image — context is repo root since web/Dockerfile COPYs "web/..." paths
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-web
+    args:
+      - build
+      - -t
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/web:$COMMIT_SHA'
+      - -f
+      - web/Dockerfile
+      - .
+    waitFor: ['-']
+
+  # 6. Push web image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-web
+    args:
+      - push
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/web:$COMMIT_SHA'
+    waitFor: ['build-web']
+
+  # 7. Deploy web to Cloud Run, pointing its nginx proxy at the platform service URL
+  - name: 'gcr.io/google.com/cloudsdk/cloud-sdk'
+    id: deploy-web
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        PLATFORM_URL=$(cat /workspace/platform_url.txt)
+        gcloud run deploy ${_WEB_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/web:$COMMIT_SHA \
+          --region=${_REGION} \
+          --platform=managed \
+          --allow-unauthenticated \
+          --set-env-vars=API_BASE_URL=$$PLATFORM_URL
+    waitFor: ['push-web', 'get-platform-url']
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/platform:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/web:$COMMIT_SHA'
+
+substitutions:
+  _REGION: asia-southeast1
+  _PLATFORM_SERVICE: billparser-platform-dev
+  _WEB_SERVICE: billparser-web-dev
+  _RUNTIME_SA: billparser-runtime@carrum-agent-pilot-dev.iam.gserviceaccount.com
+  _STORAGE_BUCKET: billparser-uploads
+  _FIRESTORE_DB: billparser-db
+  _VERTEX_LOCATION: us-central1
+
+options:
+  logging: CLOUD_LOGGING_ONLY
