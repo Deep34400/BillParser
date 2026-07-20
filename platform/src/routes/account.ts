@@ -5,7 +5,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { getUserTransactions } from '../models/users.js';
-import { clientUserView } from '../lib/clientUser.js';
+import { clientUserView } from '../shared/clientUser.js';
 
 export async function accountRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/account', async (req, reply) => {

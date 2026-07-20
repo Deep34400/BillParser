@@ -6,7 +6,7 @@ loadEnv({ path: resolve(process.cwd(), '../.env') });
 
 const { buildApp } = await import('./app.js');
 const { env } = await import('./config/env.js');
-const { devStore } = await import('./lib/devStore.js');
+const { devStore } = await import('./shared/devStore.js');
 
 if (env.localDev) {
   if (env.mistralApiKey) devStore.saveCreds('mistral', { apiKey: env.mistralApiKey });

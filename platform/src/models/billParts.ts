@@ -1,6 +1,6 @@
 import { env } from '../config/env.js';
 import { db, col } from '../config/firebase.js';
-import { devStore } from '../lib/devStore.js';
+import { devStore } from '../shared/devStore.js';
 import type { BillPartDoc, ParsedInvoiceData, LineType } from './types.js';
 import { v4 as uuid } from 'uuid';
 

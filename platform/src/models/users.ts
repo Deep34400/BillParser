@@ -5,7 +5,7 @@
 import { randomBytes, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
 import { env } from '../config/env.js';
 import { db, col } from '../config/firebase.js';
-import { devStore } from '../lib/devStore.js';
+import { devStore } from '../shared/devStore.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

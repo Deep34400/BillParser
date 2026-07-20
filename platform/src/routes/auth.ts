@@ -9,7 +9,7 @@ import {
   createApiKeyDoc, listApiKeysForUser, deleteApiKey,
   type ApiKeyDoc,
 } from '../models/users.js';
-import { clientUserView } from '../lib/clientUser.js';
+import { clientUserView } from '../shared/clientUser.js';
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   /** POST /api/auth/login — email + password → JWT token */

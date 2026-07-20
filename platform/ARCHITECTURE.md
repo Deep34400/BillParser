@@ -54,89 +54,123 @@
 
 ## Project Structure
 
+Code is organized by **domain** — each service (OCR, Analytics, Fraud) owns its routes, services, and utilities in one folder. Shared infrastructure lives in `config/`, `models/`, `shared/`, and `middleware/`.
+
 ```
-├── platform/                    # Backend (GCP/Firebase)
+├── platform/                         # Backend (GCP/Firebase)
 │   ├── src/
-│   │   ├── index.ts             # Server entry — loads .env, starts Fastify
-│   │   ├── app.ts               # Fastify app builder — registers all routes
+│   │   ├── index.ts                  # Server entry — loads .env, seeds admin, starts Fastify
+│   │   ├── app.ts                    # Fastify app builder — registers all domain routes
 │   │   │
-│   │   ├── config/
-│   │   │   ├── env.ts           # Environment variables (API keys, ports, flags)
-│   │   │   └── firebase.ts      # Firebase Admin init (Firestore + Storage)
+│   │   ├── config/                   # Environment + Firebase setup
+│   │   │   ├── env.ts               # All env vars with defaults
+│   │   │   └── firebase.ts          # Firebase Admin SDK init (Firestore + Storage)
 │   │   │
-│   │   ├── models/              # Firestore data layer
-│   │   │   ├── types.ts         # ALL types (OCR contract, BillDoc, BillPartDoc, API envelope)
-│   │   │   ├── bills.ts         # CRUD for 'bills' collection
-│   │   │   ├── billParts.ts     # CRUD for 'bill_parts' collection + extraction logic
-│   │   │   └── settings.ts      # App settings + provider credentials storage
+│   │   ├── models/                   # Firestore data layer (shared across domains)
+│   │   │   ├── types.ts             # ALL types (OCR contract, BillDoc, BillPartDoc, API envelope)
+│   │   │   ├── bills.ts             # CRUD for 'bills' collection
+│   │   │   ├── billParts.ts         # CRUD for 'bill_parts' collection + extraction
+│   │   │   ├── settings.ts          # App settings + provider credentials
+│   │   │   └── users.ts             # User CRUD + password hashing + token balance
 │   │   │
-│   │   ├── providers/           # OCR + AI providers
-│   │   │   ├── mistralOcr.ts    # Mistral OCR API — PDF buffer → markdown
-│   │   │   ├── geminiNormalize.ts # Gemini API — markdown → ParsedInvoiceData
-│   │   │   ├── pipeline.ts      # Combined: mistralOcr → geminiNormalize
-│   │   │   └── types.ts         # CanonicalResult, provider interfaces
+│   │   ├── middleware/               # Fastify plugins
+│   │   │   └── auth.ts              # JWT + API key authentication
 │   │   │
-│   │   ├── parsing/             # LLM response parsing (from original system)
-│   │   │   ├── prompt.ts        # STRUCTURING_PROMPT — the exact instructions Gemini follows
-│   │   │   ├── parse.ts         # JSON → ParsedInvoiceData coercion
-│   │   │   ├── coerce.ts        # Type coercion helpers (toNum, toStr, etc.)
-│   │   │   ├── validate.ts      # Business validation rules
-│   │   │   ├── types.ts         # ParsedInvoiceData interface (OCR contract)
-│   │   │   ├── legacy.ts        # Legacy format parser
-│   │   │   └── index.ts         # structureFromLlmResponse — main entry point
+│   │   ├── shared/                   # Shared utilities (used by multiple domains)
+│   │   │   ├── apiResponse.ts       # Standard {success, data, errors} envelope
+│   │   │   ├── cache.ts             # Server-side TTL cache (30s) for analytics
+│   │   │   ├── clientUser.ts        # User → frontend-safe shape
+│   │   │   ├── devStore.ts          # In-memory Maps for LOCAL_DEV mode
+│   │   │   └── storage.ts           # Cloud Storage upload/download + file detection
 │   │   │
-│   │   ├── billing/             # GST/tax/footer calculation logic
-│   │   │   ├── billSummary.ts   # resolveBillSummary — GST reconciliation
-│   │   │   ├── footerExtract.ts # extractSummaryFromMarkdown — footer parsing
-│   │   │   ├── normalize.ts     # enrichParsedInvoice — post-processing
-│   │   │   └── dateExtract.ts   # extractInvoiceDateFromMarkdown
+│   │   ├── ocr/                      # ★ OCR Domain — invoice processing pipeline
+│   │   │   ├── route.ts             # /api/invoices/* (14 endpoints) + /api/parse, /api/ocr/*
+│   │   │   ├── structuringService.ts # Pipeline orchestrator (single/split mode + fallback)
+│   │   │   ├── processingService.ts  # Upload → OCR → Store orchestration
+│   │   │   ├── providers/            # LLM API clients
+│   │   │   │   ├── geminiClient.ts  # Vertex AI Gemini via ADC
+│   │   │   │   ├── llmSingle.ts     # Single-call OCR+structure (Gemini/Claude/OpenAI/Mistral)
+│   │   │   │   ├── llmNormalize.ts  # Multi-provider structuring (markdown → JSON)
+│   │   │   │   ├── mistralOcr.ts    # Mistral OCR API (PDF → markdown)
+│   │   │   │   ├── resolveKey.ts    # API key + model resolution per provider
+│   │   │   │   └── types.ts         # OcrCostInfo, OcrStepCost, LlmUsage
+│   │   │   ├── parsing/             # LLM response → structured data
+│   │   │   │   ├── index.ts         # structureFromLlmResponse — main entry
+│   │   │   │   ├── parse.ts         # JSON → ParsedInvoiceData coercion
+│   │   │   │   ├── coerce.ts        # Type coercion + JSON repair
+│   │   │   │   ├── validate.ts      # Business validation rules
+│   │   │   │   ├── prompt.ts        # STRUCTURING_PROMPT (instructions for LLM)
+│   │   │   │   ├── legacy.ts        # Legacy flat-JSON format parser
+│   │   │   │   └── types.ts         # Parsing-specific types + re-exports
+│   │   │   ├── extraction/           # Field extraction from parsed data / markdown
+│   │   │   │   ├── billSummary.ts   # GST reconciliation + fillMissingGstAmounts
+│   │   │   │   ├── footerExtract.ts # Extract GST footer from OCR markdown
+│   │   │   │   ├── normalize.ts     # enrichParsedInvoice — post-processing
+│   │   │   │   ├── vendorExtract.ts # Vendor name extraction + junk detection
+│   │   │   │   ├── dateExtract.ts   # Fallback date extraction from markdown
+│   │   │   │   ├── vehicleExtract.ts # Registration/chassis normalization
+│   │   │   │   ├── lineItemFilter.ts # Line item dedup + filtering
+│   │   │   │   └── reviewFlags.ts   # Confidence flags for review
+│   │   │   └── mapper/              # Data mapping + response shaping
+│   │   │       ├── billMapper.ts    # ParsedInvoiceData → BillDoc for Firestore
+│   │   │       ├── billToInvoice.ts # BillDoc → frontend Invoice shape
+│   │   │       └── toApiParsed.ts   # OCR response normalizer (IMMUTABLE contract)
 │   │   │
-│   │   ├── response/
-│   │   │   └── toCanonical.ts   # ParsedInvoiceData → CanonicalResult mapping
+│   │   ├── analytics/                # ★ Analytics Domain — spend/cost analytics
+│   │   │   ├── route.ts             # /api/analytics/* (7 endpoints)
+│   │   │   └── analyticsService.ts  # Vehicle spend, cost/km, OCR cost summary
 │   │   │
-│   │   ├── services/
-│   │   │   ├── billing/
-│   │   │   │   ├── billProcessingService.ts  # Upload → OCR → Normalize → Store
-│   │   │   │   └── billMapper.ts             # ParsedInvoiceData → BillDoc
-│   │   │   ├── analytics/
-│   │   │   │   └── analyticsService.ts       # Dashboard, vehicle, vendor, cost/km
-│   │   │   └── fraud/
-│   │   │       └── fraudDetectionService.ts  # Duplicates, GST, price, odometer
+│   │   ├── fraud/                    # ★ Fraud Domain — anomaly detection
+│   │   │   ├── route.ts             # /api/fraud/* (5 endpoints)
+│   │   │   └── fraudDetectionService.ts # Duplicates, GST, price, odometer checks
 │   │   │
-│   │   ├── routes/              # HTTP endpoints
-│   │   │   ├── bills.ts         # /api/invoices/* (14 endpoints)
-│   │   │   ├── analytics.ts     # /api/analytics, /api/batches
-│   │   │   ├── fraud.ts         # /api/fraud/* (5 endpoints)
-│   │   │   ├── config.ts        # /api/config
-│   │   │   └── settings.ts      # /api/settings/* (5 endpoints)
-│   │   │
-│   │   └── lib/                 # Shared utilities
-│   │       ├── toApiParsed.ts   # OCR response normalizer (IMMUTABLE contract)
-│   │       ├── apiResponse.ts   # Standard {success, data, errors} envelope
-│   │       ├── billToInvoice.ts # BillDoc → frontend Invoice shape
-│   │       ├── storage.ts       # Cloud Storage upload/download + file detection
-│   │       └── devStore.ts      # In-memory store for LOCAL_DEV mode
+│   │   └── routes/                   # Auth, Settings, Admin (non-domain routes)
+│   │       ├── auth.ts              # /api/auth/* (login, API keys)
+│   │       ├── account.ts           # /api/account (profile, transactions)
+│   │       ├── admin.ts             # /api/admin/* (user management)
+│   │       ├── settings.ts          # /api/settings/* (provider config)
+│   │       └── config.ts            # /api/config (provider list)
 │   │
-│   ├── tests/                   # 42 tests across 6 files
+│   ├── tests/                        # 139 tests across 23 files (mirrors src/ layout)
+│   │   ├── ocr/                     # OCR tests
+│   │   │   ├── extraction/          # 9 test files (billing logic)
+│   │   │   ├── providers/           # 4 test files (LLM clients)
+│   │   │   ├── parsing/             # 2 test files (JSON parsing)
+│   │   │   ├── mapper/              # 3 test files (data mapping)
+│   │   │   └── services/            # 1 test file (structuring service)
+│   │   ├── shared/                  # 2 test files (utilities)
+│   │   ├── models/                  # 1 test file (billParts)
+│   │   └── middleware/              # 1 test file (auth)
+│   │
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── Dockerfile
 │
-├── web/                         # Frontend (React SPA)
+├── web/                              # Frontend (React SPA)
 │   ├── src/
-│   │   ├── api/client.ts        # API client — 20 endpoints
-│   │   ├── types/index.ts       # 15 TypeScript interfaces
-│   │   ├── pages/               # 4 pages (Invoices, Detail, Analytics, Settings)
-│   │   ├── components/          # 7 UI components
-│   │   ├── overlays/            # BakeoffOverlay, CompareOverlay
-│   │   ├── hooks/               # usePolling
-│   │   └── lib/                 # format, summaryFromMarkdown, structuringModels
-│   ├── nginx.conf               # Production proxy: /api/ → backend:4000
+│   │   ├── api/client.ts            # API client — 20+ endpoints
+│   │   ├── types/index.ts           # TypeScript interfaces
+│   │   ├── pages/                   # InvoicesPage, InvoiceDetailPage, AnalyticsPage, SettingsPage
+│   │   ├── components/              # Shell, StatusDot, ConfidenceBar, Toast, etc.
+│   │   ├── overlays/                # BakeoffOverlay, CompareOverlay
+│   │   ├── hooks/                   # usePolling
+│   │   └── lib/                     # format, summaryFromMarkdown, structuringModels
+│   ├── nginx.conf                   # Production proxy: /api/ → backend:4000
 │   └── Dockerfile
 │
-├── docker-compose.yml           # api + web (no PostgreSQL)
-└── .env                         # API keys + config
+├── docker-compose.yml                # api + web
+└── .env                              # API keys + config
 ```
+
+### Why this structure?
+
+| Principle | How it's applied |
+|-----------|-----------------|
+| **Domain-first** | `ocr/`, `analytics/`, `fraud/` each own their route + service + utils |
+| **Easy navigation** | Want to fix OCR parsing? → `ocr/parsing/`. Want analytics? → `analytics/` |
+| **No over-nesting** | Max 3 levels deep (`ocr/providers/geminiClient.ts`) |
+| **Shared = explicit** | `shared/`, `models/`, `config/` are clearly cross-cutting |
+| **Tests mirror source** | `tests/ocr/extraction/` mirrors `src/ocr/extraction/` |
 
 ---
 
@@ -157,13 +191,13 @@ This is what happens when a user uploads a PDF invoice:
 ┌──────────────────────────────────────────────────────────────────┐
 │                     BACKEND (platform/)                           │
 │                                                                  │
-│  routes/bills.ts                                                 │
+│  ocr/route.ts                                                    │
 │    │  Receives multipart file, extracts Buffer                   │
 │    │  Validates: isPdf(buf) or isImage(buf)                      │
 │    ▼                                                             │
-│  services/billing/billProcessingService.ts → processUpload()     │
+│  ocr/processingService.ts → processUpload()                      │
 │    │                                                             │
-│    ├─ 1. UPLOAD: lib/storage.ts → uploadFile(buf)                │
+│    ├─ 1. UPLOAD: shared/storage.ts → uploadFile(buf)                │
 │    │     → Cloud Storage (or local:// in LOCAL_DEV)              │
 │    │     → Returns { storagePath, publicUrl }                    │
 │    │                                                             │
@@ -173,29 +207,29 @@ This is what happens when a user uploads a PDF invoice:
 │    │                                                             │
 │    ├─ 3. STATUS UPDATE → PROCESSING                              │
 │    │                                                             │
-│    ├─ 4. OCR: providers/mistralOcr.ts → mistralOcr(buf)          │
+│    ├─ 4. OCR: ocr/providers/mistralOcr.ts → mistralOcr(buf)          │
 │    │     → POST https://api.mistral.ai/v1/ocr                   │
 │    │     → model: mistral-ocr-latest                             │
 │    │     → Sends PDF as base64 data URL                          │
 │    │     → Returns: markdown string                              │
 │    │                                                             │
-│    ├─ 5. NORMALIZE: providers/geminiNormalize.ts                 │
-│    │     → geminiNormalize(rawOcr)                               │
-│    │     → Uses STRUCTURING_PROMPT from parsing/prompt.ts        │
+│    ├─ 5. NORMALIZE: ocr/providers/llmNormalize.ts                │
+│    │     → llmNormalize(rawOcr, provider, model)                 │
+│    │     → Uses STRUCTURING_PROMPT from ocr/parsing/prompt.ts    │
 │    │     → Gemini returns JSON matching the invoice schema       │
-│    │     → parsing/index.ts → structureFromLlmResponse()         │
-│    │       → parsing/parse.ts → coerces JSON to types            │
-│    │       → parsing/validate.ts → validates fields              │
-│    │       → billing/normalize.ts → enrichParsedInvoice()        │
-│    │         → billing/footerExtract.ts → GST footer parsing     │
-│    │         → billing/billSummary.ts → GST reconciliation       │
+│    │     → ocr/parsing/index.ts → structureFromLlmResponse()      │
+│    │       → ocr/parsing/parse.ts → coerces JSON to types        │
+│    │       → ocr/parsing/validate.ts → validates fields           │
+│    │       → ocr/extraction/normalize.ts → enrichParsedInvoice()  │
+│    │         → ocr/extraction/footerExtract.ts → GST footer       │
+│    │         → ocr/extraction/billSummary.ts → GST reconciliation │
 │    │     → Returns: ParsedInvoiceData                            │
 │    │                                                             │
-│    ├─ 6. SHAPE: lib/toApiParsed.ts → toApiParsed(parsed)         │
+│    ├─ 6. SHAPE: ocr/mapper/toApiParsed.ts → toApiParsed(parsed)  │
 │    │     → Normalizes nulls, resolves GST rate sides             │
 │    │     → Returns immutable OCR response shape                  │
 │    │                                                             │
-│    ├─ 7. MAP: services/billing/billMapper.ts                     │
+│    ├─ 7. MAP: ocr/mapper/billMapper.ts                           │
 │    │     → mapParsedToBill() → creates BillDoc                   │
 │    │     → Status: OCR_COMPLETED                                 │
 │    │                                                             │
@@ -281,7 +315,7 @@ PDF/Image → [Gemini | Claude | OpenAI | Mistral Pixtral] → JSON (one call)
 | **OpenAI** | `/v1/chat/completions` | gpt-4o, gpt-4o-mini, gpt-4-turbo | No |
 
 All providers use the **same STRUCTURING_PROMPT** and **same JSON parsing logic**.
-Only the API format differs — handled by `providers/llmNormalize.ts`.
+Only the API format differs — handled by `ocr/providers/llmNormalize.ts`.
 
 #### API Key Resolution
 
@@ -291,7 +325,7 @@ Settings DB (provider_credentials/{provider}.apiKey)
 Environment variable fallback (MISTRAL_API_KEY, GEMINI_API_KEY)
 ```
 
-Managed via `providers/resolveKey.ts`.
+Managed via `ocr/providers/resolveKey.ts`.
 
 #### Automatic Fallback
 
@@ -319,7 +353,7 @@ Everything below runs in the **background** — the HTTP response returns in ~50
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  STEP 1 — UPLOAD (instant, < 500ms)                                     │
-│  routes/bills.ts → POST /api/invoices/upload                            │
+│  ocr/route.ts → POST /api/invoices/upload                               │
 │                                                                          │
 │  ① Receive multipart file → Buffer                                       │
 │  ② Validate: isPdf(buf) or isImage(buf)                                  │
@@ -332,7 +366,7 @@ Everything below runs in the **background** — the HTTP response returns in ~50
                               ▼ (runs async, doesn't block HTTP response)
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  STEP 2 — MISTRAL OCR  (~1-8 seconds)                                   │
-│  providers/mistralOcr.ts                                                 │
+│  ocr/providers/mistralOcr.ts                                             │
 │                                                                          │
 │  What: Converts PDF pages → markdown with tables                         │
 │  How:                                                                    │
@@ -354,8 +388,8 @@ Everything below runs in the **background** — the HTTP response returns in ~50
                               ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  STEP 3 — AI STRUCTURING  (~3-7 seconds)                                 │
-│  services/billing/structuringService.ts → runPipeline()                  │
-│  providers/llmNormalize.ts (unified multi-provider interface)            │
+│  ocr/structuringService.ts → runPipeline()                               │
+│  ocr/providers/llmNormalize.ts (unified multi-provider interface)        │
 │                                                                          │
 │  What: Maps raw markdown → structured JSON (ParsedInvoiceData)           │
 │  Provider: Configured in Settings UI (DB), any of:                       │
@@ -364,7 +398,7 @@ Everything below runs in the **background** — the HTTP response returns in ~50
 │    • Claude:  POST api.anthropic.com/v1/messages                         │
 │    • OpenAI:  POST api.openai.com/v1/chat/completions                    │
 │                                                                          │
-│  All use the same STRUCTURING_PROMPT (parsing/prompt.ts)                 │
+│  All use the same STRUCTURING_PROMPT (ocr/parsing/prompt.ts)             │
 │  Key rules in the prompt:                                                │
 │    • Return JSON matching ParsedInvoiceData schema                       │
 │    • Line items are GROSS (before discount)                              │
@@ -379,18 +413,17 @@ Everything below runs in the **background** — the HTTP response returns in ~50
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  STEP 4 — POST-PROCESSING  (< 100ms, no API calls)                      │
 │                                                                          │
-│  ① structureFromLlmResponse(text, rawOcr)   — parsing/index.ts          │
-│     ├─ parseStructuredOutput()              — parsing/parse.ts           │
+│  ① structureFromLlmResponse(text, rawOcr)   — ocr/parsing/index.ts      │
+│     ├─ parseStructuredOutput()              — ocr/parsing/parse.ts       │
 │     │    coerce JSON fields to correct types (toNum, toStr)              │
-│     ├─ validateParsedInvoice()              — parsing/validate.ts        │
+│     ├─ validateParsedInvoice()              — ocr/parsing/validate.ts    │
 │     │    check business rules (valid dates, positive amounts)            │
-│     └─ toCanonicalResult()                  — response/toCanonical.ts    │
 │                                                                          │
-│  ② toApiParsed(parsed)                      — lib/toApiParsed.ts        │
+│  ② toApiParsed(parsed)                      — ocr/mapper/toApiParsed.ts │
 │     normalize nulls, resolve GST rate sides (IGST vs CGST/SGST)         │
 │     THIS IS THE IMMUTABLE OCR CONTRACT — never modify this shape        │
 │                                                                          │
-│  ③ mapParsedToBill(billId, parsed)          — services/billing/mapper   │
+│  ③ mapParsedToBill(billId, parsed)          — ocr/mapper/billMapper.ts  │
 │     extract header fields (vendor, GSTIN, PAN, dates, vehicle)           │
 │     calculate total_tax_amount from GST parts/labour fields              │
 │     embed parsed_data as the "source of truth"                           │
@@ -432,7 +465,7 @@ Everything below runs in the **background** — the HTTP response returns in ~50
 
 | Step                 | Time       | Where                           |
 | -------------------- | ---------- | ------------------------------- |
-| Upload + create bill | ~50ms      | `routes/bills.ts`               |
+| Upload + create bill | ~50ms      | `ocr/route.ts`                  |
 | Mistral OCR          | 1-8s       | Mistral API (network)           |
 | AI Normalization     | 3-7s       | Mistral or Gemini API (network) |
 | Post-processing      | <100ms     | Local CPU                       |
@@ -473,11 +506,11 @@ NORMALIZE_PROVIDER=mistral   # default — uses MISTRAL_API_KEY
 NORMALIZE_PROVIDER=gemini    # needs valid GEMINI_API_KEY with billing credits
 ```
 
-Where it's wired: `routes/bills.ts` → `pickNormalize()` reads `NORMALIZE_PROVIDER`.
+Where it's wired: `ocr/structuringService.ts` → reads Settings to pick provider.
 
 ### Add a new OCR provider (code)
 
-1. Create `platform/src/providers/yourProvider.ts`:
+1. Create `platform/src/ocr/providers/yourProvider.ts`:
 
 ```typescript
 export async function yourOcr(buf: Buffer): Promise<string> {
@@ -485,7 +518,7 @@ export async function yourOcr(buf: Buffer): Promise<string> {
 }
 ```
 
-1. Import in `platform/src/routes/bills.ts` and use in `processInBackground()`
+1. Import in `platform/src/ocr/structuringService.ts` and add to the provider switch
 
 ### Settings UI ([http://localhost:5173/settings](http://localhost:5173/settings))
 
@@ -824,7 +857,7 @@ All return: `{ success, message, data: FraudAlert[], metadata, errors }`
 
 ## Analytics Service & UI
 
-**Backend:** `services/analytics/analyticsService.ts` + `routes/analytics.ts`
+**Backend:** `analytics/analyticsService.ts` + `analytics/route.ts`
 **Frontend:** `web/src/pages/AnalyticsPage.tsx`
 **Route:** [http://localhost:5173/analytics](http://localhost:5173/analytics)
 
@@ -845,10 +878,10 @@ Frontend (React)
 Backend (Fastify)
   │
   ├─ Server-side in-memory cache (30s TTL)
-  │   lib/cache.ts → cacheGet/cacheSet per endpoint
+  │   shared/cache.ts → cacheGet/cacheSet per endpoint
   │   Invalidated on bill create/delete/update
   │
-  └─ services/analytics/analyticsService.ts
+  └─ analytics/analyticsService.ts
        └─ listBills() → single DB read per cache-miss
 ```
 
@@ -912,19 +945,17 @@ Bill mutation (create/delete/bulk) → cacheInvalidate('analytics')
 
 | Function               | File                  | What it does                                |
 | ---------------------- | --------------------- | ------------------------------------------- |
-| `computeKpis()`        | `routes/analytics.ts` | KPIs + vendor + month aggregation (cached)  |
-| `getVehicleSpend()`    | `analyticsService.ts` | Groups bills by vehicle, sums amounts       |
-| `getVendorAnalytics()` | `analyticsService.ts` | Groups bills by vendor name                 |
-| `getCostPerKm()`       | `analyticsService.ts` | min/max odometer → cost_per_km = spend / km |
-| `getDashboard()`       | `analyticsService.ts` | Full aggregation (status, type, totals)     |
-| `getOcrCostSummary()`  | `analyticsService.ts` | OCR API cost breakdown by provider          |
+| `computeKpis()`        | `analytics/route.ts`             | KPIs + vendor + month aggregation (cached)  |
+| `getVehicleSpend()`    | `analytics/analyticsService.ts`  | Groups bills by vehicle, sums amounts       |
+| `getCostPerKm()`       | `analytics/analyticsService.ts`  | min/max odometer → cost_per_km = spend / km |
+| `getOcrCostSummary()`  | `analytics/analyticsService.ts`  | OCR API cost breakdown by provider          |
 
 
 ---
 
 ## Fraud Detection Service & UI
 
-**Backend:** `services/fraud/fraudDetectionService.ts` + `routes/fraud.ts`
+**Backend:** `fraud/fraudDetectionService.ts` + `fraud/route.ts`
 **Frontend:** `web/src/pages/FraudPage.tsx`
 **Route:** [http://localhost:5173/fraud](http://localhost:5173/fraud)
 
@@ -1042,42 +1073,78 @@ In production, nginx does the same proxy.
 
 ### What each file does
 
+#### Shared infrastructure
 
-| File                                        | One-line purpose                                       |
-| ------------------------------------------- | ------------------------------------------------------ |
-| `config/env.ts`                             | All environment variables with defaults                |
-| `config/firebase.ts`                        | Firebase Admin SDK initialization                      |
-| `models/types.ts`                           | Every type: OCR contract, Firestore docs, API envelope |
-| `models/bills.ts`                           | Firestore CRUD for bills (with in-memory fallback)     |
-| `models/billParts.ts`                       | Firestore CRUD for bill_parts + OCR→parts extraction   |
-| `models/settings.ts`                        | Settings + credentials Firestore storage               |
-| `providers/mistralOcr.ts`                   | Mistral API call: PDF → markdown                       |
-| `providers/geminiNormalize.ts`              | Gemini API call: markdown → ParsedInvoiceData          |
-| `providers/pipeline.ts`                     | Combined: mistralOcr → geminiNormalize                 |
-| `parsing/prompt.ts`                         | The STRUCTURING_PROMPT Gemini uses                     |
-| `parsing/parse.ts`                          | JSON coercion: raw LLM output → typed data             |
-| `parsing/validate.ts`                       | Business validation on parsed data                     |
-| `parsing/coerce.ts`                         | Type coercion helpers (toNum, toStr)                   |
-| `billing/footerExtract.ts`                  | Extract GST footer from OCR markdown                   |
-| `billing/billSummary.ts`                    | Reconcile GST (dedup, rate inference)                  |
-| `billing/normalize.ts`                      | Post-processing: enrich parsed invoice                 |
-| `billing/dateExtract.ts`                    | Fallback date extraction from markdown                 |
-| `response/toCanonical.ts`                   | ParsedInvoiceData → CanonicalResult                    |
-| `services/billing/billProcessingService.ts` | Full pipeline: upload → OCR → store                    |
-| `services/billing/billMapper.ts`            | ParsedInvoiceData → BillDoc for Firestore              |
-| `services/analytics/analyticsService.ts`    | Dashboard + vehicle + vendor + cost/km                 |
-| `services/fraud/fraudDetectionService.ts`   | 4 fraud detection algorithms                           |
-| `routes/bills.ts`                           | 14 invoice HTTP endpoints                              |
-| `routes/analytics.ts`                       | Analytics + batches endpoints                          |
-| `routes/fraud.ts`                           | 5 fraud scan endpoints                                 |
-| `routes/config.ts`                          | App configuration endpoint                             |
-| `routes/settings.ts`                        | 5 settings management endpoints                        |
-| `lib/toApiParsed.ts`                        | OCR response normalizer (immutable contract)           |
-| `lib/apiResponse.ts`                        | Standard `{success, data, errors}` helpers             |
-| `lib/billToInvoice.ts`                      | BillDoc → frontend Invoice shape                       |
-| `lib/storage.ts`                            | Cloud Storage upload/download                          |
-| `lib/devStore.ts`                           | In-memory Maps for LOCAL_DEV mode                      |
-| `lib/cache.ts`                              | Server-side TTL cache (30s) for analytics endpoints    |
+| File                    | One-line purpose                                       |
+| ----------------------- | ------------------------------------------------------ |
+| `config/env.ts`         | All environment variables with defaults                |
+| `config/firebase.ts`    | Firebase Admin SDK initialization                      |
+| `middleware/auth.ts`    | JWT + API key authentication plugin                    |
+| `models/types.ts`       | Every type: OCR contract, Firestore docs, API envelope |
+| `models/bills.ts`       | Firestore CRUD for bills (with in-memory fallback)     |
+| `models/billParts.ts`   | Firestore CRUD for bill_parts + OCR→parts extraction   |
+| `models/settings.ts`    | Settings + credentials Firestore storage               |
+| `models/users.ts`       | User CRUD + password hashing + token balance           |
+| `shared/apiResponse.ts` | Standard `{success, data, errors}` helpers             |
+| `shared/cache.ts`       | Server-side TTL cache (30s) for analytics              |
+| `shared/clientUser.ts`  | User → frontend-safe shape                             |
+| `shared/devStore.ts`    | In-memory Maps for LOCAL_DEV mode                      |
+| `shared/storage.ts`     | Cloud Storage upload/download + file detection         |
+
+#### OCR domain (`ocr/`)
+
+| File                              | One-line purpose                                       |
+| --------------------------------- | ------------------------------------------------------ |
+| `ocr/route.ts`                    | 14 invoice HTTP endpoints + /api/parse, /api/ocr/*     |
+| `ocr/structuringService.ts`       | Pipeline orchestrator (single/split mode + fallback)   |
+| `ocr/processingService.ts`        | Upload → OCR → Store orchestration                     |
+| `ocr/providers/geminiClient.ts`   | Vertex AI Gemini via ADC                               |
+| `ocr/providers/llmSingle.ts`      | Single-call OCR+structure (Gemini/Claude/OpenAI/Mistral) |
+| `ocr/providers/llmNormalize.ts`   | Multi-provider structuring (markdown → JSON)           |
+| `ocr/providers/mistralOcr.ts`     | Mistral OCR API (PDF → markdown)                       |
+| `ocr/providers/resolveKey.ts`     | API key + model resolution per provider                |
+| `ocr/providers/types.ts`          | OcrCostInfo, OcrStepCost, LlmUsage                     |
+| `ocr/parsing/index.ts`            | structureFromLlmResponse — main entry                  |
+| `ocr/parsing/parse.ts`            | JSON coercion: raw LLM output → typed data             |
+| `ocr/parsing/coerce.ts`           | Type coercion + truncated JSON repair                  |
+| `ocr/parsing/validate.ts`         | Business validation on parsed data                     |
+| `ocr/parsing/prompt.ts`           | STRUCTURING_PROMPT (instructions for all LLMs)         |
+| `ocr/parsing/legacy.ts`           | Legacy flat-JSON format parser                         |
+| `ocr/extraction/billSummary.ts`   | GST reconciliation + fillMissingGstAmounts             |
+| `ocr/extraction/footerExtract.ts` | Extract GST footer from OCR markdown                   |
+| `ocr/extraction/normalize.ts`     | enrichParsedInvoice — post-processing                  |
+| `ocr/extraction/vendorExtract.ts` | Vendor name extraction + junk detection                |
+| `ocr/extraction/dateExtract.ts`   | Fallback date extraction from markdown                 |
+| `ocr/extraction/vehicleExtract.ts`| Registration/chassis normalization                     |
+| `ocr/extraction/lineItemFilter.ts`| Line item dedup + filtering                            |
+| `ocr/extraction/reviewFlags.ts`   | Confidence flags for review                            |
+| `ocr/mapper/billMapper.ts`        | ParsedInvoiceData → BillDoc for Firestore              |
+| `ocr/mapper/billToInvoice.ts`     | BillDoc → frontend Invoice shape                       |
+| `ocr/mapper/toApiParsed.ts`       | OCR response normalizer (IMMUTABLE contract)           |
+
+#### Analytics domain (`analytics/`)
+
+| File                          | One-line purpose                                       |
+| ----------------------------- | ------------------------------------------------------ |
+| `analytics/route.ts`          | /api/analytics/* (7 cached endpoints + search)         |
+| `analytics/analyticsService.ts` | Vehicle spend, cost/km, OCR cost summary             |
+
+#### Fraud domain (`fraud/`)
+
+| File                              | One-line purpose                                    |
+| --------------------------------- | --------------------------------------------------- |
+| `fraud/route.ts`                  | /api/fraud/* (5 scan endpoints)                     |
+| `fraud/fraudDetectionService.ts`  | Duplicates, GST, price, odometer checks             |
+
+#### Auth & settings routes (`routes/`)
+
+| File               | One-line purpose                         |
+| ------------------ | ---------------------------------------- |
+| `routes/auth.ts`   | /api/auth/* (login, API keys)            |
+| `routes/account.ts`| /api/account (profile, transactions)     |
+| `routes/admin.ts`  | /api/admin/* (user management)           |
+| `routes/settings.ts`| /api/settings/* (5 provider settings)   |
+| `routes/config.ts` | /api/config (provider list + status)     |
 
 
 ---
@@ -1121,11 +1188,11 @@ NORMALIZE_PROVIDER=mistral         →    NORMALIZE_PROVIDER=mistral (same)
 | `models/bills.ts`     | `if (env.localDev) → devStore.bills.get()` else `→ Firestore`     |
 | `models/billParts.ts` | Same pattern                                                      |
 | `models/settings.ts`  | Same pattern                                                      |
-| `lib/storage.ts`      | `if (env.localDev) → devStore.files.set()` else `→ Cloud Storage` |
-| `lib/devStore.ts`     | In-memory Maps (only used when localDev=true)                     |
-| `routes/bills.ts`     | `/file` endpoint: streams from devStore or redirects to GCS       |
-| `services/fraud/`     | Uses `listBills()` model layer (works in both modes)              |
-| `services/analytics/` | Uses `listBills()` model layer (works in both modes)              |
+| `shared/storage.ts`   | `if (env.localDev) → devStore.files.set()` else `→ Cloud Storage` |
+| `shared/devStore.ts`  | In-memory Maps (only used when localDev=true)                     |
+| `ocr/route.ts`        | `/file` endpoint: streams from devStore or redirects to GCS       |
+| `fraud/`              | Uses `listBills()` model layer (works in both modes)              |
+| `analytics/`          | Uses `listBills()` model layer (works in both modes)              |
 
 
 ### Local setup
@@ -1144,7 +1211,7 @@ npm install && npm run dev   # → http://localhost:5173
 ### Run tests
 
 ```bash
-cd platform && npm test    # 42 tests
+cd platform && npm test    # 139 tests across 23 files
 cd web && npm test         # Frontend tests
 ```
 
