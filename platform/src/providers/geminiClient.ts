@@ -60,12 +60,12 @@ export interface GeminiGenerateResult {
 
 function vertexUrl(model: string): string {
   const project = env.projectId;
-  const location = env.vertexLocation;
+  const location = env.vertexLocation || 'us-central1';
+  // Global endpoint uses aiplatform.googleapis.com (not global-aiplatform.googleapis.com)
+  if (location === 'global') {
+    return `https://aiplatform.googleapis.com/v1/projects/${project}/locations/global/publishers/google/models/${model}:generateContent`;
+  }
   return `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`;
-}
-
-function aiStudioUrl(model: string, apiKey: string): string {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 }
 
 function parseGeminiResponse(json: any): { text: string; usage: LlmUsage } {
@@ -80,12 +80,13 @@ function parseGeminiResponse(json: any): { text: string; usage: LlmUsage } {
 }
 
 /**
- * Prefer API key when provided (local/dev Settings).
- * Otherwise use Vertex AI + ADC (production Cloud Run).
+ * Always Vertex AI + ADC for Gemini (no API key).
+ * Model comes from Settings (singleModel / structuringModel).
  */
 export async function geminiGenerateContent(opts: {
   model: string;
   parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
+  /** Ignored — Gemini uses ADC only */
   apiKey?: string;
 }): Promise<GeminiGenerateResult> {
   const t0 = Date.now();
@@ -103,25 +104,17 @@ export async function geminiGenerateContent(opts: {
     },
   };
 
-  let url: string;
-  let headers: Record<string, string>;
-  let authMode: 'api_key' | 'adc';
-
-  if (opts.apiKey) {
-    url = aiStudioUrl(opts.model, opts.apiKey);
-    headers = { 'content-type': 'application/json' };
-    authMode = 'api_key';
-  } else {
-    const client = await auth.getClient();
-    const token = await client.getAccessToken();
-    if (!token.token) throw new Error('ADC failed — no access token for Vertex Gemini');
-    url = vertexUrl(opts.model);
-    headers = {
-      'content-type': 'application/json',
-      authorization: `Bearer ${token.token}`,
-    };
-    authMode = 'adc';
-  }
+  const client = await auth.getClient();
+  const token = await client.getAccessToken();
+  if (!token.token) throw new Error('ADC failed — no access token for Vertex Gemini. Run: gcloud auth application-default login');
+  const url = vertexUrl(opts.model);
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    authorization: `Bearer ${token.token}`,
+  };
+  // Helps user ADC bill/quota against the correct GCP project
+  if (env.projectId) headers['x-goog-user-project'] = env.projectId;
+  const authMode = 'adc' as const;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -135,7 +128,10 @@ export async function geminiGenerateContent(opts: {
 
   if (!res.ok) {
     const err = await res.text().catch(() => '');
-    throw new Error(`Gemini (${authMode}) HTTP ${res.status}: ${err.slice(0, 300)}`);
+    const hint = res.status === 403
+      ? ' — grant your ADC user roles/aiplatform.user on this GCP project (Vertex AI User)'
+      : '';
+    throw new Error(`Gemini (${authMode}, model=${opts.model}) HTTP ${res.status}${hint}: ${err.slice(0, 400)}`);
   }
 
   const json = await res.json();

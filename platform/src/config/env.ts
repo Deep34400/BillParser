@@ -1,9 +1,12 @@
 function opt(name: string, fallback: string): string {
-  return process.env[name] ?? fallback;
+  const raw = process.env[name] ?? process.env[name.trim()];
+  if (raw == null) return fallback;
+  const v = raw.trim();
+  return v === '' ? fallback : v;
 }
 
 function req(name: string): string {
-  const v = process.env[name];
+  const v = opt(name, '');
   if (!v) throw new Error(`Missing required env: ${name}`);
   return v;
 }
@@ -12,14 +15,14 @@ export const env = {
   /** GCP project ID */
   projectId: opt('GCP_PROJECT_ID', 'billparser-dev'),
 
-  /** Cloud Storage bucket for uploaded bills */
+  /** Cloud Storage bucket for uploaded bills (private — served via signed URL or API proxy) */
   storageBucket: opt('STORAGE_BUCKET', 'billparser-uploads'),
 
   /** Firestore collection prefix (enables multi-tenant or staging isolation) */
   firestorePrefix: opt('FIRESTORE_PREFIX', ''),
 
-  /** Firestore database ID (named database, not the project's "(default)" database) */
-  firestoreDatabaseId: opt('FIRESTORE_DATABASE_ID', 'billparser-db'),
+  /** Firestore database ID (named database). Use "(default)" for the default DB. */
+  firestoreDatabaseId: opt('FIRESTORE_DATABASE_ID', '(default)'),
 
   /** Mistral API key for OCR extraction + normalization */
   mistralApiKey: opt('MISTRAL_API_KEY', ''),
@@ -38,6 +41,9 @@ export const env = {
    * Cloud Run production should rely on ADC + this location.
    */
   vertexLocation: opt('VERTEX_LOCATION', 'us-central1'),
+
+  /** Signed URL lifetime in minutes for private GCS objects */
+  signedUrlTtlMinutes: Number(opt('SIGNED_URL_TTL_MINUTES', '60')),
 
   /** Server port */
   port: Number(opt('PORT', '4000')),

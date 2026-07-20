@@ -32,7 +32,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     }));
 
     return {
-      pipelineMode: settings.pipelineMode ?? 'split',
+      pipelineMode: settings.pipelineMode ?? 'single',
       extractionProvider: settings.extractionProvider,
       structuringProvider: settings.structuringProvider,
       structuringModel: settings.structuringModel,

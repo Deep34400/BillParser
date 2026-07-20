@@ -10,7 +10,7 @@ const { devStore } = await import('./lib/devStore.js');
 
 if (env.localDev) {
   if (env.mistralApiKey) devStore.saveCreds('mistral', { apiKey: env.mistralApiKey });
-  if (env.geminiApiKey) devStore.saveCreds('gemini', { apiKey: env.geminiApiKey, model: env.geminiModel });
+  // Gemini uses Vertex + ADC only — do not seed API keys into Settings.
 }
 
 async function seedAdmin() {

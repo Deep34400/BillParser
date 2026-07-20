@@ -2,7 +2,7 @@
  * Resolve API key + model for a provider.
  * Priority: DB-stored credentials → env var fallback.
  *
- * Gemini special case: API key is optional. If missing, callers use Vertex AI + ADC.
+ * Gemini: ALWAYS Vertex AI + ADC (never API key), even if a key exists in Settings/env.
  */
 import { getProviderCredentials } from '../models/settings.js';
 import { env } from '../config/env.js';
@@ -29,7 +29,7 @@ const ENV_TO_PROP: Record<string, keyof typeof env> = {
 export interface ResolvedProvider {
   apiKey: string;
   model: string;
-  /** For Gemini: true when no API key — use Vertex + ADC */
+  /** For Gemini: always true — Vertex + ADC */
   useAdc: boolean;
 }
 
@@ -44,19 +44,26 @@ function envKey(provider: string): string {
 export async function resolveProviderKey(provider: string, modelOverride?: string): Promise<ResolvedProvider> {
   const creds = await getProviderCredentials(provider);
 
+  // Gemini never uses API keys — model from Settings/override, auth via ADC only.
+  if (provider === 'gemini') {
+    const model = modelOverride
+      || creds.model
+      || env.geminiModel
+      || DEFAULT_MODELS.gemini;
+    return { apiKey: '', model, useAdc: true };
+  }
+
   const apiKey = creds.apiKey || envKey(provider);
   const model = modelOverride
     || creds.model
-    || (provider === 'gemini' ? env.geminiModel : '')
     || (provider === 'mistral' ? env.mistralModel : '')
     || DEFAULT_MODELS[provider]
     || '';
 
-  // Gemini may authenticate via ADC (Vertex) when no API key is configured.
-  if (!apiKey && provider !== 'gemini') {
+  if (!apiKey) {
     const varName = ENV_KEY_MAP[provider] ?? `${provider.toUpperCase()}_API_KEY`;
     throw new Error(`No API key for ${provider} — set it in Settings UI or ${varName} env var`);
   }
 
-  return { apiKey, model, useAdc: provider === 'gemini' && !apiKey };
+  return { apiKey, model, useAdc: false };
 }

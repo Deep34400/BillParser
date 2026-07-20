@@ -12,7 +12,7 @@ const users = new Map<string, import('../models/users.js').UserDoc>();
 const tokenTransactions: import('../models/users.js').TokenTransactionDoc[] = [];
 const apiKeys: import('../models/users.js').ApiKeyDoc[] = [];
 let settings: AppSettings = {
-  pipelineMode: 'split',
+  pipelineMode: 'single',
   extractionProvider: 'mistral',
   structuringProvider: 'gemini',
   structuringModel: 'gemini-2.5-flash',

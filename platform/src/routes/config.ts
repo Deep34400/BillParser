@@ -27,9 +27,15 @@ export async function configRoutes(app: FastifyInstance) {
 
     return {
       providers,
-      activeProvider: settings.extractionProvider,
+      pipelineMode: settings.pipelineMode ?? 'single',
+      activeProvider:
+        (settings.pipelineMode ?? 'single') === 'single'
+          ? (settings.singleProvider ?? 'gemini')
+          : settings.extractionProvider,
       structuringProvider: settings.structuringProvider,
       structuringModel: settings.structuringModel,
+      singleProvider: settings.singleProvider ?? 'gemini',
+      singleModel: settings.singleModel ?? 'gemini-2.5-flash',
     };
   });
 }

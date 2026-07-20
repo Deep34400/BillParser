@@ -68,6 +68,7 @@ export interface FrontendInvoice {
   lineItems?: FrontendLineItem[];
   runs?: unknown[];
   reviewReasons?: string[] | null;
+  fallbackReason?: string | null;
 }
 
 const STATUS_MAP: Record<string, string> = {
@@ -153,5 +154,8 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     lineItems: lineItems.length ? lineItems : undefined,
     runs: [],
     reviewReasons: bill.review_reasons ?? null,
+    fallbackReason: bill.processing_status?.startsWith('FALLBACK:')
+      ? bill.processing_status.slice('FALLBACK:'.length).trim()
+      : null,
   };
 }

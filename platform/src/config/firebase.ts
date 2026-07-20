@@ -18,7 +18,11 @@ function ensureApp(): App {
 let _db: Firestore | undefined;
 export function db(): Firestore {
   if (!_db) {
-    _db = getFirestore(ensureApp(), env.firestoreDatabaseId);
+    const dbId = env.firestoreDatabaseId;
+    // "(default)" or empty → default database; otherwise named DB
+    _db = !dbId || dbId === '(default)'
+      ? getFirestore(ensureApp())
+      : getFirestore(ensureApp(), dbId);
     _db.settings({ ignoreUndefinedProperties: true });
   }
   return _db;

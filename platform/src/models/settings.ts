@@ -21,7 +21,7 @@ export interface AppSettings {
 }
 
 const DEFAULTS: AppSettings = {
-  pipelineMode: 'split',
+  pipelineMode: 'single',
   extractionProvider: 'mistral',
   structuringProvider: 'gemini',
   structuringModel: 'gemini-2.5-flash',

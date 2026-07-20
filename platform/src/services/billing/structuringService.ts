@@ -25,7 +25,7 @@ export interface PipelineResult {
  */
 export async function runPipeline(buf: Buffer, contextId = 'ocr'): Promise<PipelineResult> {
   const settings = await getSettings();
-  const mode = settings.pipelineMode ?? 'split';
+  const mode = settings.pipelineMode ?? 'single';
   console.log(
     `[OCR] ${contextId} — settings: mode=${mode}, structProv=${settings.structuringProvider}, ` +
     `structModel=${settings.structuringModel}, singleProv=${settings.singleProvider}, singleModel=${settings.singleModel}`,

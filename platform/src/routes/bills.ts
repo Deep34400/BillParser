@@ -50,6 +50,9 @@ function processInBackground(
         pipelineMode: providers.mode,
       });
       bill.ocr_status = 'OCR_COMPLETED';
+      if (result.fallbackReason) {
+        bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
+      }
 
       await updateBillStatus(billId, 'OCR_COMPLETED', bill);
 
@@ -115,7 +118,7 @@ export async function billRoutes(app: FastifyInstance) {
 
   /**
    * GET /api/invoices/:id/file — serve the original PDF/image.
-   * LOCAL_DEV: streams from in-memory store. Production: redirects to GCS or streams.
+   * Private GCS: prefer short-lived signed URL; otherwise stream via API (never public bucket URL).
    */
   app.get('/api/invoices/:id/file', async (req, reply) => {
     try {
@@ -126,10 +129,19 @@ export async function billRoutes(app: FastifyInstance) {
       }
 
       const storagePath = bill.storage_path
-        ?? bill.file_url?.replace(/^local:\/\//, '');
+        ?? bill.file_url?.replace(/^local:\/\//, '')
+        ?? bill.file_url?.replace(/^gs:\/\/[^/]+\//, '');
 
       if (!storagePath) return reply.code(404).send({ error: 'File not found' });
 
+      // Prefer private signed URL when credentials can sign (SA key / Cloud Run SA)
+      if (!env.localDev && bill.storage_path) {
+        const { getSignedReadUrl } = await import('../lib/storage.js');
+        const signed = await getSignedReadUrl(bill.storage_path);
+        if (signed) return reply.redirect(signed);
+      }
+
+      // Fallback: stream bytes through API (works with user ADC; bucket stays private)
       const stored = await getStoredFile(storagePath);
       if (stored) {
         return reply
@@ -138,7 +150,8 @@ export async function billRoutes(app: FastifyInstance) {
           .send(stored.buf);
       }
 
-      if (bill.file_url?.startsWith('http')) {
+      // External http(s) only (e.g. S3 import) — never treat storage.googleapis.com as public
+      if (bill.file_url?.startsWith('http') && !bill.file_url.includes('storage.googleapis.com')) {
         return reply.redirect(bill.file_url);
       }
 
@@ -163,7 +176,7 @@ export async function billRoutes(app: FastifyInstance) {
       }
 
       const created: string[] = [];
-      const rejected: string[] = [];
+      const rejected: { name: string; reason: string }[] = [];
       const files: { buf: Buffer; name: string }[] = [];
 
       for await (const part of (req as any).parts()) {
@@ -173,9 +186,17 @@ export async function billRoutes(app: FastifyInstance) {
         }
       }
 
+      if (files.length === 0) {
+        return reply.code(400).send({ created: [], duplicates: [], rejected: [{ name: '(none)', reason: 'No files in upload' }] });
+      }
+
       for (const f of files) {
+        if (!f.buf?.length) {
+          rejected.push({ name: f.name, reason: 'Empty file (0 bytes)' });
+          continue;
+        }
         if (!isPdf(f.buf) && !isImage(f.buf)) {
-          rejected.push(f.name);
+          rejected.push({ name: f.name, reason: 'Unsupported type — only PDF or JPEG/PNG/WebP' });
           continue;
         }
         try {
@@ -196,8 +217,10 @@ export async function billRoutes(app: FastifyInstance) {
           created.push(billId);
 
           processInBackground(billId, f.buf, f.name, publicUrl, storagePath, req.appUser?.user_id);
-        } catch {
-          rejected.push(f.name);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : 'Upload failed';
+          console.error(`[upload] rejected ${f.name}:`, reason);
+          rejected.push({ name: f.name, reason });
         }
       }
 

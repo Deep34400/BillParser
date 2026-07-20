@@ -14,24 +14,25 @@ describe('resolveProviderKey', () => {
     await expect(resolveProviderKey('claude')).rejects.toThrow(/No API key for claude/);
   });
 
-  it('returns useAdc=false when Gemini API key is in DB', async () => {
-    devStore.saveCreds('gemini', { apiKey: 'test-gemini-key' });
+  it('Gemini always uses ADC even when an API key is stored', async () => {
+    devStore.saveCreds('gemini', { apiKey: 'test-gemini-key', model: 'gemini-2.5-pro' });
     const g = await resolveProviderKey('gemini');
-    expect(g.apiKey).toBe('test-gemini-key');
-    expect(g.useAdc).toBe(false);
+    expect(g.apiKey).toBe('');
+    expect(g.useAdc).toBe(true);
+    expect(g.model).toBe('gemini-2.5-pro');
   });
 
-  it('allows Gemini with empty key (ADC / Vertex mode)', async () => {
-    // Clear DB key; env may still provide a key — either way must not throw
-    const g = await resolveProviderKey('gemini');
-    expect(g.model).toBeTruthy();
-    expect(g.useAdc).toBe(!g.apiKey);
+  it('Gemini uses model override from Settings selection', async () => {
+    const g = await resolveProviderKey('gemini', 'gemini-3.1-pro-preview');
+    expect(g.apiKey).toBe('');
+    expect(g.useAdc).toBe(true);
+    expect(g.model).toBe('gemini-3.1-pro-preview');
   });
 });
 
 describe('estimateGeminiCostUsd', () => {
   it('computes cost from token usage', () => {
-    const cost = estimateGeminiCostUsd({ prompt_tokens: 1000, completion_tokens: 1000, total_tokens: 2000 });
-    expect(cost).toBeCloseTo(0.00015 + 0.0006, 6);
+    const cost = estimateGeminiCostUsd({ prompt_tokens: 1000, completion_tokens: 1000, total_tokens: 2000 }, 'gemini-2.5-flash');
+    expect(cost).toBeCloseTo(0.0003 + 0.0025, 6);
   });
 });

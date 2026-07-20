@@ -21,19 +21,41 @@ function isPublic(path: string): boolean {
   return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
 }
 
+/** True for GET /api/invoices/:id/file — browsers load this in <iframe>/<img> without Authorization. */
+function isInvoiceFilePath(pathname: string): boolean {
+  return /^\/api\/invoices\/[^/]+\/file$/.test(pathname);
+}
+
+/**
+ * Resolve bearer token from Authorization header, or from ?token= on invoice file routes only
+ * (iframe/img cannot set Authorization headers).
+ */
+export function bearerFromRequest(req: { headers: { authorization?: string }; url: string }): string | undefined {
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) return header.slice(7);
+
+  const pathname = req.url.split('?')[0] ?? '';
+  if (!isInvoiceFilePath(pathname)) return undefined;
+
+  try {
+    const q = new URL(req.url, 'http://localhost').searchParams.get('token');
+    return q || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const authPlugin = fp(async function authPluginFn(app: FastifyInstance): Promise<void> {
   app.decorateRequest('appUser', undefined);
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     if (isPublic(req.url.split('?')[0])) return;
 
-    const header = req.headers.authorization;
-    if (!header || !header.startsWith('Bearer ')) {
+    const token = bearerFromRequest(req);
+    if (!token) {
       if (env.localDev) return;
       return reply.status(401).send({ success: false, message: 'Authentication required' });
     }
-
-    const token = header.slice(7);
 
     if (token.startsWith('eyJ')) {
       try {
