@@ -37,10 +37,11 @@ export const env = {
   geminiModel: opt('GEMINI_MODEL', 'gemini-2.5-flash'),
 
   /**
-   * Vertex AI region for Gemini when using ADC (no API key).
-   * Cloud Run production should rely on ADC + this location.
+   * Vertex AI location for Gemini when using ADC (no API key).
+   * "global" is required for Gemini 3.x models (they 404 on regional endpoints
+   * in this project as of 2026-07); Gemini 2.5 models work fine via global too.
    */
-  vertexLocation: opt('VERTEX_LOCATION', 'us-central1'),
+  vertexLocation: opt('VERTEX_LOCATION', 'global'),
 
   /** Signed URL lifetime in minutes for private GCS objects */
   signedUrlTtlMinutes: Number(opt('SIGNED_URL_TTL_MINUTES', '60')),

@@ -26,10 +26,11 @@ const GEMINI_MODEL_PRICING: Record<string, { input: number; output: number }> = 
  * "-latest" aliases get hot-swapped by Google without notice to the exact underlying
  * model, so there's no fixed price for them. Point at today's newest stable model in
  * each tier — update this mapping when Google promotes a new stable release.
+ * Note: only "gemini-flash-latest" actually exists — "gemini-pro-latest" 404s on
+ * Vertex (confirmed 2026-07), there's no equivalent alias for Pro yet.
  */
 const GEMINI_ALIAS_PRICING: Record<string, string> = {
   'gemini-flash-latest': 'gemini-3.5-flash',
-  'gemini-pro-latest': 'gemini-2.5-pro',
 };
 
 const TIMEOUT_MS = 120_000;

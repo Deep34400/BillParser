@@ -94,7 +94,7 @@ substitutions:
   _RUNTIME_SA: billparser-runtime@carrum-agent-pilot-dev.iam.gserviceaccount.com
   _STORAGE_BUCKET: billparser-uploads
   _FIRESTORE_DB: billparser-db
-  _VERTEX_LOCATION: us-central1
+  _VERTEX_LOCATION: global
 
 options:
   logging: CLOUD_LOGGING_ONLY
