@@ -57,10 +57,20 @@ export interface Invoice {
   extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;
   lineItems?: LineItem[]; runs?: ExtractionRun[];
   reviewReasons?: string[] | null;
+  /** Set when single/Gemini failed and pipeline fell back to Mistral split */
+  fallbackReason?: string | null;
 }
 export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; }
 export interface ProviderInfo { name: string; displayName: string; kind: string; configured: boolean; requiredCredentials?: string[]; masked?: Record<string, string>; }
-export interface AppConfig { providers: ProviderInfo[]; activeProvider: string; structuringProvider: string; structuringModel: string; }
+export interface AppConfig {
+  providers: ProviderInfo[];
+  activeProvider: string;
+  structuringProvider: string;
+  structuringModel: string;
+  pipelineMode?: 'split' | 'single';
+  singleProvider?: string;
+  singleModel?: string;
+}
 export interface SettingsData {
   pipelineMode: 'split' | 'single';
   extractionProvider: string;

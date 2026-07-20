@@ -549,6 +549,30 @@ export function InvoiceDetailPage() {
         </div>
       )}
 
+      {/* Pipeline fallback (e.g. Gemini ADC 403 → Mistral split) */}
+      {inv.fallbackReason && (
+        <div style={{
+          margin: '12px 30px 0',
+          padding: '14px 18px',
+          background: '#fff8ec',
+          borderLeft: `4px solid ${T.amber}`,
+          borderRadius: 6,
+          fontSize: 13,
+          color: '#7a5a00',
+          fontFamily: T.font,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+            Settings use Single + Gemini, but this run fell back to Split (Mistral)
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 12, wordBreak: 'break-word' }}>
+            {inv.fallbackReason}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
+            Grant your Google account <code>roles/aiplatform.user</code> on the GCP project, then re-extract.
+          </div>
+        </div>
+      )}
+
       {/* Failed error box */}
       {inv.status === 'FAILED' && inv.error && (
         <div style={{
@@ -684,6 +708,9 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
           ? `Split — ${inv.extractionProvider} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)`
           : (inv.provider ?? '—'),
     },
+    ...(inv.fallbackReason
+      ? [{ label: 'Fallback', value: inv.fallbackReason }]
+      : []),
     ...(isSingle
       ? [
           {

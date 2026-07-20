@@ -313,11 +313,18 @@ export function InvoicesPage() {
       const result = await api.upload(pdfs, batchName.trim() || undefined);
       const created = result?.created?.length ?? 0;
       const dupes = result?.duplicates?.length ?? 0;
-      const rejected = result?.rejected?.length ?? 0;
+      const rejectedList = (result?.rejected ?? []) as Array<string | { name: string; reason?: string }>;
+      const rejected = rejectedList.length;
+      const rejectDetail = rejectedList
+        .map((r) => (typeof r === 'string' ? r : `${r.name}${r.reason ? `: ${r.reason}` : ''}`))
+        .slice(0, 3)
+        .join('; ');
       if (dupes > 0) setDuplicateBanner({ count: dupes });
       await refetch();
       setToast(
-        `Uploaded ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`,
+        `Uploaded ${created} file${created === 1 ? '' : 's'}` +
+        `${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}` +
+        `${rejected ? `, ${rejected} rejected${rejectDetail ? ` (${rejectDetail})` : ''}` : ''}`,
       );
       setShowUpload(false);
       setBatchName('');

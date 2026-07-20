@@ -60,14 +60,14 @@ interface ProvDef {
 
 const ALL_PROVIDERS: ProvDef[] = [
   { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest', 'pixtral-12b-2409'], canStructure: true, canSingle: true, desc: 'Mistral — Single: PDF uses OCR+structure (stays Single mode); images use Pixtral' },
-  { id: 'gemini', label: 'Google Gemini', models: ['gemini-flash-latest', 'gemini-pro-latest', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], canStructure: true, canSingle: true, desc: 'Gemini — split structuring or single PDF/image call (ADC on Cloud Run)' },
+  { id: 'gemini', label: 'Google Gemini', models: ['gemini-flash-latest', 'gemini-pro-latest', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], canStructure: true, canSingle: true, desc: 'Gemini — always Vertex AI + ADC (no API key). Pick any model; default Single mode.' },
   { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: true, desc: 'Claude — structuring or single PDF/image call' },
   { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: true, desc: 'OpenAI — structuring or single image call (PDF: use Split/Gemini/Claude)' },
 ];
 
 export function SettingsPage() {
-  const [mode, setMode] = useState<'split' | 'single'>('split');
-  const [savedMode, setSavedMode] = useState<'split' | 'single'>('split');
+  const [mode, setMode] = useState<'split' | 'single'>('single');
+  const [savedMode, setSavedMode] = useState<'split' | 'single'>('single');
   const [savedStructProv, setSavedStructProv] = useState('gemini');
   const [savedStructModel, setSavedStructModel] = useState('gemini-2.5-flash');
   const [savedSingleProv, setSavedSingleProv] = useState('gemini');
@@ -88,7 +88,7 @@ export function SettingsPage() {
   const load = useCallback(async () => {
     try {
       const s = await api.settings();
-      const pm = s.pipelineMode === 'single' ? 'single' : 'split';
+      const pm = s.pipelineMode === 'split' ? 'split' : 'single';
       const sp = s.structuringProvider || 'gemini';
       const sm = s.structuringModel || 'gemini-2.5-flash';
       const snp = s.singleProvider || 'gemini';
@@ -161,7 +161,7 @@ export function SettingsPage() {
     <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 740 }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>OCR Pipeline Settings</h1>
       <p style={{ fontSize: 13, color: T.muted, margin: '0 0 24px' }}>
-        Choose Split or Single mode. Setting is stored as <code>pipelineMode</code> in DB.
+        Default: <strong>Single + Gemini</strong> via ADC (Vertex). Change mode/model below and Save — OCR uses Settings, not env keys for Gemini.
       </p>
 
       {/* Active mode banner */}
@@ -291,18 +291,19 @@ export function SettingsPage() {
         const isActive = mode === 'split'
           ? (prov.id === 'mistral' || prov.id === structProv)
           : (prov.id === singleProv);
+        const isGeminiAdc = prov.id === 'gemini';
 
         return (
           <div key={prov.id} style={{ ...card, opacity: isActive ? 1 : 0.55 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <span style={dot(hasKey)} />
+              <span style={dot(isGeminiAdc || hasKey)} />
               <span style={{ fontSize: 15, fontWeight: 700 }}>{prov.label}</span>
               <span style={{
                 fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 12,
-                background: hasKey ? '#d4f7e7' : T.border,
-                color: hasKey ? T.green : T.muted,
+                background: isGeminiAdc || hasKey ? '#d4f7e7' : T.border,
+                color: isGeminiAdc || hasKey ? T.green : T.muted,
                 marginLeft: 4,
-              }}>{hasKey ? 'Key saved' : 'No key'}</span>
+              }}>{isGeminiAdc ? 'ADC (Vertex)' : hasKey ? 'Key saved' : 'No key'}</span>
               {isActive && (
                 <span style={{
                   fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 12,
@@ -311,26 +312,35 @@ export function SettingsPage() {
               )}
             </div>
             <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>{prov.desc}</div>
-            <div style={{ marginBottom: 10 }}>
-              <div style={lbl}>API Key</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type={shown ? 'text' : 'password'}
-                  style={inp}
-                  placeholder={`Paste ${prov.label} API key`}
-                  autoComplete="off"
-                  value={creds[keyField] ?? ''}
-                  onChange={(e) => setCreds((p) => ({ ...p, [keyField]: e.target.value }))}
-                />
-                <button type="button" style={btnS} onClick={() => toggle(keyField)}>
-                  {shown ? 'Hide' : 'Show'}
-                </button>
+            {isGeminiAdc ? (
+              <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5 }}>
+                No API key. Uses Application Default Credentials → Vertex AI.
+                Pick any Gemini model above; it always authenticates with ADC.
               </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button style={btnP} onClick={() => void handleSaveCreds(prov.id)}>Save</button>
-              <button style={btnS} onClick={() => void handleClearCreds(prov.id)}>Clear</button>
-            </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={lbl}>API Key</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type={shown ? 'text' : 'password'}
+                      style={inp}
+                      placeholder={`Paste ${prov.label} API key`}
+                      autoComplete="off"
+                      value={creds[keyField] ?? ''}
+                      onChange={(e) => setCreds((p) => ({ ...p, [keyField]: e.target.value }))}
+                    />
+                    <button type="button" style={btnS} onClick={() => toggle(keyField)}>
+                      {shown ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={btnP} onClick={() => void handleSaveCreds(prov.id)}>Save</button>
+                  <button style={btnS} onClick={() => void handleClearCreds(prov.id)}>Clear</button>
+                </div>
+              </>
+            )}
           </div>
         );
       })}

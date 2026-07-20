@@ -69,7 +69,11 @@ export const api = {
   config: () => j<AppConfig>('/api/config'),
   list: (qs: string) => j<{ invoices: Invoice[] }>(`/api/invoices${qs}`),
   get: (id: string) => j<Invoice>(`/api/invoices/${id}`),
-  fileUrl: (id: string) => `/api/invoices/${id}/file`,
+  fileUrl: (id: string) => {
+    const token = localStorage.getItem('session_token');
+    const base = `/api/invoices/${id}/file`;
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  },
   reextract: (id: string, provider?: string) => j(`/api/invoices/${id}/reextract`, { method: 'POST', body: JSON.stringify({ provider }) }),
   cancel: (id: string) => j(`/api/invoices/${id}/cancel`, { method: 'POST', body: '{}' }),
   bakeoff: (id: string) => j<{ runs: ExtractionRun[] }>(`/api/invoices/${id}/bakeoff`, { method: 'POST' }),
