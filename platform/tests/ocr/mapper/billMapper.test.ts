@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mapParsedToBill } from '../../../src/ocr/mapper/billMapper.js';
-import type { ParsedInvoiceData } from '../../src/models/types.js';
+import { mapParsedToBill } from '../../../src/ocr/mapper.js';
+import type { ParsedInvoiceData } from '../../../src/shared/types.js';
 
 describe('mapParsedToBill', () => {
   const BILL_ID = 'test-bill-001';

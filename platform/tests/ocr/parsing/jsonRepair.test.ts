@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { prepareLlmJsonWithRepair, repairTruncatedJson } from '../../../src/ocr/parsing/coerce.js';
-import { structureFromLlmResponse } from '../../../src/ocr/parsing/index.js';
+import { structureFromLlmResponse } from '../../../src/ocr/parsing/parse.js';
 
 describe('repairTruncatedJson — Gemini malformed closings', () => {
   it('inserts missing } before ] (parsed_data closed too early)', () => {

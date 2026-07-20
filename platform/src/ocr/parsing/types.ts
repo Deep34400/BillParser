@@ -9,7 +9,7 @@ export type {
   VehicleDetails,
   TotalsAndTaxSummary,
   GstBreakdownLine,
-} from '../../models/types.js';
+} from '../../shared/types.js';
 
 export interface InvoiceSchemaEntry {
   id?: string;
@@ -29,7 +29,7 @@ export interface ValidationIssue {
 }
 
 export interface ParseResult {
-  parsed: import('../../models/types.js').ParsedInvoiceData;
+  parsed: import('../../shared/types.js').ParsedInvoiceData;
   raw: Record<string, unknown>;
   format: 'schema' | 'legacy';
   validation: ValidationIssue[];

@@ -1,5 +1,7 @@
 /**
- * User model — Firestore CRUD for accounts + auth.
+ * User Repository — Firestore CRUD for users, API keys, and token transactions.
+ * Pure data-access layer: no business logic, no HTTP concerns.
+ *
  * Collections: users, token_transactions, api_keys
  */
 import { randomBytes, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -35,7 +37,6 @@ export interface ApiKeyDoc {
   user_id: string;
   key_hash: string;
   key_prefix: string;
-  /** Full key stored so user can copy it again from UI. */
   api_key: string;
   label: string;
   created_at: string;
@@ -53,7 +54,7 @@ export interface TokenTransactionDoc {
   created_at: string;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Collection refs ────────────────────────────────────────────────────────
 
 const USERS_COL = 'users';
 const TX_COL = 'token_transactions';
@@ -63,7 +64,7 @@ function usersRef() { return db().collection(col(USERS_COL)); }
 function txRef() { return db().collection(col(TX_COL)); }
 function keysRef() { return db().collection(col(KEYS_COL)); }
 
-// ─── Password hashing (scrypt — no external deps) ───────────────────────────
+// ─── Password hashing (scrypt) ─────────────────────────────────────────────
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
@@ -121,10 +122,8 @@ export async function getUserByEmail(email: string): Promise<UserDoc | null> {
 }
 
 export async function getUserByApiKeyHash(hash: string): Promise<UserDoc | null> {
-  // Check new api_keys collection first
   const keyDoc = await getApiKeyByHash(hash);
   if (keyDoc) return getUser(keyDoc.user_id);
-  // Fallback to legacy api_key_hash on user doc
   if (env.localDev) {
     for (const u of devStore.users.values()) {
       if (u.api_key_hash === hash) return u;
@@ -188,71 +187,14 @@ export async function deleteApiKey(keyId: string): Promise<void> {
   await keysRef().doc(keyId).delete();
 }
 
-// ─── Token operations ────────────────────────────────────────────────────────
+// ─── Token transaction CRUD ─────────────────────────────────────────────────
 
-export async function addTokens(
-  userId: string,
-  amount: number,
-  description: string,
-): Promise<TokenTransactionDoc> {
-  const user = await getUser(userId);
-  if (!user) throw new Error(`User ${userId} not found`);
-
-  const newBalance = user.token_balance + amount;
-  await updateUser(userId, { token_balance: newBalance });
-
-  const tx: TokenTransactionDoc = {
-    tx_id: randomBytes(16).toString('hex'),
-    user_id: userId,
-    type: 'credit',
-    amount,
-    balance_after: newBalance,
-    description,
-    created_at: new Date().toISOString(),
-  };
-
+export async function createTransaction(tx: TokenTransactionDoc): Promise<void> {
   if (env.localDev) {
     devStore.tokenTransactions.push(tx);
   } else {
     await txRef().doc(tx.tx_id).set(tx);
   }
-  return tx;
-}
-
-export async function deductTokens(
-  userId: string,
-  amount: number,
-  description: string,
-  referenceId?: string,
-): Promise<TokenTransactionDoc> {
-  const user = await getUser(userId);
-  if (!user) throw new Error(`User ${userId} not found`);
-  if (user.token_balance < amount) throw new Error('Insufficient balance');
-
-  const newBalance = Math.round((user.token_balance - amount) * 10000) / 10000;
-  await updateUser(userId, {
-    token_balance: newBalance,
-    total_tokens_used: Math.round((user.total_tokens_used + amount) * 10000) / 10000,
-    total_ocr_count: user.total_ocr_count + 1,
-  });
-
-  const tx: TokenTransactionDoc = {
-    tx_id: randomBytes(16).toString('hex'),
-    user_id: userId,
-    type: 'debit',
-    amount,
-    balance_after: newBalance,
-    description,
-    reference_id: referenceId ?? null,
-    created_at: new Date().toISOString(),
-  };
-
-  if (env.localDev) {
-    devStore.tokenTransactions.push(tx);
-  } else {
-    await txRef().doc(tx.tx_id).set(tx);
-  }
-  return tx;
 }
 
 export async function getUserTransactions(userId: string, limit = 50): Promise<TokenTransactionDoc[]> {

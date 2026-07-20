@@ -1,9 +1,25 @@
 /**
- * Analytics Service — aggregation queries over bills.
- * Reads through the models layer (works in both LOCAL_DEV and production).
+ * Analytics Service — aggregation and business logic.
+ * All data comes through repository.ts. No direct Firestore access.
  */
-import { listBills } from '../models/bills.js';
-import type { BillDoc } from '../models/types.js';
+import { fetchAllBills, type BillDoc } from './repository.js';
+import { isJunkVendorName } from '../ocr/extraction/vendorExtract.js';
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+export interface KpiResult {
+  totalSpend: number;
+  completedCount: number;
+  needsReview: number;
+  totalParts: number;
+  totalLabour: number;
+  totalTax: number;
+  avgConfidence: number;
+  vendorCount: number;
+  vehicleCount: number;
+  byVendor: { name: string; amount: number }[];
+  byMonth: { label: string; amount: number }[];
+}
 
 export interface VehicleSpendSummary {
   vehicle_id: string;
@@ -23,12 +39,74 @@ export interface CostPerKmResult {
   cost_per_km: number | null;
 }
 
-async function allBills(): Promise<BillDoc[]> {
-  return listBills({ limit: 10000 });
+export interface OcrCostSummary {
+  total_ocr_count: number;
+  total_extraction_cost_usd: number;
+  total_structuring_cost_usd: number;
+  total_cost_usd: number;
+  total_extraction_tokens: number;
+  total_structuring_tokens: number;
+  total_tokens: number;
+  avg_cost_per_ocr_usd: number;
+  avg_tokens_per_ocr: number;
+  by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
 }
 
+// ─── KPI Aggregation ────────────────────────────────────────────────────────
+
+export async function computeKpis(): Promise<KpiResult> {
+  const bills = await fetchAllBills();
+
+  let totalSpend = 0, completedCount = 0, confidenceSum = 0, needsReview = 0;
+  let totalParts = 0, totalLabour = 0, totalTax = 0;
+  const vendorTotals = new Map<string, number>();
+  const monthTotals = new Map<string, number>();
+  const vehicleIds = new Set<string>();
+
+  for (const bill of bills) {
+    const vid = bill.vehicle_id ?? bill.registration_number;
+    if (vid) vehicleIds.add(vid);
+
+    if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
+      completedCount++;
+      const amount = bill.grand_total_amount ?? 0;
+      totalSpend += amount;
+      totalParts += bill.parts_amount ?? 0;
+      totalLabour += bill.labour_amount ?? 0;
+      totalTax += bill.total_tax_amount ?? 0;
+      if (bill.confidence_score != null) confidenceSum += bill.confidence_score;
+      if ((bill.confidence_score ?? 1) < 0.75 && bill.ocr_status !== 'VERIFIED') needsReview++;
+
+      const vendor = bill.vendor_name ?? bill.company_name ?? 'Unknown';
+      if (!isJunkVendorName(vendor)) {
+        vendorTotals.set(vendor, (vendorTotals.get(vendor) ?? 0) + amount);
+      }
+
+      if (bill.invoice_date) {
+        const mk = bill.invoice_date.slice(0, 7);
+        monthTotals.set(mk, (monthTotals.get(mk) ?? 0) + amount);
+      }
+    }
+  }
+
+  return {
+    totalSpend, completedCount, needsReview, totalParts, totalLabour, totalTax,
+    avgConfidence: completedCount > 0 ? Math.round((confidenceSum / completedCount) * 100) / 100 : 0,
+    vendorCount: vendorTotals.size,
+    vehicleCount: vehicleIds.size,
+    byVendor: Array.from(vendorTotals.entries())
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount),
+    byMonth: Array.from(monthTotals.entries())
+      .map(([label, amount]) => ({ label, amount }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  };
+}
+
+// ─── Vehicle Spend ──────────────────────────────────────────────────────────
+
 export async function getVehicleSpend(vehicleId?: string): Promise<VehicleSpendSummary[]> {
-  let bills = await allBills();
+  let bills = await fetchAllBills();
   if (vehicleId) bills = bills.filter((b) => b.vehicle_id === vehicleId || b.registration_number === vehicleId);
 
   const byVehicle = new Map<string, VehicleSpendSummary>();
@@ -38,11 +116,7 @@ export async function getVehicleSpend(vehicleId?: string): Promise<VehicleSpendS
     const existing = byVehicle.get(vid) ?? {
       vehicle_id: vid,
       registration_number: bill.registration_number ?? null,
-      total_bills: 0,
-      total_amount: 0,
-      parts_amount: 0,
-      labour_amount: 0,
-      total_tax: 0,
+      total_bills: 0, total_amount: 0, parts_amount: 0, labour_amount: 0, total_tax: 0,
     };
     existing.total_bills++;
     existing.total_amount += bill.grand_total_amount ?? 0;
@@ -55,8 +129,10 @@ export async function getVehicleSpend(vehicleId?: string): Promise<VehicleSpendS
   return Array.from(byVehicle.values()).sort((a, b) => b.total_amount - a.total_amount);
 }
 
+// ─── Cost Per Km ────────────────────────────────────────────────────────────
+
 export async function getCostPerKm(): Promise<CostPerKmResult[]> {
-  const bills = await allBills();
+  const bills = await fetchAllBills();
   const withOdo = bills.filter((b) => b.odometer_reading && b.odometer_reading > 0);
 
   const byVehicle = new Map<string, BillDoc[]>();
@@ -88,21 +164,10 @@ export async function getCostPerKm(): Promise<CostPerKmResult[]> {
   return results;
 }
 
-export interface OcrCostSummary {
-  total_ocr_count: number;
-  total_extraction_cost_usd: number;
-  total_structuring_cost_usd: number;
-  total_cost_usd: number;
-  total_extraction_tokens: number;
-  total_structuring_tokens: number;
-  total_tokens: number;
-  avg_cost_per_ocr_usd: number;
-  avg_tokens_per_ocr: number;
-  by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
-}
+// ─── OCR Cost Summary ───────────────────────────────────────────────────────
 
 export async function getOcrCostSummary(): Promise<OcrCostSummary> {
-  const bills = await allBills();
+  const bills = await fetchAllBills();
   const completed = bills.filter((b) => b.ocr_status === 'OCR_COMPLETED' || b.ocr_status === 'VERIFIED');
 
   let extCost = 0, strCost = 0, totCost = 0;

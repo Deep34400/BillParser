@@ -3,7 +3,7 @@ import {
   extractRegistrationFromMarkdown,
   normalizeRegistrationNumber,
   normalizeVehicleDetails,
-} from '../../../src/ocr/extraction/vehicleExtract.js';
+} from '../../../src/ocr/extraction/normalize.js';
 
 const ARPANNA_HEADER =
   'Tax Invoice No./Sales Invoice TXA25-08492(Cash) Reg. No. MH01FE2778';

@@ -1,13 +1,10 @@
 /**
- * Fraud Detection Service
- *
- * All checks read through the models layer (LOCAL_DEV compatible).
+ * Fraud Detection Service — business logic only.
+ * All data comes through repository.ts. No direct Firestore access.
  */
-import { listBills } from '../models/bills.js';
-import { env } from '../config/env.js';
-import { db, col } from '../config/firebase.js';
-import { devStore } from '../shared/devStore.js';
-import type { BillDoc, BillPartDoc } from '../models/types.js';
+import { fetchCompletedBills, fetchAllParts, type BillDoc, type BillPartDoc } from './repository.js';
+
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface FraudAlert {
   type: string;
@@ -17,19 +14,76 @@ export interface FraudAlert {
   details: Record<string, unknown>;
 }
 
-async function allCompletedBills(): Promise<BillDoc[]> {
-  const bills = await listBills({ limit: 10000 });
-  return bills.filter((b) => b.ocr_status === 'OCR_COMPLETED' || b.ocr_status === 'VERIFIED');
+interface GstSide {
+  label: string;
+  grossAmount: number | null;
+  discount: number | null;
+  special_discount: number | null;
+  cgstRate: number | null;
+  sgstRate: number | null;
+  igstRate: number | null;
+  cgstAmount: number | null;
+  sgstAmount: number | null;
+  igstAmount: number | null;
 }
 
-async function allParts(): Promise<BillPartDoc[]> {
-  if (env.localDev) return Array.from(devStore.parts.values());
-  const snap = await db().collection(col('bill_parts')).get();
-  return snap.docs.map((d) => d.data() as BillPartDoc);
+// ─── Helpers (used by detection functions below) ─────────────────────────────
+
+function sumNums(...vals: (number | null | undefined)[]): number | null {
+  const nums = vals.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  return nums.length ? nums.reduce((a, b) => a + b, 0) : null;
 }
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+/**
+ * Validate GST on one side (parts or labour).
+ * taxable base = gross − discount. GST = taxable × rate%.
+ * Tolerance: max(₹1, 1% of expected).
+ */
+function checkGstSide(side: GstSide): string[] {
+  const issues: string[] = [];
+  const totalGstAmount = sumNums(side.cgstAmount, side.sgstAmount, side.igstAmount);
+  const hasRate = side.cgstRate != null || side.sgstRate != null || side.igstRate != null;
+  if (side.grossAmount == null || totalGstAmount == null || !hasRate) return issues;
+
+  const isInterState = (side.igstRate ?? 0) > 0 || (side.igstAmount ?? 0) > 0;
+
+  if (!isInterState && side.cgstRate != null && side.sgstRate != null) {
+    if (Math.abs(side.cgstRate - side.sgstRate) > 0.01) {
+      issues.push(`${side.label}: CGST rate (${side.cgstRate}%) ≠ SGST rate (${side.sgstRate}%)`);
+    }
+    if (side.cgstAmount != null && side.sgstAmount != null &&
+        Math.abs(side.cgstAmount - side.sgstAmount) > 1) {
+      issues.push(`${side.label}: CGST amount (₹${side.cgstAmount}) ≠ SGST amount (₹${side.sgstAmount})`);
+    }
+  }
+
+  const totalRate = isInterState
+    ? (side.igstRate ?? 0)
+    : (side.cgstRate ?? 0) + (side.sgstRate ?? 0);
+
+  if (totalRate > 0) {
+    const taxableBase = side.grossAmount - (side.discount ?? 0) - (side.special_discount ?? 0);
+    const expected = Math.round(taxableBase * (totalRate / 100) * 100) / 100;
+    const tolerance = Math.max(1, expected * 0.01);
+    if (Math.abs(expected - totalGstAmount) > tolerance) {
+      issues.push(
+        `${side.label}: total GST expected ₹${expected} ` +
+        `(₹${taxableBase} × ${totalRate}%), got ₹${round2(totalGstAmount)}`,
+      );
+    }
+  }
+
+  return issues;
+}
+
+// ─── Detection Functions ────────────────────────────────────────────────────
 
 export async function detectDuplicateInvoices(): Promise<FraudAlert[]> {
-  const bills = await allCompletedBills();
+  const bills = await fetchCompletedBills();
   const alerts: FraudAlert[] = [];
   const seen = new Map<string, BillDoc[]>();
 
@@ -61,78 +115,8 @@ export async function detectDuplicateInvoices(): Promise<FraudAlert[]> {
   return alerts;
 }
 
-/** One tax side (parts or labour) of a bill, normalized for GST checking. */
-interface GstSide {
-  label: string;
-  grossAmount: number | null;
-  discount: number | null;
-  special_discount: number | null;
-  cgstRate: number | null;
-  sgstRate: number | null;
-  igstRate: number | null;
-  cgstAmount: number | null;
-  sgstAmount: number | null;
-  igstAmount: number | null;
-}
-
-/**
- * Validate the total GST on one side (parts or labour).
- *
- * Correct GST logic:
- *   taxable base = gross − discount   (GST is charged AFTER discount)
- *   intra-state  → total GST = CGST + SGST   (CGST rate must equal SGST rate)
- *   inter-state  → total GST = IGST
- *   expected total GST = taxable base × total rate%
- *   actual total GST   = CGST amount + SGST amount + IGST amount
- *
- * Tolerance is the larger of ₹1 or 1% of expected (absorbs rounding).
- */
-function checkGstSide(side: GstSide): string[] {
-  const issues: string[] = [];
-
-  const totalGstAmount = sumNums(side.cgstAmount, side.sgstAmount, side.igstAmount);
-  const hasRate = side.cgstRate != null || side.sgstRate != null || side.igstRate != null;
-
-  // Nothing to validate on this side.
-  if (side.grossAmount == null || totalGstAmount == null || !hasRate) return issues;
-
-  const isInterState = (side.igstRate ?? 0) > 0 || (side.igstAmount ?? 0) > 0;
-
-  // 1) CGST rate must equal SGST rate for intra-state bills.
-  if (!isInterState && side.cgstRate != null && side.sgstRate != null) {
-    if (Math.abs(side.cgstRate - side.sgstRate) > 0.01) {
-      issues.push(`${side.label}: CGST rate (${side.cgstRate}%) ≠ SGST rate (${side.sgstRate}%)`);
-    }
-    // CGST amount must equal SGST amount too.
-    if (side.cgstAmount != null && side.sgstAmount != null &&
-        Math.abs(side.cgstAmount - side.sgstAmount) > 1) {
-      issues.push(`${side.label}: CGST amount (₹${side.cgstAmount}) ≠ SGST amount (₹${side.sgstAmount})`);
-    }
-  }
-
-  // 2) Total GST amount must match taxable base × total rate.
-  const totalRate = isInterState
-    ? (side.igstRate ?? 0)
-    : (side.cgstRate ?? 0) + (side.sgstRate ?? 0);
-
-  if (totalRate > 0) {
-    const taxableBase = side.grossAmount - (side.discount ?? 0) - (side.special_discount ?? 0);
-    const expected = Math.round(taxableBase * (totalRate / 100) * 100) / 100;
-    const tolerance = Math.max(1, expected * 0.01);
-
-    if (Math.abs(expected - totalGstAmount) > tolerance) {
-      issues.push(
-        `${side.label}: total GST expected ₹${expected} ` +
-        `(₹${taxableBase} × ${totalRate}%), got ₹${round2(totalGstAmount)}`,
-      );
-    }
-  }
-
-  return issues;
-}
-
 export async function detectGstAnomalies(): Promise<FraudAlert[]> {
-  const bills = await allCompletedBills();
+  const bills = await fetchCompletedBills();
   const alerts: FraudAlert[] = [];
 
   for (const bill of bills) {
@@ -185,18 +169,8 @@ export async function detectGstAnomalies(): Promise<FraudAlert[]> {
   return alerts;
 }
 
-/** Sum numeric values, ignoring null/undefined. Returns null if all are null. */
-function sumNums(...vals: (number | null | undefined)[]): number | null {
-  const nums = vals.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
-  return nums.length ? nums.reduce((a, b) => a + b, 0) : null;
-}
-
-function round2(v: number): number {
-  return Math.round(v * 100) / 100;
-}
-
 export async function detectPriceAnomalies(thresholdPct = 50): Promise<FraudAlert[]> {
-  const parts = await allParts();
+  const parts = await fetchAllParts();
   const alerts: FraudAlert[] = [];
   const byPart = new Map<string, BillPartDoc[]>();
 
@@ -232,7 +206,7 @@ export async function detectPriceAnomalies(thresholdPct = 50): Promise<FraudAler
 }
 
 export async function detectOdometerInconsistency(): Promise<FraudAlert[]> {
-  const bills = await allCompletedBills();
+  const bills = await fetchCompletedBills();
   const alerts: FraudAlert[] = [];
   const byVehicle = new Map<string, BillDoc[]>();
 
@@ -270,6 +244,8 @@ export async function detectOdometerInconsistency(): Promise<FraudAlert[]> {
 
   return alerts;
 }
+
+// ─── Combined Scan ──────────────────────────────────────────────────────────
 
 export async function runAllChecks(): Promise<FraudAlert[]> {
   const [dupes, gst, prices, odometer] = await Promise.all([

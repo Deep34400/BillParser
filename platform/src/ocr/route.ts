@@ -1,24 +1,22 @@
 import type { FastifyInstance } from 'fastify';
 import { v4 as uuid } from 'uuid';
 import { processUpload, processFromUrl, verifyBill } from './processingService.js';
-import { getBill, listBills, deleteBill, updateBill, createBill, updateBillStatus } from '../models/bills.js';
-import { getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts } from '../models/billParts.js';
-import { billToInvoice } from './mapper/billToInvoice.js';
-import { toApiParsed } from './mapper/toApiParsed.js';
+import {
+  getBill, listBills, deleteBill, updateBill, createBill, updateBillStatus,
+  getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts,
+  getSettings, type BillType, type ParsedInvoiceData,
+} from './repository.js';
+import { billToInvoice, toApiParsed, mapParsedToBill } from './mapper.js';
 import { isPdf, isImage, uploadFile, getStoredFile } from '../shared/storage.js';
 import { env } from '../config/env.js';
-import { mapParsedToBill } from './mapper/billMapper.js';
-import type { BillType, ParsedInvoiceData } from '../models/types.js';
 import type { OcrCostInfo, OcrStepCost } from './providers/types.js';
-import { deductTokens, updateUser, getUser } from '../models/users.js';
-import type { UserDoc } from '../models/users.js';
+import { deductTokens, trackOcrCost, type UserDoc } from '../users/service.js';
 import { enrichParsedInvoice } from './extraction/normalize.js';
 import { runPipeline } from './structuringService.js';
 import { cacheInvalidate } from '../shared/cache.js';
-import { getSettings } from '../models/settings.js';
 
 /** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill (so UI shows the chosen model, not mistral). */
-async function applyPipelineSettingsToBill(bill: import('../models/types.js').BillDoc): Promise<void> {
+async function applyPipelineSettingsToBill(bill: import('../shared/types.js').BillDoc): Promise<void> {
   const settings = await getSettings();
   const mode = settings.pipelineMode ?? 'single';
   bill.pipeline_mode = mode;
@@ -87,10 +85,7 @@ function processInBackground(
           const costUsd = Math.round(costInfo.total_cost_usd * 10000) / 10000;
           const deductAmt = costUsd > 0 ? costUsd : 0.001;
           await deductTokens(userId, deductAmt, `OCR: ${fileName} ($${deductAmt.toFixed(4)})`, billId);
-          const u = await getUser(userId);
-          if (u) {
-            await updateUser(userId, { total_cost_usd: Math.round(((u.total_cost_usd ?? 0) + costInfo.total_cost_usd) * 10000) / 10000 });
-          }
+          await trackOcrCost(userId, costInfo.total_cost_usd);
         } catch (e) {
           console.warn(`[OCR] ${billId} — token deduction failed:`, (e as Error).message);
         }
@@ -543,10 +538,7 @@ export async function billRoutes(app: FastifyInstance) {
       if (user.role !== 'admin') {
         const amt = Math.round(costInfo.total_cost_usd * 10000) / 10000 || 0.001;
         try { await deductTokens(user.user_id, amt, `API OCR sync ($${amt.toFixed(4)})`, billId); } catch { /* ignore */ }
-        try {
-          const u = await getUser(user.user_id);
-          if (u) await updateUser(user.user_id, { total_cost_usd: Math.round(((u.total_cost_usd ?? 0) + costInfo.total_cost_usd) * 10000) / 10000 });
-        } catch { /* ignore */ }
+        try { await trackOcrCost(user.user_id, costInfo.total_cost_usd); } catch { /* ignore */ }
       }
 
       return {

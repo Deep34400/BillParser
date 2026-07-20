@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   filterLabourLineItems,
   isLabourSectionHeader,
-} from '../../../src/ocr/extraction/lineItemFilter.js';
+} from '../../../src/ocr/extraction/normalize.js';
 import type { LabourServiceLineItem } from '../../../src/ocr/parsing/types.js';
 
 describe('isLabourSectionHeader', () => {

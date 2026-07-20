@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { getSettings, getAllCredentials } from '../models/settings.js';
+import { getSettings, getAllCredentials } from '../shared/settings.js';
 
 const PROVIDERS = [
   { name: 'mistral', displayName: 'Mistral OCR', kind: 'markdown', requiredCredentials: ['apiKey'] },

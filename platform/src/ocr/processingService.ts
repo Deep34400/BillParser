@@ -10,11 +10,12 @@
  */
 import { v4 as uuid } from 'uuid';
 import { uploadFile, isPdf, isImage, downloadFile } from '../shared/storage.js';
-import { toApiParsed } from './mapper/toApiParsed.js';
-import { createBill, updateBillStatus, getBill } from '../models/bills.js';
-import { extractPartsFromParsed, saveBillParts } from '../models/billParts.js';
-import { mapParsedToBill } from './mapper/billMapper.js';
-import type { BillDoc, ParsedInvoiceData, BillType } from '../models/types.js';
+import { toApiParsed, mapParsedToBill } from './mapper.js';
+import {
+  createBill, updateBillStatus, getBill,
+  extractPartsFromParsed, saveBillParts,
+  type BillDoc, type ParsedInvoiceData, type BillType,
+} from './repository.js';
 
 export interface ProcessResult {
   bill: BillDoc;

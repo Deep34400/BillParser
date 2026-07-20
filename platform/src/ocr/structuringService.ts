@@ -9,11 +9,11 @@
  * Fallback (both modes): if the Settings model fails → gemini-2.5-flash SINGLE.
  * Never falls back to Mistral split when the user chose Single.
  */
-import { getSettings } from '../models/settings.js';
+import { getSettings } from '../shared/settings.js';
 import { llmNormalize, SUPPORTED_PROVIDERS } from './providers/llmNormalize.js';
 import { mistralOcr } from './providers/mistralOcr.js';
 import { llmSingle, SINGLE_PROVIDERS } from './providers/llmSingle.js';
-import type { ParsedInvoiceData } from '../models/types.js';
+import type { ParsedInvoiceData } from '../shared/types.js';
 import type { OcrStepCost, OcrCostInfo } from './providers/types.js';
 
 /** Reliable single-call fallback when the Settings model fails. */

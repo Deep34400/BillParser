@@ -4,7 +4,7 @@
  * Each uses its own API format but the same STRUCTURING_PROMPT.
  */
 import { STRUCTURING_PROMPT } from '../parsing/prompt.js';
-import { structureFromLlmResponse } from '../parsing/index.js';
+import { structureFromLlmResponse } from '../parsing/parse.js';
 import type { ParsedInvoiceData } from '../parsing/types.js';
 import type { LlmUsage, OcrStepCost } from './types.js';
 import { resolveProviderKey } from './resolveKey.js';

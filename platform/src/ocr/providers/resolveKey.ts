@@ -4,7 +4,7 @@
  *
  * Gemini: ALWAYS Vertex AI + ADC (never API key), even if a key exists in Settings/env.
  */
-import { getProviderCredentials } from '../../models/settings.js';
+import { getProviderCredentials } from '../../shared/settings.js';
 import { env } from '../../config/env.js';
 
 const ENV_KEY_MAP: Record<string, string> = {

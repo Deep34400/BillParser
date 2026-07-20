@@ -1,4 +1,4 @@
-import type { ApiResponse, ApiError } from '../models/types.js';
+import type { ApiResponse, ApiError } from './types.js';
 
 export function success<T>(data: T, message = '', metadata: Record<string, unknown> = {}): ApiResponse<T> {
   return { success: true, message, data, metadata, errors: [] };

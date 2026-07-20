@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { extractPartsFromParsed } from '../../src/models/billParts.js';
-import type { ParsedInvoiceData } from '../../src/models/types.js';
+import { extractPartsFromParsed } from '../../src/ocr/repository.js';
+import type { ParsedInvoiceData } from '../../src/shared/types.js';
 
 describe('extractPartsFromParsed', () => {
   const BILL_ID = 'test-bill-001';

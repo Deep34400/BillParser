@@ -14,7 +14,7 @@ if (env.localDev) {
 }
 
 async function seedAdmin() {
-  const { listUsers, createUser, hashPassword } = await import('./models/users.js');
+  const { listUsers, createUser, hashPassword } = await import('./users/repository.js');
   const users = await listUsers();
   if (users.some((u) => u.role === 'admin')) return;
 

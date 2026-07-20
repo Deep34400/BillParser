@@ -2,6 +2,23 @@ import type {
   ParsedInvoiceData, PartsLineItem, LabourServiceLineItem,
   ServiceDetails, VehicleDetails, TotalsAndTaxSummary, ParseResult,
 } from './types.js';
+
+/**
+ * Bridge function — used by providers to convert LLM text → ParsedInvoiceData.
+ */
+export function structureFromLlmResponse(
+  text: string,
+  rawOcr?: string,
+): { parsedData: ParsedInvoiceData | null; error?: string } {
+  try {
+    const result = parseStructuredOutput(text, rawOcr);
+    return { parsedData: result.parsed };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[parse] structureFromLlmResponse failed: ${msg.slice(0, 200)} | raw[0..200]=${(text ?? '').slice(0, 200)}`);
+    return { parsedData: null, error: msg };
+  }
+}
 import { prepareLlmJson, prepareLlmJsonWithRepair, toNum, toStr, toNullableNum, toNullableStr } from './coerce.js';
 import { validateParsedInvoice } from './validate.js';
 import { parseLegacyCanonical } from './legacy.js';

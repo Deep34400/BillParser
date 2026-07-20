@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { billToInvoice } from '../../../src/ocr/mapper/billToInvoice.js';
-import type { BillDoc, BillPartDoc } from '../../src/models/types.js';
+import { billToInvoice } from '../../../src/ocr/mapper.js';
+import type { BillDoc, BillPartDoc } from '../../../src/shared/types.js';
 
 function makeBill(overrides: Partial<BillDoc> = {}): BillDoc {
   return {

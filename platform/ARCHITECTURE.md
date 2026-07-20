@@ -70,8 +70,7 @@ Code is organized by **domain** — each service (OCR, Analytics, Fraud) owns it
 │   │   │   ├── types.ts             # ALL types (OCR contract, BillDoc, BillPartDoc, API envelope)
 │   │   │   ├── bills.ts             # CRUD for 'bills' collection
 │   │   │   ├── billParts.ts         # CRUD for 'bill_parts' collection + extraction
-│   │   │   ├── settings.ts          # App settings + provider credentials
-│   │   │   └── users.ts             # User CRUD + password hashing + token balance
+│   │   │   └── settings.ts          # App settings + provider credentials
 │   │   │
 │   │   ├── middleware/               # Fastify plugins
 │   │   │   └── auth.ts              # JWT + API key authentication
@@ -79,7 +78,6 @@ Code is organized by **domain** — each service (OCR, Analytics, Fraud) owns it
 │   │   ├── shared/                   # Shared utilities (used by multiple domains)
 │   │   │   ├── apiResponse.ts       # Standard {success, data, errors} envelope
 │   │   │   ├── cache.ts             # Server-side TTL cache (30s) for analytics
-│   │   │   ├── clientUser.ts        # User → frontend-safe shape
 │   │   │   ├── devStore.ts          # In-memory Maps for LOCAL_DEV mode
 │   │   │   └── storage.ts           # Cloud Storage upload/download + file detection
 │   │   │
@@ -94,27 +92,21 @@ Code is organized by **domain** — each service (OCR, Analytics, Fraud) owns it
 │   │   │   │   ├── mistralOcr.ts    # Mistral OCR API (PDF → markdown)
 │   │   │   │   ├── resolveKey.ts    # API key + model resolution per provider
 │   │   │   │   └── types.ts         # OcrCostInfo, OcrStepCost, LlmUsage
+│   │   │   ├── mapper.ts             # All data transformations (ParsedData→BillDoc, BillDoc→FrontendInvoice, toApiParsed)
 │   │   │   ├── parsing/             # LLM response → structured data
-│   │   │   │   ├── index.ts         # structureFromLlmResponse — main entry
-│   │   │   │   ├── parse.ts         # JSON → ParsedInvoiceData coercion
+│   │   │   │   ├── parse.ts         # JSON → ParsedInvoiceData coercion + structureFromLlmResponse
 │   │   │   │   ├── coerce.ts        # Type coercion + JSON repair
 │   │   │   │   ├── validate.ts      # Business validation rules
 │   │   │   │   ├── prompt.ts        # STRUCTURING_PROMPT (instructions for LLM)
 │   │   │   │   ├── legacy.ts        # Legacy flat-JSON format parser
 │   │   │   │   └── types.ts         # Parsing-specific types + re-exports
-│   │   │   ├── extraction/           # Field extraction from parsed data / markdown
-│   │   │   │   ├── billSummary.ts   # GST reconciliation + fillMissingGstAmounts
-│   │   │   │   ├── footerExtract.ts # Extract GST footer from OCR markdown
-│   │   │   │   ├── normalize.ts     # enrichParsedInvoice — post-processing
-│   │   │   │   ├── vendorExtract.ts # Vendor name extraction + junk detection
-│   │   │   │   ├── dateExtract.ts   # Fallback date extraction from markdown
-│   │   │   │   ├── vehicleExtract.ts # Registration/chassis normalization
-│   │   │   │   ├── lineItemFilter.ts # Line item dedup + filtering
-│   │   │   │   └── reviewFlags.ts   # Confidence flags for review
-│   │   │   └── mapper/              # Data mapping + response shaping
-│   │   │       ├── billMapper.ts    # ParsedInvoiceData → BillDoc for Firestore
-│   │   │       ├── billToInvoice.ts # BillDoc → frontend Invoice shape
-│   │   │       └── toApiParsed.ts   # OCR response normalizer (IMMUTABLE contract)
+│   │   │   └── extraction/          # Field extraction from parsed data / markdown
+│   │   │       ├── billSummary.ts   # GST reconciliation + fillMissingGstAmounts
+│   │   │       ├── footerExtract.ts # Extract GST footer from OCR markdown
+│   │   │       ├── normalize.ts     # enrichParsedInvoice + vehicle/labour normalization
+│   │   │       ├── vendorExtract.ts # Vendor name extraction + junk detection
+│   │   │       ├── dateExtract.ts   # Fallback date extraction from markdown
+│   │   │       └── reviewFlags.ts   # Confidence flags for review
 │   │   │
 │   │   ├── analytics/                # ★ Analytics Domain — spend/cost analytics
 │   │   │   ├── route.ts             # /api/analytics/* (7 endpoints)
@@ -124,10 +116,13 @@ Code is organized by **domain** — each service (OCR, Analytics, Fraud) owns it
 │   │   │   ├── route.ts             # /api/fraud/* (5 endpoints)
 │   │   │   └── fraudDetectionService.ts # Duplicates, GST, price, odometer checks
 │   │   │
-│   │   └── routes/                   # Auth, Settings, Admin (non-domain routes)
-│   │       ├── auth.ts              # /api/auth/* (login, API keys)
-│   │       ├── account.ts           # /api/account (profile, transactions)
-│   │       ├── admin.ts             # /api/admin/* (user management)
+│   │   ├── users/                    # ★ Users Domain — auth, account, admin
+│   │   │   ├── route.ts             # All user endpoints (login, API keys, admin CRUD)
+│   │   │   ├── service.ts           # Business logic (login, token ops, user admin)
+│   │   │   ├── repository.ts        # Firestore CRUD (users, api_keys, transactions)
+│   │   │   └── dto.ts               # clientUserView, sanitizeUser
+│   │   │
+│   │   └── routes/                   # Global config routes (not domain-specific)
 │   │       ├── settings.ts          # /api/settings/* (provider config)
 │   │       └── config.ts            # /api/config (provider list)
 │   │

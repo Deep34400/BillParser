@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { toApiParsed } from '../../../src/ocr/mapper/toApiParsed.js';
-import type { ParsedInvoiceData } from '../../src/models/types.js';
+import { toApiParsed } from '../../../src/ocr/mapper.js';
+import type { ParsedInvoiceData } from '../../../src/shared/types.js';
 
 describe('toApiParsed', () => {
   it('returns all null keys for empty input', () => {

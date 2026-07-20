@@ -6,7 +6,7 @@ import {
   saveProviderCredentials,
   clearProviderCredentials,
   getAllCredentials,
-} from '../models/settings.js';
+} from '../shared/settings.js';
 
 const PROVIDERS = [
   { name: 'mistral', displayName: 'Mistral OCR', kind: 'markdown', requiredCredentials: ['apiKey'] },

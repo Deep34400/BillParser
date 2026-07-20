@@ -1,9 +1,82 @@
-import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem } from '../parsing/types.js';
+import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem, VehicleDetails } from '../parsing/types.js';
 import { resolveBillSummary, columnNet } from './billSummary.js';
 import { resolveVendorFromMarkdown, isJunkVendorName } from './vendorExtract.js';
 import { normalizeInvoiceDateFields } from './dateExtract.js';
-import { normalizeVehicleDetails } from './vehicleExtract.js';
-import { filterLabourLineItems } from './lineItemFilter.js';
+
+// ── Vehicle registration normalization ──────────────────────────
+
+const INDIAN_REG_RE = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$|^\d{2}BH\d{4}[A-Z]$/;
+
+const REG_LABEL_RE =
+  /\b(?:reg(?:istration)?\.?\s*(?:no|number)?|vehicle\s*(?:reg(?:istration)?)?\.?\s*(?:no|number)?|veh\.?\s*no)\.?\s*[:\-/]?\s*([A-Z0-9][A-Z0-9\s]{2,14})/gi;
+
+export function normalizeRegistrationNumber(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const compact = raw.replace(/\s+/g, '').toUpperCase();
+  return INDIAN_REG_RE.test(compact) ? compact : null;
+}
+
+function cleanRegCapture(raw: string): string {
+  return raw.split(/[(,;\n|]/)[0].trim();
+}
+
+export function extractRegistrationFromMarkdown(markdown?: string | null): string | null {
+  if (!markdown) return null;
+  for (const m of markdown.matchAll(REG_LABEL_RE)) {
+    const candidate = normalizeRegistrationNumber(cleanRegCapture(m[1]));
+    if (candidate) return candidate;
+  }
+  for (const line of markdown.split(/\r?\n/)) {
+    const t = line.trim();
+    if (t.length < 6 || t.length > 16) continue;
+    const candidate = normalizeRegistrationNumber(t);
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+export function normalizeVehicleDetails(
+  vehicle: VehicleDetails | null | undefined,
+  markdown?: string | null,
+): VehicleDetails | null {
+  const vd = vehicle ?? {};
+  const fromParsed = normalizeRegistrationNumber(vd.registration_number);
+  const fromMarkdown = extractRegistrationFromMarkdown(markdown);
+  return {
+    ...vd,
+    registration_number: fromParsed ?? fromMarkdown ?? vd.registration_number ?? null,
+    chassis_number: vd.chassis_number?.trim() || vd.chassis_number || null,
+    mileage_odometer_reading: vd.mileage_odometer_reading ?? null,
+  };
+}
+
+// ── Labour line item filtering ──────────────────────────────────
+
+const LABOUR_SECTION_HEADER_RE =
+  /\b(oil|parts|labour|labor|service|misc|other|sub[\s-]?total)\s+charges?\b/i;
+
+export function isLabourSectionHeader(desc: string | null | undefined): boolean {
+  const t = desc?.trim();
+  if (!t) return false;
+  return LABOUR_SECTION_HEADER_RE.test(t) || /^charges$/i.test(t);
+}
+
+function hasLabourIdentifiers(li: LabourServiceLineItem): boolean {
+  return Boolean(li.labour_code?.trim()) || Boolean(li.hsn_sac_code?.trim());
+}
+
+export function filterLabourLineItems(items: LabourServiceLineItem[]): LabourServiceLineItem[] {
+  return items.filter((li) => {
+    const desc = li.labour_description?.trim() ?? '';
+    if (isLabourSectionHeader(desc)) return false;
+    const charges = li.labour_charges ?? 0;
+    if (charges !== 0) return true;
+    if (hasLabourIdentifiers(li)) return true;
+    return desc.length > 0 && !isLabourSectionHeader(desc);
+  });
+}
+
+// ── Core normalize logic ────────────────────────────────────────
 
 export { extractSummaryFromMarkdown, applyFooterFromMarkdown, stripCalculatedFooterAmounts, extractGatePassAmount, footerMissingInMarkdown, clearUntrustedZeroDiscounts, isCalculatedGstAmount, footerColumnAmounts } from './footerExtract.js';
 export { resolveBillSummary, columnNet } from './billSummary.js';

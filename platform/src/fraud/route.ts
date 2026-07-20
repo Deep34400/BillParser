@@ -5,7 +5,7 @@ import {
   detectPriceAnomalies,
   detectOdometerInconsistency,
   runAllChecks,
-} from './fraudDetectionService.js';
+} from './service.js';
 import { success, serverError } from '../shared/apiResponse.js';
 
 export async function fraudRoutes(app: FastifyInstance) {

@@ -2,7 +2,7 @@
  * Tests that structureFromLlmResponse correctly parses various invoice types.
  */
 import { describe, it, expect } from 'vitest';
-import { structureFromLlmResponse } from '../../../src/ocr/parsing/index.js';
+import { structureFromLlmResponse } from '../../../src/ocr/parsing/parse.js';
 
 describe('structureFromLlmResponse — diverse invoice types', () => {
   it('parses Indian automotive invoice', () => {

@@ -1,5 +1,6 @@
-/** Provider-layer types for OCR and normalization results. */
+/** OCR provider types — token usage, costs, and pipeline info. */
 
+/** Legacy canonical shape used only by parsing/legacy.ts fallback path. */
 export interface CanonicalLineItem {
   lineNumber: number;
   description?: string;
@@ -10,16 +11,6 @@ export interface CanonicalLineItem {
   amount?: number;
   labourAmount?: number;
   taxRate?: number;
-}
-
-export interface SummaryColumn {
-  label?: string;
-  subtotal?: number;
-  discount?: number;
-  cgst?: number;
-  sgst?: number;
-  igst?: number;
-  total?: number;
 }
 
 export interface CanonicalResult {
@@ -40,7 +31,7 @@ export interface CanonicalResult {
   sgstAmount?: number;
   igstAmount?: number;
   netAmount?: number;
-  summaryColumns?: SummaryColumn[];
+  summaryColumns?: { label?: string; subtotal?: number; discount?: number; cgst?: number; sgst?: number; igst?: number; total?: number }[];
   confidence?: number;
   lineItems: CanonicalLineItem[];
   rawText?: string;
