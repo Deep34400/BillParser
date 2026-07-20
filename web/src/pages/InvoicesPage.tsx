@@ -9,6 +9,11 @@ import { ConfidenceBar } from '../components/ConfidenceBar.js';
 import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
 
+/* Client-side invoice list cache (30s TTL) */
+const INV_CACHE_TTL = 30_000;
+let invCache: { invoices: Invoice[]; batches: Batch[]; at: number } | null = null;
+export function invalidateInvoiceCache() { invCache = null; }
+
 type SortKey = 'status' | 'vendorName' | 'invoiceDate' | 'confidence' | 'totalAmount';
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'ALL' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NEEDS_REVIEW';
@@ -117,14 +122,19 @@ export function InvoicesPage() {
   // Debounce ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch all invoices (for count display and display)
   const fetchAll = useCallback(async () => {
     try {
+      if (invCache && Date.now() - invCache.at < INV_CACHE_TTL) {
+        setAllInvoices(invCache.invoices);
+        setBatches(invCache.batches);
+        return;
+      }
       const [inv, bat] = await Promise.all([api.list(''), api.batches().catch(() => ({ batches: [] }))]);
+      invCache = { invoices: inv.invoices, batches: bat.batches, at: Date.now() };
       setAllInvoices(inv.invoices);
       setBatches(bat.batches);
     } catch (_e) {
-      // silently ignore for counts
+      // silently ignore
     }
   }, []);
 
@@ -267,6 +277,7 @@ export function InvoicesPage() {
       await api.bulk('reextract', [...selected]);
       setToast('Re-extraction queued');
       setSelected(new Set());
+      invalidateInvoiceCache();
       await refetch();
     } catch (e) {
       setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
@@ -288,6 +299,7 @@ export function InvoicesPage() {
       await api.bulk('delete', [...selected]);
       setSelected(new Set());
       setToast('Deleted selected invoices');
+      invalidateInvoiceCache();
       await refetch();
     } catch (e) {
       setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
@@ -320,6 +332,7 @@ export function InvoicesPage() {
         .slice(0, 3)
         .join('; ');
       if (dupes > 0) setDuplicateBanner({ count: dupes });
+      invalidateInvoiceCache();
       await refetch();
       setToast(
         `Uploaded ${created} file${created === 1 ? '' : 's'}` +
@@ -350,6 +363,7 @@ export function InvoicesPage() {
       const dupes = result?.duplicates?.length ?? 0;
       const rejected = result?.rejected?.length ?? 0;
       if (dupes > 0) setDuplicateBanner({ count: dupes });
+      invalidateInvoiceCache();
       await refetch();
       setToast(
         `Imported ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`,
@@ -919,6 +933,12 @@ export function InvoicesPage() {
                 </th>
                 {/* Invoice # */}
                 <th style={thBase}>Invoice #</th>
+                {/* Reg */}
+                <th style={thBase}>Reg No</th>
+                {/* GSTIN */}
+                <th style={thBase}>GSTIN</th>
+                {/* PAN */}
+                <th style={thBase}>PAN</th>
                 {/* Date */}
                 <th
                   style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }}
@@ -926,8 +946,8 @@ export function InvoicesPage() {
                 >
                   Date {sort === 'invoiceDate' ? (dir === 'asc' ? '▲' : '▼') : ''}
                 </th>
-                {/* Provider */}
-                <th style={thBase}>Provider</th>
+                {/* Pipeline / Model */}
+                <th style={thBase}>Pipeline</th>
                 {/* Confidence */}
                 <th
                   style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }}
@@ -954,7 +974,7 @@ export function InvoicesPage() {
                 skeletonRows.map((_, i) => (
                   <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
                     <td style={tdBase} />
-                    {Array.from({ length: 9 }).map((__, j) => (
+                    {Array.from({ length: 12 }).map((__, j) => (
                       <td key={j} style={tdBase}>
                         <div
                           style={{
@@ -973,7 +993,7 @@ export function InvoicesPage() {
               {/* Empty states */}
               {!loading && displayedRows.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: '60px 24px' }}>
+                  <td colSpan={13} style={{ textAlign: 'center', padding: '60px 24px' }}>
                     {allInvoices.length === 0 && !hasSearch && !hasAdvancedFilters && statusFilter === 'ALL' ? (
                       <div>
                         <div style={{ fontSize: 16, fontWeight: 600, color: T.text, marginBottom: 8 }}>
@@ -1086,26 +1106,46 @@ export function InvoicesPage() {
                       {row.invoiceNumber ?? '—'}
                     </td>
 
+                    {/* Reg No */}
+                    <td style={{ ...tdBase, fontFamily: T.mono, fontSize: 12, color: T.text }}>
+                      {row.registrationNumber ?? '—'}
+                    </td>
+
+                    {/* GSTIN */}
+                    <td style={{ ...tdBase, fontFamily: T.mono, fontSize: 11, color: T.muted }} title={row.gstin ?? row.vendorTaxId ?? undefined}>
+                      {row.gstin ?? row.vendorTaxId ?? '—'}
+                    </td>
+
+                    {/* PAN */}
+                    <td style={{ ...tdBase, fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+                      {row.pan ?? '—'}
+                    </td>
+
                     {/* Date */}
                     <td style={tdBase}>{dateFmt(row.invoiceDate)}</td>
 
-                    {/* Provider */}
+                    {/* Provider + Model */}
                     <td style={tdBase}>
-                      {row.provider ? (
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            background: T.rail,
-                            border: `1px solid ${T.border}`,
-                            borderRadius: 5,
-                            fontSize: 11,
-                            fontWeight: 500,
-                            color: T.muted,
-                          }}
-                        >
-                          {row.provider}
-                        </span>
+                      {row.extractionProvider || row.provider ? (
+                        <div>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              background: row.pipelineMode === 'single' ? '#e8f4fd' : T.rail,
+                              border: `1px solid ${row.pipelineMode === 'single' ? '#b8ddf0' : T.border}`,
+                              borderRadius: 5,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: row.pipelineMode === 'single' ? '#1a6fa0' : T.muted,
+                            }}
+                          >
+                            {row.pipelineMode === 'single' ? 'Single' : 'Split'}
+                          </span>
+                          <div style={{ fontSize: 10, color: T.faint, marginTop: 2 }}>
+                            {row.extractionModel ?? row.extractionProvider ?? row.provider ?? '—'}
+                          </div>
+                        </div>
                       ) : (
                         <span style={{ color: T.faint }}>—</span>
                       )}

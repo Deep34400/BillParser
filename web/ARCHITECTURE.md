@@ -71,3 +71,34 @@ web/
 - **`types/index.ts`** centralizes all TypeScript interfaces shared across the app.
 - **`lib/`** keeps formatting and model utilities separate from React components — pure functions, easy to test.
 - **Pages** are route-level; **components** are reusable within pages; **overlays** are modal UIs that appear over pages.
+
+## Caching Strategy
+
+### Invoice List Cache
+- 30-second TTL client-side cache (`invCache` in `InvoicesPage.tsx`)
+- Invalidated on upload, delete, reextract, import
+- Navigating away and back within 30s uses cached data — instant page load
+
+### Analytics Cache (Two Layers)
+
+**Client-side** (`AnalyticsPage.tsx`):
+- `cachedFetch(key, fetcher)` — 30s TTL per endpoint
+- Switching between tabs/chips uses cached data if fresh
+- Each sub-view (Vehicles, Months, Cost/km, API Costs) is lazy-loaded — only fetched on first click
+
+**Server-side** (`platform/src/lib/cache.ts`):
+- In-memory TTL cache (30s) per analytics endpoint
+- Invalidated when bills are created, deleted, or bulk-modified
+- Prevents repeated DB scans across concurrent requests
+
+### Analytics Split APIs
+Instead of one monolithic `GET /api/analytics`, the frontend calls:
+- `analyticsKpis()` — KPIs + workshops (loaded on page mount)
+- `analyticsVehicles(?q=)` — vehicles (lazy, searchable)
+- `analyticsWorkshops(?q=)` — workshops (searchable)
+- `analyticsMonths()` — monthly spend (lazy)
+- `analyticsCostkm()` — cost/km (lazy)
+- `analyticsCosts()` — OCR API costs (lazy, on "API Costs" tab)
+
+### Search
+Workshops and Vehicles views have debounced search inputs (300ms) that hit server-side filtered endpoints.

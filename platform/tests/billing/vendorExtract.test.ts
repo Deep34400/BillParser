@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveVendorFromMarkdown } from '../../src/billing/vendorExtract.js';
+import { resolveVendorFromMarkdown, isJunkVendorName } from '../../src/billing/vendorExtract.js';
 import type { ParsedInvoiceData } from '../../src/parsing/types.js';
 
 const ARPANNA_MARKDOWN = `
@@ -334,5 +334,25 @@ describe('resolveVendorFromMarkdown — SAI SERVICE (Dealer GSTIN at bottom)', (
     expect(fixed.company_name).toBe('SAI SERVICE PRIVATE LIMITED');
     expect(fixed.gstin).toBe('36AABCS4998M1ZK');
     expect(fixed.pan).toBe('AABCS4998M');
+  });
+});
+
+describe('isJunkVendorName', () => {
+  it('flags bare document titles like Invoice', () => {
+    expect(isJunkVendorName('Invoice')).toBe(true);
+    expect(isJunkVendorName('Tax Invoice')).toBe(true);
+    expect(isJunkVendorName('Receipt')).toBe(true);
+  });
+
+  it('flags raw LLM JSON dumped into company_name', () => {
+    const blob = '{"output":{"entries":[{"parsed_data":{"company_name":"Anysphere, Inc."}}]}}';
+    expect(isJunkVendorName(blob)).toBe(true);
+    expect(isJunkVendorName('"output": {')).toBe(true);
+  });
+
+  it('allows real company names', () => {
+    expect(isJunkVendorName('Anysphere, Inc.')).toBe(false);
+    expect(isJunkVendorName('Vectrio Innovations Private Limited')).toBe(false);
+    expect(isJunkVendorName('Cursor')).toBe(false);
   });
 });

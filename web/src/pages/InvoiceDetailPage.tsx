@@ -704,8 +704,8 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
       label: 'Pipeline',
       value: isSingle
         ? `Single — ${inv.extractionProvider ?? inv.provider ?? '—'} (${inv.extractionModel ?? '—'})`
-        : inv.extractionProvider
-          ? `Split — ${inv.extractionProvider} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)`
+        : (inv.extractionProvider || inv.structuringProvider)
+          ? `Split — ${inv.extractionProvider ?? '—'} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)`
           : (inv.provider ?? '—'),
     },
     ...(inv.fallbackReason

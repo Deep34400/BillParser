@@ -28,6 +28,9 @@ export interface FrontendInvoice {
   vendorName?: string | null;
   vendorAddress?: string | null;
   vendorTaxId?: string | null;
+  gstin?: string | null;
+  pan?: string | null;
+  registrationNumber?: string | null;
   invoiceNumber?: string | null;
   poNumber?: string | null;
   invoiceDate?: string | null;
@@ -108,12 +111,17 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     id: bill.bill_id,
     fileName: bill.storage_path?.split('/').pop() ?? 'invoice.pdf',
     status: STATUS_MAP[bill.ocr_status] ?? 'PENDING',
-    provider: bill.structuring_provider ?? bill.extraction_provider ?? 'mistral',
+    provider: bill.structuring_provider ?? bill.extraction_provider ?? null,
     confidence: bill.confidence_score,
     error: bill.ocr_status === 'FAILED' ? (bill.processing_status ?? 'Processing failed') : null,
     vendorName: bill.vendor_name ?? bill.company_name,
     vendorAddress: null,
     vendorTaxId: bill.vendor_gstin ?? bill.gstin,
+    gstin: bill.vendor_gstin ?? bill.gstin ?? null,
+    pan: bill.pan ?? bill.parsed_data?.pan ?? null,
+    registrationNumber: bill.registration_number
+      ?? bill.parsed_data?.vehicle_details?.registration_number
+      ?? null,
     invoiceNumber: bill.invoice_number,
     poNumber: null,
     invoiceDate: bill.invoice_date,

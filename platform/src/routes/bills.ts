@@ -14,8 +14,28 @@ import { deductTokens, updateUser, getUser } from '../models/users.js';
 import type { UserDoc } from '../models/users.js';
 import { enrichParsedInvoice } from '../billing/normalize.js';
 import { runPipeline } from '../services/billing/structuringService.js';
+import { cacheInvalidate } from '../lib/cache.js';
+import { getSettings } from '../models/settings.js';
 
-/**
+/** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill (so UI shows the chosen model, not mistral). */
+async function applyPipelineSettingsToBill(bill: import('../models/types.js').BillDoc): Promise<void> {
+  const settings = await getSettings();
+  const mode = settings.pipelineMode ?? 'single';
+  bill.pipeline_mode = mode;
+  if (mode === 'single') {
+    const prov = settings.singleProvider ?? 'gemini';
+    const model = settings.singleModel ?? 'gemini-2.5-flash';
+    bill.extraction_provider = prov;
+    bill.structuring_provider = prov;
+    bill.extraction_model = model;
+    bill.structuring_model = model;
+  } else {
+    bill.extraction_provider = 'mistral';
+    bill.structuring_provider = settings.structuringProvider ?? 'gemini';
+    bill.structuring_model = settings.structuringModel ?? 'gemini-2.5-flash';
+    bill.extraction_model = null;
+  }
+}
  * Run OCR pipeline in the background (fire-and-forget).
  * Uses runPipeline() which reads settings from DB for mode + providers.
  */
@@ -55,6 +75,7 @@ function processInBackground(
       }
 
       await updateBillStatus(billId, 'OCR_COMPLETED', bill);
+      cacheInvalidate('analytics');
 
       const parts = extractPartsFromParsed(billId, parsed);
       await saveBillParts(parts);
@@ -212,6 +233,7 @@ export async function billRoutes(app: FastifyInstance) {
             storagePath,
           });
           initialBill.ocr_status = 'PROCESSING';
+          await applyPipelineSettingsToBill(initialBill);
           await createBill(initialBill);
 
           created.push(billId);
@@ -261,6 +283,7 @@ export async function billRoutes(app: FastifyInstance) {
             storagePath,
           });
           initialBill.ocr_status = 'PROCESSING';
+          await applyPipelineSettingsToBill(initialBill);
           await createBill(initialBill);
 
           created.push(billId);
@@ -359,6 +382,7 @@ export async function billRoutes(app: FastifyInstance) {
       if (!bill) return reply.code(404).send({ error: 'Invoice not found' });
       await deletePartsForBill(id);
       await deleteBill(id);
+      cacheInvalidate('analytics');
       return { ok: true };
     } catch (err) {
       return reply.code(500).send({ error: 'Delete failed' });
@@ -376,6 +400,7 @@ export async function billRoutes(app: FastifyInstance) {
           await deletePartsForBill(id);
           await deleteBill(id);
         }
+        cacheInvalidate('analytics');
       } else if (body.action === 'reextract') {
         for (const id of body.ids) {
           await updateBill(id, { ocr_status: 'PROCESSING' } as any);

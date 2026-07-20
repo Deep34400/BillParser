@@ -1,6 +1,6 @@
 import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem } from '../parsing/types.js';
 import { resolveBillSummary, columnNet } from './billSummary.js';
-import { resolveVendorFromMarkdown } from './vendorExtract.js';
+import { resolveVendorFromMarkdown, isJunkVendorName } from './vendorExtract.js';
 import { normalizeInvoiceDateFields } from './dateExtract.js';
 import { normalizeVehicleDetails } from './vehicleExtract.js';
 import { filterLabourLineItems } from './lineItemFilter.js';
@@ -84,12 +84,15 @@ function alignLabourChargesToGross(
 /** Strip junk from company_name: newlines, trailing GST labels, table noise. */
 function cleanCompanyName(name: string | null | undefined): string | null {
   if (!name) return null;
+  // Always drop junk — even when there is no OCR markdown (Gemini single mode).
+  if (isJunkVendorName(name)) return null;
   let s = name
     .replace(/\r?\n/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .replace(/\s*(IGST|CGST|SGST|GST|@\s*\d+%?|Dealer|Authorised|Signatory)\s*$/i, '')
     .trim();
   if (s.length < 2) return null;
+  if (isJunkVendorName(s)) return null;
   return s;
 }
 

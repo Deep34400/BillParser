@@ -161,6 +161,10 @@ export function isJunkVendorName(name: string | null | undefined): boolean {
   if (!t) return false;
   if (looksLikeTableHeader(t)) return true;
   if (/bill\s*\/?\s*cash\s*memo|tax\s*invoice|cash\s*memo|estimate|quotation/i.test(t)) return true;
+  // Bare document titles (SaaS PDFs often title the page "Invoice")
+  if (/^(invoice|bill|receipt|statement|proforma|credit\s*note|debit\s*note|tax\s*invoice)$/i.test(t)) return true;
+  // Raw LLM JSON / schema leakage (e.g. whole {"output":{"entries":…}} dumped into company_name)
+  if (/^\s*[\{\[]/.test(t) || /"parsed_data"\s*:|"output"\s*:\s*\{/.test(t)) return true;
   if (t.length > 70) return true;
   if (t.split(/\s+/).length > 9) return true;
   return false;

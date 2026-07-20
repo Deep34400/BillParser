@@ -60,32 +60,55 @@ function stripCommasFromUnquotedNumbers(json: string): string {
   );
 }
 
-/** Close unbalanced braces/brackets when the model truncates mid-response. */
-function repairTruncatedJson(json: string): string {
-  let s = json.trim();
+/** Close unbalanced / mismatched braces when the model truncates or skips a `}`. */
+export function repairTruncatedJson(json: string): string {
+  let out = '';
   const stack: ('{' | '[')[] = [];
   let inString = false;
   let escape = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
+
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
     if (inString) {
+      out += c;
       if (escape) { escape = false; continue; }
       if (c === '\\') { escape = true; continue; }
       if (c === '"') inString = false;
       continue;
     }
-    if (c === '"') { inString = true; continue; }
-    if (c === '{') stack.push('{');
-    else if (c === '[') stack.push('[');
-    else if (c === '}' && stack[stack.length - 1] === '{') stack.pop();
-    else if (c === ']' && stack[stack.length - 1] === '[') stack.pop();
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === '{') { stack.push('{'); out += c; continue; }
+    if (c === '[') { stack.push('['); out += c; continue; }
+    if (c === '}') {
+      if (stack[stack.length - 1] === '{') {
+        stack.pop();
+        out += c;
+      }
+      // orphan `}` — skip
+      continue;
+    }
+    if (c === ']') {
+      // Gemini often emits `]"confidence":0.95}]` missing `}` for parsed_data —
+      // close open objects before closing the array.
+      while (stack.length && stack[stack.length - 1] === '{') {
+        out += '}';
+        stack.pop();
+      }
+      if (stack[stack.length - 1] === '[') {
+        stack.pop();
+        out += c;
+      }
+      continue;
+    }
+    out += c;
   }
-  if (inString) s += '"';
+
+  if (inString) out += '"';
   while (stack.length) {
     const open = stack.pop();
-    s += open === '{' ? '}' : ']';
+    out += open === '{' ? '}' : ']';
   }
-  return s;
+  return out;
 }
 
 /** Normalize common LLM JSON mistakes before JSON.parse. */

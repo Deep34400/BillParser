@@ -13,21 +13,18 @@ import type { LlmUsage, OcrStepCost } from './types.js';
  * more above 200k context, which isn't tracked separately here.
  */
 const GEMINI_MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gemini-3.5-flash': { input: 0.0015, output: 0.009 },
-  'gemini-3.1-flash-lite': { input: 0.00025, output: 0.0015 },
-  'gemini-3.1-pro-preview': { input: 0.002, output: 0.012 },
-  'gemini-3-flash-preview': { input: 0.0005, output: 0.003 },
-  'gemini-2.5-pro': { input: 0.00125, output: 0.01 },
-  'gemini-2.5-flash': { input: 0.0003, output: 0.0025 },
-  'gemini-2.5-flash-lite': { input: 0.0001, output: 0.0004 },
+  'gemini-3.5-flash':       { input: 0.0015,  output: 0.009  },
+  'gemini-3.1-flash-lite':  { input: 0.00025, output: 0.0015 },
+  'gemini-3.1-pro-preview': { input: 0.002,   output: 0.012  },
+  'gemini-3-flash-preview': { input: 0.0005,  output: 0.003  },
+  'gemini-2.5-pro':         { input: 0.00125, output: 0.01   },
+  'gemini-2.5-flash':       { input: 0.0003,  output: 0.0025 },
+  'gemini-2.5-flash-lite':  { input: 0.0001,  output: 0.0004 },
 };
 
 /**
- * "-latest" aliases get hot-swapped by Google without notice to the exact underlying
- * model, so there's no fixed price for them. Point at today's newest stable model in
- * each tier — update this mapping when Google promotes a new stable release.
- * Note: only "gemini-flash-latest" actually exists — "gemini-pro-latest" 404s on
- * Vertex (confirmed 2026-07), there's no equivalent alias for Pro yet.
+ * "-latest" aliases get hot-swapped by Google without notice.
+ * Map to the newest stable model in each tier (update when Google promotes a new release).
  */
 const GEMINI_ALIAS_PRICING: Record<string, string> = {
   'gemini-flash-latest': 'gemini-3.5-flash',
@@ -39,15 +36,19 @@ const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],
 });
 
-export function estimateGeminiCostUsd(usage: LlmUsage, model: string): number {
+export function geminiPricing(model: string): { input: number; output: number } {
   const resolved = GEMINI_MODEL_PRICING[model] ?? GEMINI_MODEL_PRICING[GEMINI_ALIAS_PRICING[model]];
   if (!resolved) {
     console.warn(`[gemini] no pricing entry for model "${model}" — falling back to gemini-2.5-pro rate (conservative overestimate)`);
   }
-  const pricing = resolved ?? GEMINI_MODEL_PRICING['gemini-2.5-pro'];
+  return resolved ?? GEMINI_MODEL_PRICING['gemini-2.5-pro'];
+}
+
+export function estimateGeminiCostUsd(usage: LlmUsage, model: string): number {
+  const p = geminiPricing(model);
   return (
-    (usage.prompt_tokens / 1000) * pricing.input +
-    (usage.completion_tokens / 1000) * pricing.output
+    (usage.prompt_tokens / 1000) * p.input +
+    (usage.completion_tokens / 1000) * p.output
   );
 }
 
@@ -59,9 +60,18 @@ export interface GeminiGenerateResult {
   authMode: 'api_key' | 'adc';
 }
 
+/**
+ * ALL Gemini models use the Vertex **global** endpoint + ADC.
+ * Regional us-central1 returns 404 for Gemini 3.x; using global for 2.5 as well
+ * keeps one consistent path and higher availability.
+ */
+export function resolveGeminiVertexLocation(_model: string): string {
+  return 'global';
+}
+
 function vertexUrl(model: string): string {
   const project = env.projectId;
-  const location = env.vertexLocation || 'us-central1';
+  const location = resolveGeminiVertexLocation(model);
   // Global endpoint uses aiplatform.googleapis.com (not global-aiplatform.googleapis.com)
   if (location === 'global') {
     return `https://aiplatform.googleapis.com/v1/projects/${project}/locations/global/publishers/google/models/${model}:generateContent`;
@@ -70,7 +80,7 @@ function vertexUrl(model: string): string {
 }
 
 function parseGeminiResponse(json: any): { text: string; usage: LlmUsage } {
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  const text = extractGeminiText(json);
   const meta = json.usageMetadata;
   const usage: LlmUsage = {
     prompt_tokens: meta?.promptTokenCount ?? 0,
@@ -78,6 +88,41 @@ function parseGeminiResponse(json: any): { text: string; usage: LlmUsage } {
     total_tokens: meta?.totalTokenCount ?? 0,
   };
   return { text, usage };
+}
+
+/**
+ * Gemini 3.x thinking models put reasoning in parts with `thought: true`
+ * (or as the first part). We must skip thoughts and pick the JSON answer.
+ */
+export function extractGeminiText(json: any): string {
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    json?.candidates?.[0]?.content?.parts ?? [];
+  const answerParts: string[] = [];
+  const allParts: string[] = [];
+  for (const p of parts) {
+    if (!p?.text) continue;
+    allParts.push(p.text);
+    if (p.thought === true) continue;
+    answerParts.push(p.text);
+  }
+  const candidates = answerParts.length > 0 ? answerParts : allParts;
+  if (candidates.length === 0) return '';
+  // Prefer a part that looks like invoice JSON
+  const jsonish = candidates.find((t) => {
+    const s = t.trim();
+    return (
+      s.startsWith('{') ||
+      s.startsWith('[') ||
+      s.includes('"parsed_data"') ||
+      s.includes('"company_name"') ||
+      s.includes('"output"')
+    );
+  });
+  return (jsonish ?? candidates.join('\n')).trim();
+}
+
+function isGemini3Family(model: string): boolean {
+  return /^gemini-3/i.test(model) || /^gemini-(flash|pro)-latest$/i.test(model);
 }
 
 /**
@@ -91,6 +136,18 @@ export async function geminiGenerateContent(opts: {
   apiKey?: string;
 }): Promise<GeminiGenerateResult> {
   const t0 = Date.now();
+  const gemini3 = isGemini3Family(opts.model);
+  const generationConfig: Record<string, unknown> = {
+    temperature: 0,
+    // Thinking models consume output budget for reasoning — give headroom for the JSON.
+    maxOutputTokens: gemini3 ? 65536 : 16384,
+    responseMimeType: 'application/json',
+  };
+  // Keep thinking minimal so the JSON answer isn't truncated / buried in thought parts.
+  if (gemini3) {
+    generationConfig.thinkingConfig = { thinkingLevel: 'minimal' };
+  }
+
   const body = {
     contents: [{ role: 'user', parts: opts.parts.map((p) => {
       if (p.inlineData) {
@@ -98,11 +155,7 @@ export async function geminiGenerateContent(opts: {
       }
       return { text: p.text ?? '' };
     }) }],
-    generationConfig: {
-      temperature: 0,
-      maxOutputTokens: 16384,
-      responseMimeType: 'application/json',
-    },
+    generationConfig,
   };
 
   const client = await auth.getClient();
@@ -129,9 +182,12 @@ export async function geminiGenerateContent(opts: {
 
   if (!res.ok) {
     const err = await res.text().catch(() => '');
-    const hint = res.status === 403
-      ? ' — grant your ADC user roles/aiplatform.user on this GCP project (Vertex AI User)'
-      : '';
+    let hint = '';
+    if (res.status === 403) {
+      hint = ' — grant your ADC user roles/aiplatform.user on this GCP project (Vertex AI User)';
+    } else if (res.status === 404 && /^gemini-3/i.test(opts.model)) {
+      hint = ' — Gemini 3.x models require the Vertex global endpoint (auto-routed); check model ID spelling and project access';
+    }
     throw new Error(`Gemini (${authMode}, model=${opts.model}) HTTP ${res.status}${hint}: ${err.slice(0, 400)}`);
   }
 

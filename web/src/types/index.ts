@@ -40,6 +40,7 @@ export interface ExtractionRun { id: string; provider: string; structuringModel?
 export interface Invoice {
   id: string; fileName: string; status: InvoiceStatus; provider?: string | null; confidence?: number | null; error?: string | null;
   vendorName?: string | null; vendorAddress?: string | null; vendorTaxId?: string | null;
+  gstin?: string | null; pan?: string | null; registrationNumber?: string | null;
   invoiceNumber?: string | null; poNumber?: string | null; invoiceDate?: string | null; dueDate?: string | null;
   currency?: string | null; subtotal?: number | null; taxAmount?: number | null; totalAmount?: number | null; paymentTerms?: string | null;
   discountAmount?: number | null; cgstAmount?: number | null; sgstAmount?: number | null; igstAmount?: number | null; netAmount?: number | null;
@@ -95,6 +96,7 @@ export interface OcrCostSummary {
   avg_tokens_per_ocr: number;
   by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
 }
+export interface AnalyticsKpis { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; byVendor: { name: string; amount: number }[]; byMonth: { label: string; amount: number }[]; }
 export interface Analytics { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; byVendor: { name: string; amount: number }[]; byMonth: { label: string; amount: number }[]; vehicleSpend: VehicleSpend[]; costPerKm: CostPerKm[]; ocrCosts?: OcrCostSummary; }
 export interface FraudAlert { type: string; severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; message: string; bill_ids: string[]; details: Record<string, unknown>; }
 export interface FraudScanResult { success: boolean; message: string; data: FraudAlert[]; metadata?: { total: number; by_type?: Record<string, number>; by_severity?: Record<string, number> }; }

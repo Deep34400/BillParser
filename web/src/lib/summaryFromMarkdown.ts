@@ -654,6 +654,32 @@ function inferGstRates(t: TotalsAndTaxSummary, data: ParsedInvoiceData): void {
   if (t.labour_igst_rate == null && (t.labour_igst_amount ?? 0) > 0 && lFull != null) t.labour_igst_rate = lFull;
 }
 
+/** Fill null GST amounts from (subtotal − discount) × rate% — mirrors platform billSummary. */
+export function fillMissingGstAmounts(t: TotalsAndTaxSummary): void {
+  for (const side of ['parts', 'labour'] as const) {
+    const sub = t[`${side}_total`];
+    if (sub == null || sub <= 0) continue;
+    const disc = (t[`${side}_discount`] ?? 0) + (t[`${side}_special_discount`] ?? 0);
+    const taxable = roundMoney(sub - disc);
+    if (taxable <= 0) continue;
+
+    const igstRate = t[`${side}_igst_rate`];
+    if (igstRate != null && igstRate > 0 && t[`${side}_igst_amount`] == null) {
+      t[`${side}_igst_amount`] = roundMoney(taxable * igstRate / 100);
+      continue;
+    }
+
+    const cgstRate = t[`${side}_cgst_rate`] ?? t[`${side}_sgst_rate`];
+    const sgstRate = t[`${side}_sgst_rate`] ?? t[`${side}_cgst_rate`];
+    if (cgstRate != null && cgstRate > 0 && t[`${side}_cgst_amount`] == null) {
+      t[`${side}_cgst_amount`] = roundMoney(taxable * cgstRate / 100);
+    }
+    if (sgstRate != null && sgstRate > 0 && t[`${side}_sgst_amount`] == null) {
+      t[`${side}_sgst_amount`] = roundMoney(taxable * sgstRate / 100);
+    }
+  }
+}
+
 function reconcileSideGst(t: TotalsAndTaxSummary): void {
   for (const side of ['parts', 'labour'] as const) {
     if (t[`${side}_total`] === 0) {
@@ -747,6 +773,7 @@ export function resolveBillSummary(data: ParsedInvoiceData, markdown?: string | 
   t.labour_discount = coalesceDiscount(t.labour_discount, t.parts_discount);
 
   inferGstRates(t, data);
+  fillMissingGstAmounts(t);
   reconcileSideGst(t);
   stripCalculatedFooterAmounts(t);
   dedupeSingleColumnDuplicate(t, data, footerParts, footerLabour);

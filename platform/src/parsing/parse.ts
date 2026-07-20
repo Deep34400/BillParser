@@ -1,5 +1,5 @@
 import type {
-  InvoiceSchemaOutput, ParsedInvoiceData, PartsLineItem, LabourServiceLineItem,
+  ParsedInvoiceData, PartsLineItem, LabourServiceLineItem,
   ServiceDetails, VehicleDetails, TotalsAndTaxSummary, ParseResult,
 } from './types.js';
 import { prepareLlmJson, prepareLlmJsonWithRepair, toNum, toStr, toNullableNum, toNullableStr } from './coerce.js';
@@ -72,11 +72,16 @@ function coerceTotals(o: unknown): TotalsAndTaxSummary | null | undefined {
 }
 
 export function coerceParsedInvoiceData(o: Record<string, unknown>): ParsedInvoiceData {
+  // Reject non-string company_name (models sometimes nest JSON objects here)
+  const rawName = o.company_name;
+  const companyName = (typeof rawName === 'string' || rawName == null)
+    ? toNullableStr(rawName)
+    : null;
   return {
     irn: toNullableStr(o.irn),
     pan: toNullableStr(o.pan),
     gstin: toNullableStr(o.gstin),
-    company_name: toNullableStr(o.company_name),
+    company_name: companyName,
     invoice_date: toNullableStr(o.invoice_date),
     invoice_time: toNullableStr(o.invoice_time),
     invoice_number: toNullableStr(o.invoice_number),
@@ -91,19 +96,63 @@ export function coerceParsedInvoiceData(o: Record<string, unknown>): ParsedInvoi
   };
 }
 
-function unwrapSchemaPayload(obj: Record<string, unknown>): ParsedInvoiceData | null {
-  const output = obj.output as InvoiceSchemaOutput['output'] | undefined;
-  const entry = output?.entries?.[0];
-  if (entry?.parsed_data && typeof entry.parsed_data === 'object') {
-    return coerceParsedInvoiceData(entry.parsed_data as Record<string, unknown>);
+/** Pull parsed_data object from whatever wrapper the model returned. */
+function pickParsedDataBlob(obj: Record<string, unknown>): Record<string, unknown> | null {
+  const asRecord = (v: unknown): Record<string, unknown> | null => {
+    if (v == null) return null;
+    if (typeof v === 'string') {
+      try {
+        const p = JSON.parse(v);
+        return p && typeof p === 'object' ? (p as Record<string, unknown>) : null;
+      } catch {
+        return null;
+      }
+    }
+    return typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  };
+
+  // 1) Canonical: { output: { entries: [{ parsed_data }] } }
+  const output = obj.output;
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    const entries = (output as Record<string, unknown>).entries;
+    if (Array.isArray(entries) && entries[0] && typeof entries[0] === 'object') {
+      const pd = asRecord((entries[0] as Record<string, unknown>).parsed_data);
+      if (pd) return pd;
+    }
   }
-  if (obj.parsed_data && typeof obj.parsed_data === 'object') {
-    return coerceParsedInvoiceData(obj.parsed_data as Record<string, unknown>);
+
+  // 2) Gemini shortcut: { output: [{ parsed_data }] }
+  if (Array.isArray(output) && output[0] && typeof output[0] === 'object') {
+    const pd = asRecord((output[0] as Record<string, unknown>).parsed_data);
+    if (pd) return pd;
+    // Sometimes the array item IS the invoice fields
+    const first = output[0] as Record<string, unknown>;
+    if (first.company_name != null || first.gstin != null || first.parts_line_items != null) {
+      return first;
+    }
   }
+
+  // 3) { entries: [{ parsed_data }] }
+  if (Array.isArray(obj.entries) && obj.entries[0] && typeof obj.entries[0] === 'object') {
+    const pd = asRecord((obj.entries[0] as Record<string, unknown>).parsed_data);
+    if (pd) return pd;
+  }
+
+  // 4) { parsed_data: {...} }
+  const top = asRecord(obj.parsed_data);
+  if (top) return top;
+
+  // 5) Flat invoice fields at root
   if (obj.company_name != null || obj.parts_line_items != null || obj.gstin != null) {
-    return coerceParsedInvoiceData(obj);
+    return obj;
   }
+
   return null;
+}
+
+function unwrapSchemaPayload(obj: Record<string, unknown>): ParsedInvoiceData | null {
+  const pd = pickParsedDataBlob(obj);
+  return pd ? coerceParsedInvoiceData(pd) : null;
 }
 
 function isLegacyCanonical(obj: Record<string, unknown>): boolean {

@@ -295,9 +295,22 @@ Managed via `providers/resolveKey.ts`.
 
 #### Automatic Fallback
 
-If the selected structuring provider fails (e.g. Gemini 429 quota):
-- Split mode: falls back to Mistral structuring automatically
-- Single mode: falls back to split mode (Mistral OCR + Mistral structuring)
+| Mode | On failure |
+|------|------------|
+| **Single** | Retry with **gemini-2.5-flash single** (one multimodal call). Never falls back to Mistral split. |
+| **Split** | If OCR/structure fails → fall back to **gemini-2.5-flash single**. Structuring-only failure may retry Gemini 2.5 on the same OCR markdown. |
+
+#### Single vs Split (what they mean)
+
+| | **Single** | **Split** |
+|--|------------|-----------|
+| **API calls** | **1** — model reads the PDF/image and returns JSON | **2** — Mistral OCR → markdown, then LLM → JSON |
+| **When to use** | Default. Faster, cheaper, one provider | When you want Mistral OCR + a separate structuring model |
+| **Fallback** | gemini-2.5-flash single | gemini-2.5-flash single |
+
+**Gemini auth:** All Gemini models use **Vertex global endpoint + ADC** (no API key).
+
+**Why Gemini single used to fall back to Mistral:** Gemini 3.x returns thinking in `parts[0]` and JSON later; old code only read `parts[0]`. Also truncated JSON missing a `}` before `]`. Fixed: skip thought parts, repair mismatched braces, fallback = Gemini 2.5 single only.
 
 ### What happens when you upload a PDF
 
@@ -765,11 +778,18 @@ curl http://localhost:4000/api/invoices/abc-123 \
 
 ### Analytics Endpoints
 
+All analytics endpoints are **server-side cached** (30s TTL, invalidated on bill create/delete).
 
-| Method | Path             | Response                                                                        |
-| ------ | ---------------- | ------------------------------------------------------------------------------- |
-| `GET`  | `/api/analytics` | `{ totalSpend, completedCount, avgConfidence, needsReview, byVendor, byMonth }` |
-| `GET`  | `/api/batches`   | `{ batches: [] }` (stub)                                                        |
+| Method | Path                     | Response                                                                        | Notes                          |
+| ------ | ------------------------ | ------------------------------------------------------------------------------- | ------------------------------ |
+| `GET`  | `/api/analytics/kpis`    | `{ totalSpend, completedCount, ..., byVendor, byMonth, vendorCount, vehicleCount }` | Fast KPIs — loaded first       |
+| `GET`  | `/api/analytics/workshops` | `{ workshops: [{name, amount}] }`                                             | Supports `?q=` search          |
+| `GET`  | `/api/analytics/vehicles`  | `{ vehicles: VehicleSpend[] }`                                                | Supports `?q=` search          |
+| `GET`  | `/api/analytics/months`    | `{ months: [{label, amount}] }`                                               | Monthly spend                  |
+| `GET`  | `/api/analytics/costkm`    | `{ costPerKm: CostPerKm[] }`                                                 | Needs 2+ odometer readings     |
+| `GET`  | `/api/analytics/costs`     | `OcrCostSummary`                                                              | OCR API cost breakdown         |
+| `GET`  | `/api/analytics`           | Full combined response (legacy, backward compat)                               | Slower — loads everything      |
+| `GET`  | `/api/batches`             | `{ batches: [] }` (stub)                                                       |                                |
 
 
 ### Fraud Detection Endpoints
@@ -808,61 +828,96 @@ All return: `{ success, message, data: FraudAlert[], metadata, errors }`
 **Frontend:** `web/src/pages/AnalyticsPage.tsx`
 **Route:** [http://localhost:5173/analytics](http://localhost:5173/analytics)
 
+### Architecture: Split API + Two-Layer Cache
+
+```
+Frontend (React)
+  │
+  ├─ Client-side cache (30s TTL, per-endpoint)
+  │   cachedFetch('kpis', ...) → returns cached data if fresh
+  │
+  ├─ GET /api/analytics/kpis     ← Page load (KPI cards + workshop list)
+  ├─ GET /api/analytics/vehicles ← Lazy: only when "Vehicles" chip clicked
+  ├─ GET /api/analytics/months   ← Lazy: only when "By month" chip clicked
+  ├─ GET /api/analytics/costkm   ← Lazy: only when "Cost / km" chip clicked
+  └─ GET /api/analytics/costs    ← Lazy: only when "API Costs" tab clicked
+         │
+Backend (Fastify)
+  │
+  ├─ Server-side in-memory cache (30s TTL)
+  │   lib/cache.ts → cacheGet/cacheSet per endpoint
+  │   Invalidated on bill create/delete/update
+  │
+  └─ services/analytics/analyticsService.ts
+       └─ listBills() → single DB read per cache-miss
+```
+
+**Why split?** With lakhs/crores of records, loading all analytics in one call is slow.
+Each tab loads only what it needs, and both client + server cache the results.
+
+### Search
+
+Workshops and Vehicles endpoints support `?q=` query parameter for server-side filtering:
+- `GET /api/analytics/workshops?q=fort` → workshops containing "fort"
+- `GET /api/analytics/vehicles?q=MH01` → vehicles matching "MH01"
+
+Frontend debounces search input (300ms) and shows results instantly.
+
+### Cache Invalidation
+
+```
+Bill mutation (create/delete/bulk) → cacheInvalidate('analytics')
+                                      → Clears all analytics:* server cache keys
+                                      → Next request fetches fresh data
+```
+
 ### What the Analytics page shows
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Analytics                                                       │
-│  Spend across 5 extracted invoices                              │
+│  15 invoices · 10 workshops · 11 vehicles                       │
+│                                                                  │
+│  [Spend Overview]  [API Costs]          ← Main tabs              │
 │                                                                  │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
 │  │TOTAL SPEND│ │  PARTS   │ │ LABOUR   │ │ TAX PAID │  ...      │
-│  │ ₹32,440  │ │ ₹12,960  │ │ ₹16,875  │ │ ₹4,948   │           │
+│  │ ₹80.0K   │ │ ₹49.1K   │ │ ₹48.2K   │ │ ₹7.0K    │           │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
 │                                                                  │
-│  ┌────────────────────────┐ ┌────────────────────────┐          │
-│  │ Top vendors by spend   │ │ Spend by month          │         │
-│  │ Arpanna Motors ██████  │ │ 2026-05 ██████          │         │
-│  │ JSB Mobility  ████    │ │ 2026-06 ████            │         │
-│  └────────────────────────┘ └────────────────────────┘          │
+│  [Workshops (10)] [Vehicles (11)] [By month (14)] [Cost/km (0)] │
+│   ↑ default       ↑ lazy           ↑ lazy           ↑ lazy      │
 │                                                                  │
-│  ┌────────────────────────┐ ┌────────────────────────┐          │
-│  │ Vehicle spend breakdown│ │ Cost per kilometer      │         │
-│  │ MH01EW8853   ₹6,488   │ │ MH01EW8853  ₹2.31/km  │         │
-│  │  3 bills | Parts ₹2.5k│ │  Total ₹12k | 5200 km  │         │
-│  └────────────────────────┘ └────────────────────────┘          │
+│  🔍 Search workshops…                   ← Search input          │
+│  ┌────────────────────────────────────────────────┐              │
+│  │ # │ Workshop / Vendor           │ Spend  │ Share│             │
+│  │ 1 │ Vectrio Innovations         │ ₹17.7K │ 22% │             │
+│  │ 2 │ TYRESNMORE ONLINE           │ ₹16.4K │ 21% │             │
+│  └────────────────────────────────────────────────┘              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Analytics API: `GET /api/analytics`
+### Analytics API endpoints
 
-Returns:
-
-
-| Field            | Type   | Description                                    |
-| ---------------- | ------ | ---------------------------------------------- |
-| `totalSpend`     | number | Sum of grand_total_amount                      |
-| `totalParts`     | number | Sum of parts_amount                            |
-| `totalLabour`    | number | Sum of labour_amount                           |
-| `totalTax`       | number | Sum of total_tax_amount                        |
-| `completedCount` | number | Bills with OCR_COMPLETED or VERIFIED           |
-| `avgConfidence`  | number | Average confidence score (0-1)                 |
-| `needsReview`    | number | Bills with confidence < 0.75                   |
-| `byVendor`       | array  | Top 10 vendors by spend                        |
-| `byMonth`        | array  | Monthly spend totals                           |
-| `vehicleSpend`   | array  | Per-vehicle spend breakdown                    |
-| `costPerKm`      | array  | Cost/km for vehicles with 2+ odometer readings |
-
+| Endpoint                 | Response                                                       | Cached | Searchable |
+| ------------------------ | -------------------------------------------------------------- | ------ | ---------- |
+| `GET /api/analytics/kpis`       | KPIs + byVendor + byMonth                                | Yes    | No         |
+| `GET /api/analytics/workshops`  | `{ workshops: [{name, amount}] }`                         | Via kpis | Yes (`?q=`) |
+| `GET /api/analytics/vehicles`   | `{ vehicles: VehicleSpend[] }`                            | Yes    | Yes (`?q=`) |
+| `GET /api/analytics/months`     | `{ months: [{label, amount}] }`                           | Via kpis | No         |
+| `GET /api/analytics/costkm`     | `{ costPerKm: CostPerKm[] }`                             | Yes    | No         |
+| `GET /api/analytics/costs`      | `OcrCostSummary` (provider breakdown, tokens, USD/INR)    | Yes    | No         |
 
 ### Backend functions
 
-
 | Function               | File                  | What it does                                |
 | ---------------------- | --------------------- | ------------------------------------------- |
+| `computeKpis()`        | `routes/analytics.ts` | KPIs + vendor + month aggregation (cached)  |
 | `getVehicleSpend()`    | `analyticsService.ts` | Groups bills by vehicle, sums amounts       |
 | `getVendorAnalytics()` | `analyticsService.ts` | Groups bills by vendor name                 |
 | `getCostPerKm()`       | `analyticsService.ts` | min/max odometer → cost_per_km = spend / km |
 | `getDashboard()`       | `analyticsService.ts` | Full aggregation (status, type, totals)     |
+| `getOcrCostSummary()`  | `analyticsService.ts` | OCR API cost breakdown by provider          |
 
 
 ---
@@ -956,7 +1011,7 @@ All return: `{ success, message, data: FraudAlert[], metadata: { total, by_type,
 | --------------------- | --------------- | -------------------------------------------------------------------------- |
 | **InvoicesPage**      | `/invoices`     | `list`, `batches`, `config`, `upload`, `import`, `bulk`, `cancel`          |
 | **InvoiceDetailPage** | `/invoices/:id` | `get`, `config`, `patch`, `reextract`, `del`, `fileUrl`, `bakeoff`         |
-| **AnalyticsPage**     | `/analytics`    | `analytics` (KPIs + vendor + monthly + vehicle + cost/km)                  |
+| **AnalyticsPage**     | `/analytics`    | `analyticsKpis`, `analyticsVehicles`, `analyticsMonths`, `analyticsCostkm`, `analyticsCosts` (lazy per tab) |
 | **FraudPage**         | `/fraud`        | `fraudScan`, `fraudDuplicates`, `fraudGst`, `fraudPrices`, `fraudOdometer` |
 | **SettingsPage**      | `/settings`     | `settings`, `revealCreds`, `saveSettings`, `saveCreds`, `clearCreds`       |
 
@@ -1022,6 +1077,7 @@ In production, nginx does the same proxy.
 | `lib/billToInvoice.ts`                      | BillDoc → frontend Invoice shape                       |
 | `lib/storage.ts`                            | Cloud Storage upload/download                          |
 | `lib/devStore.ts`                           | In-memory Maps for LOCAL_DEV mode                      |
+| `lib/cache.ts`                              | Server-side TTL cache (30s) for analytics endpoints    |
 
 
 ---

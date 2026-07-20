@@ -15,16 +15,16 @@
  */
 
 export const OCR_PROMPT =
-  'You are an OCR engine. Transcribe this Indian automotive service invoice to GitHub-flavored Markdown. ' +
-  'Preserve ALL text verbatim — letterhead, addresses, GSTIN lines, line-item tables, and the bill ' +
-  'summary footer (Sub Total, Discount, CGST, SGST, Net Bill Amount). ' +
-  'Keep section labels ("Bill To", "Consignee", "Details of Receiver", etc.) as-is. ' +
+  'You are an OCR engine. Transcribe this invoice/bill to GitHub-flavored Markdown. ' +
+  'Preserve ALL text verbatim — letterhead, addresses, tax IDs (GSTIN/VAT/ABN/EIN), line-item tables, ' +
+  'and the bill summary footer (Sub Total, Discount, Tax, Total). ' +
+  'Keep section labels ("Bill To", "Ship To", "From", etc.) as-is. ' +
   'Output only the transcription — no commentary, no code fences.';
 
 export const OCR_HEADER_PROMPT =
   'You are an OCR engine. This image is the top/header section of an invoice. Transcribe it to ' +
-  'plain Markdown. Capture company names, GSTIN, PAN, IRN, invoice number, date/time, ' +
-  'vehicle registration, chassis, odometer, and service details. ' +
+  'plain Markdown. Capture company names, tax IDs (GSTIN/PAN/IRN/VAT/ABN/EIN), invoice number, date/time, ' +
+  'and any vehicle/service/subscription details. ' +
   'Keep section labels intact. Output only the transcription — no commentary, no code fences.';
 
 /** Minified skeleton — smaller/faster for structuring prompts. */
@@ -84,22 +84,25 @@ export const SCHEMA_JSON_EXAMPLE = `{
 }`;
 
 export const STRUCTURING_PROMPT =
-  'You are an automotive/service invoice parser. Given OCR markdown of ONE invoice, return ONLY minified JSON matching this exact shape:\n' +
+  'You are an invoice parser. Given OCR markdown (or a document image) of ONE invoice, return ONLY minified JSON matching this exact shape:\n' +
   SCHEMA_JSON_SKELETON +
   '\nRules:\n' +
   '- Return exactly ONE entry in output.entries.\n' +
   '- Use null for unknown fields. Numbers as JSON numbers with NO commas (1823.76 not 1,823.76).\n' +
   '- invoice_date as DD/MM/YYYY; invoice_time as HH:MM:SS. If combined, split them.\n' +
-  '- company_name = the business that ISSUED the invoice (seller/workshop/dealer). gstin and pan = seller\'s.\n' +
-  '- parts_line_items = physical parts/spares rows; labour_service_line_items = labour/service rows.\n' +
+  '- company_name = the business that ISSUED the invoice (seller/vendor/service provider). gstin and pan = seller\'s.\n' +
+  '  Never use the page title alone ("Invoice", "Tax Invoice", "Receipt").\n' +
+  '  For SaaS/Stripe-style bills: use the legal entity (e.g. "Anysphere, Inc.") or the From-section brand ("Cursor").\n' +
+  '  Bill To / customer / ship-to is NOT company_name. US EIN / Tax ID → pan when no GSTIN.\n' +
+  '- parts_line_items = physical goods/products/parts; labour_service_line_items = services, subscriptions, labour.\n' +
+  '  For SaaS/subscription invoices: put the plan/line items in labour_service_line_items.\n' +
   '- Line items are GROSS (amount BEFORE any discount). taxable_amount = quantity × rate.\n' +
   '- labour_charges = gross charge (before discount).\n' +
-  '- hsn_sac_code = 4–8 digit HSN/SAC code, not a tax percentage.\n' +
-  '- tax_percentage = GST % for that line (0–28); null if not printed.\n' +
-  '- totals_and_tax_summary: copy printed footer values. Two columns: Parts | Labour.\n' +
-  '  parts_total/labour_total = gross subtotals; parts_discount/labour_discount = printed discounts.\n' +
-  '  CGST/SGST/IGST rates and amounts = copy from footer as printed.\n' +
-  '  grand_total_invoice = final net amount.\n' +
-  '- Intra-state = CGST+SGST; inter-state = IGST.\n' +
+  '- hsn_sac_code = HSN/SAC code if printed. Do NOT put tax percentages here.\n' +
+  '- tax_percentage = tax % for that line (GST/VAT/Sales Tax); null if not printed.\n' +
+  '- totals_and_tax_summary: copy printed footer values.\n' +
+  '  For Indian GST invoices: split into Parts and Labour columns (CGST/SGST intra-state, IGST inter-state).\n' +
+  '  For non-GST invoices: put all tax in the labour_ fields (labour_igst_rate/amount for single-rate tax).\n' +
+  '  grand_total_invoice = final total amount due.\n' +
   '- confidence: 0..1 reflecting extraction certainty.\n' +
   '- No prose, no markdown fences, no comments — JSON only.';

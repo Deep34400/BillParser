@@ -59,6 +59,35 @@ function inferGstRates(t: TotalsAndTaxSummary, data: ParsedInvoiceData): void {
 }
 
 /**
+ * When rates exist but amounts are missing (common in Gemini single — no OCR markdown),
+ * fill CGST/SGST/IGST from (subtotal − discount) × rate%. Only fills null/undefined — never overwrites.
+ */
+export function fillMissingGstAmounts(t: TotalsAndTaxSummary): void {
+  for (const side of ['parts', 'labour'] as const) {
+    const sub = t[`${side}_total`];
+    if (sub == null || sub <= 0) continue;
+    const disc = (t[`${side}_discount`] ?? 0) + (t[`${side}_special_discount`] ?? 0);
+    const taxable = roundMoney(sub - disc);
+    if (taxable <= 0) continue;
+
+    const igstRate = t[`${side}_igst_rate`];
+    if (igstRate != null && igstRate > 0 && t[`${side}_igst_amount`] == null) {
+      t[`${side}_igst_amount`] = roundMoney(taxable * igstRate / 100);
+      continue; // IGST and CGST+SGST are mutually exclusive
+    }
+
+    const cgstRate = t[`${side}_cgst_rate`] ?? t[`${side}_sgst_rate`];
+    const sgstRate = t[`${side}_sgst_rate`] ?? t[`${side}_cgst_rate`];
+    if (cgstRate != null && cgstRate > 0 && t[`${side}_cgst_amount`] == null) {
+      t[`${side}_cgst_amount`] = roundMoney(taxable * cgstRate / 100);
+    }
+    if (sgstRate != null && sgstRate > 0 && t[`${side}_sgst_amount`] == null) {
+      t[`${side}_sgst_amount`] = roundMoney(taxable * sgstRate / 100);
+    }
+  }
+}
+
+/**
  * GST-law cleanup per side:
  *  - a side with zero subtotal cannot carry any GST;
  *  - IGST (inter-state) and CGST+SGST (intra-state) are mutually exclusive — when IGST is charged,
@@ -207,6 +236,7 @@ export function resolveBillSummary(
   t.labour_discount = coalesceDiscount(t.labour_discount, t.parts_discount);
 
   inferGstRates(t, data);
+  fillMissingGstAmounts(t);
   reconcileSideGst(t);
   stripCalculatedFooterAmounts(t);
   dedupeSingleColumnDuplicate(t, data, footerParts, footerLabour);

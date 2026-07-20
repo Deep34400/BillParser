@@ -1,4 +1,4 @@
-import type { Invoice, AppConfig, SettingsData, Analytics, ExtractionRun, Batch, FraudScanResult } from '../types/index.js';
+import type { Invoice, AppConfig, SettingsData, Analytics, AnalyticsKpis, VehicleSpend, CostPerKm, OcrCostSummary, ExtractionRun, Batch, FraudScanResult } from '../types/index.js';
 const BASE = '';
 
 function getAuthHeaders(): Record<string, string> {
@@ -79,9 +79,15 @@ export const api = {
   bakeoff: (id: string) => j<{ runs: ExtractionRun[] }>(`/api/invoices/${id}/bakeoff`, { method: 'POST' }),
   applyRun: (id: string, runId: string) => j(`/api/invoices/${id}/apply-run`, { method: 'POST', body: JSON.stringify({ runId }) }),
   patch: (id: string, body: unknown) => j<Invoice>(`/api/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  del: (id: string) => j(`/api/invoices/${id}`, { method: 'DELETE' }),
+  del: (id: string) => fetch(BASE + `/api/invoices/${id}`, { method: 'DELETE', headers: (() => { const h: Record<string, string> = {}; const t = localStorage.getItem('session_token'); if (t) h['authorization'] = `Bearer ${t}`; return h; })() }).then(async (res) => { if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error((b as any).message ?? (b as any).error ?? `HTTP ${res.status}`); } return res.json(); }),
   bulk: (action: string, ids: string[]) => j('/api/invoices/bulk', { method: 'POST', body: JSON.stringify({ action, ids }) }),
   analytics: () => j<Analytics>('/api/analytics'),
+  analyticsKpis: () => j<AnalyticsKpis>('/api/analytics/kpis'),
+  analyticsVehicles: (q?: string) => j<{ vehicles: VehicleSpend[] }>(`/api/analytics/vehicles${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  analyticsWorkshops: (q?: string) => j<{ workshops: { name: string; amount: number }[] }>(`/api/analytics/workshops${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  analyticsMonths: () => j<{ months: { label: string; amount: number }[] }>('/api/analytics/months'),
+  analyticsCostkm: () => j<{ costPerKm: CostPerKm[] }>('/api/analytics/costkm'),
+  analyticsCosts: () => j<OcrCostSummary>('/api/analytics/costs'),
   fraudScan: () => j<FraudScanResult>('/api/fraud/scan'),
   fraudDuplicates: () => j<FraudScanResult>('/api/fraud/duplicates'),
   fraudGst: () => j<FraudScanResult>('/api/fraud/gst-anomalies'),
@@ -92,7 +98,7 @@ export const api = {
   revealCreds: () => j<{ credentials: Record<string, Record<string, string>> }>('/api/settings/reveal'),
   saveSettings: (b: unknown) => j('/api/settings', { method: 'PUT', body: JSON.stringify(b) }),
   saveCreds: (provider: string, b: unknown) => j(`/api/settings/providers/${provider}`, { method: 'PUT', body: JSON.stringify(b) }),
-  clearCreds: (provider: string) => j(`/api/settings/providers/${provider}`, { method: 'DELETE' }),
+  clearCreds: (provider: string) => fetch(BASE + `/api/settings/providers/${provider}`, { method: 'DELETE', headers: (() => { const h: Record<string, string> = {}; const t = localStorage.getItem('session_token'); if (t) h['authorization'] = `Bearer ${t}`; return h; })() }).then(async (res) => { if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error((b as any).message ?? (b as any).error ?? `HTTP ${res.status}`); } return res.json(); }),
   upload: async (files: File[], batchName?: string) => {
     const fd = new FormData();
     if (batchName) fd.append('batchName', batchName);

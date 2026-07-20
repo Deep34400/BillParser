@@ -55,7 +55,11 @@ async function geminiSingle(buf: Buffer, modelOverride?: string): Promise<Single
   });
   const cost = toGeminiStepCost(r);
   const structured = structureFromLlmResponse(r.text, '');
-  if (!structured.parsedData) throw new Error('Gemini single returned no parsed_data');
+  if (!structured.parsedData) {
+    throw new Error(
+      `Gemini single returned no parsed_data (model=${r.model}): ${structured.error ?? 'unrecognized JSON'} | raw[0..300]=${(r.text ?? '').slice(0, 300)}`,
+    );
+  }
   return { parsed: structured.parsedData, rawOcr: r.text, cost };
 }
 
