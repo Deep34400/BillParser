@@ -36,6 +36,8 @@ async function applyPipelineSettingsToBill(bill: import('../models/types.js').Bi
     bill.extraction_model = null;
   }
 }
+
+/**
  * Run OCR pipeline in the background (fire-and-forget).
  * Uses runPipeline() which reads settings from DB for mode + providers.
  */
