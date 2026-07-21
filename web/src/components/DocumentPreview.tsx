@@ -14,8 +14,9 @@ interface FieldRow {
 }
 
 function displayStatus(inv: Invoice): string {
-  if (inv.status === 'COMPLETED' && (inv.confidence ?? 1) < 0.75 && !inv.verified) {
-    return 'NEEDS_REVIEW';
+  if (inv.status === 'COMPLETED' && !inv.verified) {
+    if ((inv.confidence ?? 1) < 0.75) return 'NEEDS_REVIEW';
+    if ((inv.reviewReasons?.length ?? 0) > 0) return 'NEEDS_REVIEW';
   }
   return inv.status;
 }

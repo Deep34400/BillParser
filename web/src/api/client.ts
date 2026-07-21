@@ -67,7 +67,7 @@ export type AccountInfo = SessionUser;
 
 export const api = {
   config: () => j<AppConfig>('/api/config'),
-  list: (qs: string) => j<{ invoices: Invoice[] }>(`/api/invoices${qs}`),
+  list: (qs: string) => j<{ invoices: Invoice[]; total: number; page: number; pageSize: number; totalPages: number }>(`/api/invoices${qs}`),
   get: (id: string) => j<Invoice>(`/api/invoices/${id}`),
   fileUrl: (id: string) => {
     const token = localStorage.getItem('session_token');

@@ -11,8 +11,10 @@ import { usePolling } from '../hooks/usePolling.js';
 
 /* Client-side invoice list cache (30s TTL) */
 const INV_CACHE_TTL = 30_000;
-let invCache: { invoices: Invoice[]; batches: Batch[]; at: number } | null = null;
+let invCache: { invoices: Invoice[]; batches: Batch[]; total: number; page: number; pageSize: number; totalPages: number; at: number } | null = null;
 export function invalidateInvoiceCache() { invCache = null; }
+
+const DEFAULT_PAGE_SIZE = 10;
 
 type SortKey = 'status' | 'vendorName' | 'invoiceDate' | 'confidence' | 'totalAmount';
 type SortDir = 'asc' | 'desc';
@@ -37,12 +39,16 @@ function buildQs(params: Record<string, string | undefined>): string {
   return s ? '?' + s : '';
 }
 
+function needsReview(inv: Invoice): boolean {
+  if (inv.status !== 'COMPLETED' || inv.verified) return false;
+  if ((inv.confidence ?? 1) < 0.75) return true;
+  return (inv.reviewReasons?.length ?? 0) > 0;
+}
+
 function applyClientFilters(invoices: Invoice[], statusFilter: StatusFilter): Invoice[] {
   if (statusFilter === 'ALL') return invoices;
   if (statusFilter === 'NEEDS_REVIEW') {
-    return invoices.filter(
-      (inv) => inv.status === 'COMPLETED' && (inv.confidence ?? 1) < 0.75 && !inv.verified,
-    );
+    return invoices.filter(needsReview);
   }
   return invoices.filter((inv) => inv.status === statusFilter);
 }
@@ -61,9 +67,7 @@ function countsByStatus(invoices: Invoice[]): Record<StatusFilter, number> {
     else if (inv.status === 'PROCESSING') counts.PROCESSING++;
     else if (inv.status === 'COMPLETED') counts.COMPLETED++;
     else if (inv.status === 'FAILED') counts.FAILED++;
-    if (inv.status === 'COMPLETED' && (inv.confidence ?? 1) < 0.75 && !inv.verified) {
-      counts.NEEDS_REVIEW++;
-    }
+    if (needsReview(inv)) counts.NEEDS_REVIEW++;
   }
   return counts;
 }
@@ -78,7 +82,7 @@ const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
 ];
 
 function rowDisplayStatus(inv: Invoice): string {
-  if (inv.status === 'COMPLETED' && (inv.confidence ?? 1) < 0.75 && !inv.verified) return 'NEEDS_REVIEW';
+  if (needsReview(inv)) return 'NEEDS_REVIEW';
   return inv.status;
 }
 
@@ -88,6 +92,10 @@ export function InvoicesPage() {
   // Data state
   const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Filter / sort state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -121,35 +129,41 @@ export function InvoicesPage() {
   // Debounce ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchAll = useCallback(async () => {
+  const fetchPage = useCallback(async (page: number, size: number) => {
+    setLoading(true);
     try {
-      if (invCache && Date.now() - invCache.at < INV_CACHE_TTL) {
+      const cacheKey = `${page}-${size}`;
+      if (invCache && Date.now() - invCache.at < INV_CACHE_TTL && invCache.page === page && invCache.pageSize === size) {
         setAllInvoices(invCache.invoices);
         setBatches(invCache.batches);
+        setTotalRecords(invCache.total);
+        setTotalPages(invCache.totalPages);
+        setCurrentPage(invCache.page);
         return;
       }
-      const [inv, bat] = await Promise.all([api.list(''), api.batches().catch(() => ({ batches: [] }))]);
-      invCache = { invoices: inv.invoices, batches: bat.batches, at: Date.now() };
+      const qs = `?page=${page}&pageSize=${size}`;
+      const [inv, bat] = await Promise.all([api.list(qs), api.batches().catch(() => ({ batches: [] }))]);
+      invCache = { invoices: inv.invoices, batches: bat.batches, total: inv.total, page: inv.page, pageSize: inv.pageSize, totalPages: inv.totalPages, at: Date.now() };
       setAllInvoices(inv.invoices);
       setBatches(bat.batches);
+      setTotalRecords(inv.total);
+      setTotalPages(inv.totalPages);
+      setCurrentPage(inv.page);
     } catch (_e) {
       // silently ignore
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   const refetch = useCallback(async () => {
-    setLoading(true);
-    try {
-      await fetchAll();
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchAll]);
+    await fetchPage(currentPage, pageSize);
+  }, [fetchPage, currentPage, pageSize]);
 
-  // Initial load
+  // Fetch when page or pageSize changes
   useEffect(() => {
-    void refetch();
-  }, [refetch]);
+    void fetchPage(currentPage, pageSize);
+  }, [fetchPage, currentPage, pageSize]);
 
   // Also call api.config on mount (as per spec / test mock)
   useEffect(() => {
@@ -671,7 +685,9 @@ export function InvoicesPage() {
         <div style={{
           flex: '1.35 1 0', minWidth: 0, background: T.surface,
           border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden',
+          display: 'flex', flexDirection: 'column',
         }}>
+          <div style={{ flex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 280px)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: T.font }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${T.border}`, background: '#FAF9F5' }}>
@@ -813,6 +829,54 @@ export function InvoicesPage() {
               })}
             </tbody>
           </table>
+          </div>
+
+          {/* Pagination bar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '12px 16px', borderTop: '1px solid #E4E1D3', fontSize: 13, color: '#67665D',
+          }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+              Showing page {currentPage} of {totalPages} ({totalRecords.toLocaleString()} records)
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                Page size
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); invalidateInvoiceCache(); }}
+                  style={{
+                    padding: '4px 8px', border: '1px solid #E4E1D3', borderRadius: 4,
+                    fontSize: 13, background: '#fff', cursor: 'pointer',
+                  }}
+                >
+                  {[10, 25, 50, 100].map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+              <button
+                disabled={currentPage <= 1 || loading}
+                onClick={() => { setCurrentPage((p) => p - 1); invalidateInvoiceCache(); }}
+                style={{
+                  padding: '6px 16px', fontSize: 13, fontWeight: 500, borderRadius: 4,
+                  border: '1px solid #E4E1D3', background: currentPage <= 1 ? '#f5f5f0' : '#fff',
+                  color: currentPage <= 1 ? '#aaa' : '#1B1D19', cursor: currentPage <= 1 ? 'default' : 'pointer',
+                }}
+              >
+                Previous
+              </button>
+              <button
+                disabled={currentPage >= totalPages || loading}
+                onClick={() => { setCurrentPage((p) => p + 1); invalidateInvoiceCache(); }}
+                style={{
+                  padding: '6px 16px', fontSize: 13, fontWeight: 500, borderRadius: 4,
+                  border: '1px solid #E4E1D3', background: currentPage >= totalPages ? '#f5f5f0' : '#fff',
+                  color: currentPage >= totalPages ? '#aaa' : '#1B1D19', cursor: currentPage >= totalPages ? 'default' : 'pointer',
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
 
         <DocumentPreview invoice={previewInvoice} />
