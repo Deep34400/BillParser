@@ -5,7 +5,7 @@ import type { Invoice, Batch } from '../types/index.js';
 import { T } from '../theme.js';
 import { money, dateFmt, costFmt } from '../lib/format.js';
 import { StatusDot } from '../components/StatusDot.js';
-import { ConfidenceBar } from '../components/ConfidenceBar.js';
+import { DocumentPreview } from '../components/DocumentPreview.js';
 import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
 
@@ -77,13 +77,10 @@ const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'NEEDS_REVIEW', label: 'Needs review' },
 ];
 
-const SORT_COLS: { key: SortKey; label: string; align?: 'right' }[] = [
-  { key: 'status', label: 'Status' },
-  { key: 'vendorName', label: 'Vendor' },
-  { key: 'invoiceDate', label: 'Date' },
-  { key: 'confidence', label: 'Confidence' },
-  { key: 'totalAmount', label: 'Total', align: 'right' },
-];
+function rowDisplayStatus(inv: Invoice): string {
+  if (inv.status === 'COMPLETED' && (inv.confidence ?? 1) < 0.75 && !inv.verified) return 'NEEDS_REVIEW';
+  return inv.status;
+}
 
 export function InvoicesPage() {
   const navigate = useNavigate();
@@ -112,8 +109,10 @@ export function InvoicesPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [dragging, setDragging] = useState(false);
 
-  // Selection state
+  // Selection state (bulk checkboxes)
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Row focused in the right-hand document preview panel
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   // Toast / banner state
   const [toast, setToast] = useState('');
@@ -306,10 +305,30 @@ export function InvoicesPage() {
     }
   }
 
-  // Export CSV helper
-  function exportCsv(path: string) {
+  // Export CSV — must use fetch with JWT (window.open cannot send Authorization)
+  async function exportCsv(path: string) {
     const qs = buildQs({ q: q || undefined, minTotal: minTotal || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
-    window.open(path + qs, '_blank');
+    try {
+      const token = localStorage.getItem('session_token');
+      const res = await fetch(path + qs, {
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = path.includes('line-items') ? 'line-items.csv' : 'invoices.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setToast('Export failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    }
   }
 
   // Upload handler
@@ -395,193 +414,116 @@ export function InvoicesPage() {
   const isAllSelected = displayedRows.length > 0 && selected.size === displayedRows.length;
   const isPartialSelected = selected.size > 0 && selected.size < displayedRows.length;
 
-  // Skeleton rows for loading state
+  // Keep preview on a visible row
+  useEffect(() => {
+    if (displayedRows.length === 0) {
+      setPreviewId(null);
+      return;
+    }
+    if (!previewId || !displayedRows.some((r) => r.id === previewId)) {
+      setPreviewId(displayedRows[0].id);
+    }
+  }, [displayedRows, previewId]);
+
+  const previewInvoice =
+    displayedRows.find((r) => r.id === previewId) ?? displayedRows[0] ?? null;
+
   const skeletonRows = Array.from({ length: 5 });
 
+  const btnSecondary: React.CSSProperties = {
+    padding: '7px 14px',
+    border: `1px solid ${T.border}`,
+    borderRadius: 8,
+    background: T.surface,
+    color: T.ink,
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: 'pointer',
+    fontFamily: T.font,
+  };
+
   return (
-    <div style={{ background: T.bg, minHeight: '100vh', fontFamily: T.font }}>
-      {/* Duplicate banner */}
+    <div style={{ background: T.paper, minHeight: '100%', fontFamily: T.font }}>
       {duplicateBanner && (
-        <div
-          style={{
-            background: '#fbf4e6',
-            borderBottom: `1px solid #e8d99a`,
-            padding: '10px 30px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            fontSize: 13,
-            color: T.amber,
-            fontWeight: 500,
-          }}
-        >
+        <div style={{
+          background: T.warnSoft, borderBottom: `1px solid #E8D4B0`,
+          padding: '10px 28px', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', fontSize: 13, color: T.warn, fontWeight: 500,
+        }}>
           <span>
             {duplicateBanner.count} duplicate{duplicateBanner.count !== 1 ? 's' : ''} skipped — these files were already uploaded.
           </span>
-          <button
-            onClick={() => setDuplicateBanner(null)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: T.amber,
-              fontWeight: 700,
-              fontSize: 16,
-              lineHeight: 1,
-              padding: '0 4px',
-            }}
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
+          <button onClick={() => setDuplicateBanner(null)} aria-label="Dismiss" style={{
+            background: 'none', border: 'none', cursor: 'pointer', color: T.warn, fontWeight: 700, fontSize: 16,
+          }}>×</button>
         </div>
       )}
 
-      {/* Header bar */}
-      <div
-        style={{
-          padding: '24px 30px',
-          borderBottom: `1px solid ${T.border}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: T.panel,
-          gap: 16,
-          flexWrap: 'wrap',
-        }}
-      >
-        {/* Left: title + count */}
+      {/* Header */}
+      <div style={{
+        padding: '22px 28px 16px', display: 'flex', alignItems: 'flex-start',
+        justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
+      }}>
         <div>
-          <div style={{ fontSize: 21, fontWeight: 700, color: T.text, lineHeight: 1.2 }}>
+          <div style={{ fontFamily: T.heading, fontSize: 26, fontWeight: 600, color: T.ink, lineHeight: 1.2 }}>
             Invoices
           </div>
-          <div style={{ fontSize: 13, color: T.muted, marginTop: 2 }}>
+          <div style={{ fontSize: 13, color: T.inkSoft, marginTop: 4 }}>
             {loading && allInvoices.length === 0
               ? 'Loading…'
               : `${displayedRows.length} invoice${displayedRows.length !== 1 ? 's' : ''}`}
           </div>
         </div>
 
-        {/* Right: controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {/* Search */}
           <input
             type="text"
-            placeholder="Search vendor, invoice #, file…"
+            placeholder="Search vendor, invoice #, file"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             style={{
-              width: 288,
-              padding: '7px 12px',
-              border: `1px solid ${T.border}`,
-              borderRadius: 7,
-              fontSize: 13,
-              fontFamily: T.font,
-              color: T.text,
-              background: T.rail,
-              outline: 'none',
+              width: 260, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8,
+              fontSize: 13, fontFamily: T.font, color: T.ink, background: T.surface, outline: 'none',
             }}
           />
-
-          {/* Batch filter */}
           <select
             aria-label="Filter by batch"
             value={batchFilter}
             onChange={(e) => setBatchFilter(e.target.value)}
-            style={{ padding: '7px 12px', border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: T.rail, outline: 'none', maxWidth: 200 }}
+            style={{ ...btnSecondary, maxWidth: 180 }}
           >
             <option value="">All batches</option>
             {batches.map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
-
-          {/* Filters toggle */}
-          <button
-            onClick={() => setShowFilters((v) => !v)}
-            style={{
-              padding: '7px 14px',
-              border: `1px solid ${T.border}`,
-              borderRadius: 7,
-              background: showFilters ? T.accentSoft : T.panel,
-              color: showFilters ? T.accent : T.text,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: T.font,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
+          <button onClick={() => setShowFilters((v) => !v)} style={{
+            ...btnSecondary,
+            background: showFilters ? T.accentSoft : T.surface,
+            color: showFilters ? T.accent : T.ink,
+          }}>
             Filters
             {hasAdvancedFilters && (
-              <span
-                style={{
-                  background: T.accent,
-                  color: '#fff',
-                  borderRadius: 10,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: '1px 6px',
-                  minWidth: 18,
-                  textAlign: 'center',
-                }}
-              >
+              <span style={{
+                marginLeft: 6, background: T.accent, color: '#fff', borderRadius: 10,
+                fontSize: 11, fontWeight: 700, padding: '1px 6px',
+              }}>
                 {[minTotal, dateFrom, dateTo].filter(Boolean).length}
               </span>
             )}
           </button>
-
-          {/* Export CSV */}
-          <button
-            onClick={() => exportCsv('/api/invoices/export/csv')}
-            style={{
-              padding: '7px 14px',
-              border: `1px solid ${T.border}`,
-              borderRadius: 7,
-              background: T.panel,
-              color: T.text,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: T.font,
-            }}
-          >
+          <button onClick={() => void exportCsv('/api/invoices/export/csv')} style={btnSecondary}>
             Export CSV
           </button>
-
-          {/* Items CSV */}
-          <button
-            onClick={() => exportCsv('/api/invoices/export/line-items.csv')}
-            style={{
-              padding: '7px 14px',
-              border: `1px solid ${T.border}`,
-              borderRadius: 7,
-              background: T.panel,
-              color: T.text,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: T.font,
-            }}
-          >
+          <button onClick={() => void exportCsv('/api/invoices/export/line-items.csv')} style={btnSecondary}>
             Items CSV
           </button>
-
-          {/* Upload bills */}
           <button
             onClick={() => setShowUpload((v) => !v)}
             style={{
-              padding: '7px 14px',
-              border: 'none',
-              borderRadius: 7,
-              background: showUpload ? T.accentHover : T.accent,
-              color: '#fff',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: T.font,
+              padding: '8px 16px', border: 'none', borderRadius: 8,
+              background: showUpload ? T.accentHover : T.accent, color: '#fff',
+              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
             }}
           >
             Upload bills
@@ -589,180 +531,73 @@ export function InvoicesPage() {
         </div>
       </div>
 
-      {/* Advanced filters panel */}
+      {/* Advanced filters */}
       {showFilters && (
-        <div
-          style={{
-            margin: '12px 30px 0',
-            padding: '16px 20px',
-            background: T.rail,
-            border: `1px solid ${T.border}`,
-            borderRadius: 9,
-            display: 'flex',
-            alignItems: 'flex-end',
-            gap: 16,
-            flexWrap: 'wrap',
-          }}
-        >
+        <div style={{
+          margin: '0 28px 12px', padding: '16px 20px', background: T.surface,
+          border: `1px solid ${T.border}`, borderRadius: 10,
+          display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap',
+        }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-              MIN TOTAL ($)
-            </div>
-            <input
-              type="number"
-              placeholder="0"
-              value={minTotal}
-              onChange={(e) => setMinTotal(e.target.value)}
-              style={{
-                padding: '6px 10px',
-                border: `1px solid ${T.border}`,
-                borderRadius: 6,
-                fontSize: 13,
-                fontFamily: T.font,
-                color: T.text,
-                background: T.panel,
-                width: 120,
-              }}
-            />
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>MIN TOTAL</div>
+            <input type="number" placeholder="0" value={minTotal} onChange={(e) => setMinTotal(e.target.value)}
+              style={{ padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, fontFamily: T.font, width: 120 }} />
           </div>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-              ISSUED FROM
-            </div>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              style={{
-                padding: '6px 10px',
-                border: `1px solid ${T.border}`,
-                borderRadius: 6,
-                fontSize: 13,
-                fontFamily: T.font,
-                color: T.text,
-                background: T.panel,
-              }}
-            />
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>ISSUED FROM</div>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              style={{ padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, fontFamily: T.font }} />
           </div>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 4 }}>
-              ISSUED TO
-            </div>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              style={{
-                padding: '6px 10px',
-                border: `1px solid ${T.border}`,
-                borderRadius: 6,
-                fontSize: 13,
-                fontFamily: T.font,
-                color: T.text,
-                background: T.panel,
-              }}
-            />
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>ISSUED TO</div>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              style={{ padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, fontFamily: T.font }} />
           </div>
-          <button
-            onClick={() => {
-              setMinTotal('');
-              setDateFrom('');
-              setDateTo('');
-            }}
-            style={{
-              padding: '7px 14px',
-              border: `1px solid ${T.border}`,
-              borderRadius: 6,
-              background: T.panel,
-              color: T.muted,
-              fontSize: 13,
-              cursor: 'pointer',
-              fontFamily: T.font,
-            }}
-          >
+          <button onClick={() => { setMinTotal(''); setDateFrom(''); setDateTo(''); }} style={btnSecondary}>
             Clear filters
           </button>
         </div>
       )}
 
-      {/* Upload drop zone */}
+      {/* Upload */}
       {showUpload && (
         <div
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
+          onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
           style={{
-            margin: '12px 30px 0',
-            padding: '32px 24px',
-            border: `2px dashed ${dragging ? T.accent : T.border}`,
-            borderRadius: 10,
-            background: dragging ? T.accentSoft : T.panel,
-            textAlign: 'center',
-            transition: 'background 0.15s, border-color 0.15s',
+            margin: '0 28px 12px', padding: '28px 24px',
+            border: `2px dashed ${dragging ? T.accent : T.border}`, borderRadius: 10,
+            background: dragging ? T.accentSoft : T.surface, textAlign: 'center',
           }}
         >
-          <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 6 }}>
-            Drop PDF invoices here
-          </div>
-          <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>
-            or browse to select files
-          </div>
-          <input
-            type="text"
-            aria-label="Batch name"
-            placeholder="Batch name (optional)"
-            value={batchName}
+          <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 6 }}>Drop PDF invoices here</div>
+          <div style={{ fontSize: 13, color: T.inkSoft, marginBottom: 16 }}>or browse to select files</div>
+          <input type="text" aria-label="Batch name" placeholder="Batch name (optional)" value={batchName}
             onChange={(e) => setBatchName(e.target.value)}
-            style={{ display: 'block', margin: '0 auto 14px', maxWidth: 280, width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 13, fontFamily: T.font, color: T.text, background: T.rail, outline: 'none' }}
-          />
-          <label
-            style={{
-              display: 'inline-block',
-              padding: '8px 20px',
-              background: T.accent,
-              color: '#fff',
-              borderRadius: 7,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: busy ? 'default' : 'pointer',
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
+            style={{ display: 'block', margin: '0 auto 14px', maxWidth: 280, width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: T.font }} />
+          <label style={{
+            display: 'inline-block', padding: '8px 20px', background: T.accent, color: '#fff',
+            borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+          }}>
             {busy ? 'Uploading…' : 'Browse files'}
-            <input
-              type="file"
-              multiple
-              accept="application/pdf,.pdf"
-              disabled={busy}
-              style={{ display: 'none' }}
+            <input type="file" multiple accept="application/pdf,.pdf" disabled={busy} style={{ display: 'none' }}
               onChange={(e) => {
                 const input = e.currentTarget;
-                if (input.files && input.files.length > 0) {
-                  void handleFiles(input.files);
-                }
-                // reset so selecting the same file again still fires onChange
+                if (input.files?.length) void handleFiles(input.files);
                 input.value = '';
               }}
             />
           </label>
           <div style={{ marginTop: 18, borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 8 }}>
-              …or paste URLs / server file paths, one per line
-            </div>
-            <textarea
-              aria-label="Import URLs or paths"
+            <div style={{ fontSize: 12, color: T.inkSoft, marginBottom: 8 }}>…or paste URLs / server file paths, one per line</div>
+            <textarea aria-label="Import URLs or paths" value={importText} onChange={(e) => setImportText(e.target.value)} rows={3}
               placeholder={'https://bucket.s3.amazonaws.com/invoice.pdf\n/data/import/invoice.pdf'}
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              rows={3}
-              style={{ width: '100%', maxWidth: 480, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 7, fontSize: 12, fontFamily: T.mono, color: T.text, background: T.rail, outline: 'none', resize: 'vertical' }}
+              style={{ width: '100%', maxWidth: 480, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12, fontFamily: T.mono, resize: 'vertical' }}
             />
             <div>
-              <button
-                onClick={() => void handleImport()}
-                disabled={busy}
-                style={{ marginTop: 10, padding: '8px 20px', background: T.accent, color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, fontFamily: T.font }}
-              >
+              <button onClick={() => void handleImport()} disabled={busy} style={{
+                marginTop: 10, padding: '8px 20px', background: T.accent, color: '#fff', border: 'none',
+                borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, fontFamily: T.font,
+              }}>
                 {busy ? 'Importing…' : 'Import'}
               </button>
             </div>
@@ -770,405 +605,201 @@ export function InvoicesPage() {
         </div>
       )}
 
-      {/* Status filter pill row */}
-      <div
-        style={{
-          padding: '12px 30px 0',
-          display: 'flex',
-          gap: 6,
-          flexWrap: 'wrap',
-        }}
-      >
+      {/* Status pills */}
+      <div style={{ padding: '4px 28px 0', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {STATUS_PILLS.map(({ key, label }) => {
           const active = statusFilter === key;
-          const count = counts[key];
           return (
-            <button
-              key={key}
-              onClick={() => setStatusFilter(key)}
-              style={{
-                padding: '5px 14px',
-                borderRadius: 20,
-                border: `1px solid ${active ? T.accent : T.border}`,
-                background: active ? T.accentSoft : T.panel,
-                color: active ? T.accent : T.muted,
-                fontSize: 13,
-                fontWeight: active ? 600 : 400,
-                cursor: 'pointer',
-                fontFamily: T.font,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                transition: 'all 0.12s',
-              }}
-            >
+            <button key={key} onClick={() => setStatusFilter(key)} style={{
+              padding: '6px 14px', borderRadius: 999,
+              border: `1px solid ${active ? T.accent : T.border}`,
+              background: active ? T.accent : T.surface,
+              color: active ? '#fff' : T.inkSoft,
+              fontSize: 13, fontWeight: active ? 600 : 500, cursor: 'pointer', fontFamily: T.font,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
               {label}
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: active ? T.accent : T.faint,
-                  background: active ? '#d8d4ff' : '#f0ede8',
-                  borderRadius: 10,
-                  padding: '1px 7px',
-                  minWidth: 18,
-                  textAlign: 'center',
-                }}
-              >
-                {count}
+              <span style={{
+                fontSize: 11, fontWeight: 600,
+                color: active ? '#fff' : T.inkFaint,
+                background: active ? 'rgba(255,255,255,0.22)' : '#F0EEE6',
+                borderRadius: 10, padding: '1px 7px', minWidth: 18, textAlign: 'center',
+              }}>
+                {counts[key]}
               </span>
             </button>
           );
         })}
       </div>
 
-      {/* Batch progress banner */}
       {batchFilter && (() => {
         const b = batches.find((x) => x.id === batchFilter);
         if (!b) return null;
         const pct = b.total ? Math.round((b.completed / b.total) * 100) : 0;
         return (
-          <div style={{ margin: '12px 30px 0', padding: '12px 16px', background: T.rail, border: `1px solid ${T.border}`, borderRadius: 9 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 8 }}>
+          <div style={{ margin: '12px 28px 0', padding: '12px 16px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
               <span>{b.name}</span>
-              <span style={{ color: T.muted, fontWeight: 500 }}>
+              <span style={{ color: T.inkSoft, fontWeight: 500 }}>
                 {b.completed}/{b.total} done{b.failed ? ` · ${b.failed} failed` : ''}{b.processing ? ` · ${b.processing} in progress` : ''}
               </span>
             </div>
-            <div style={{ height: 6, borderRadius: 3, background: '#e8e3da', overflow: 'hidden' }}>
+            <div style={{ height: 6, borderRadius: 3, background: T.border, overflow: 'hidden' }}>
               <div style={{ width: `${pct}%`, height: '100%', background: T.accent, transition: 'width 0.3s' }} />
             </div>
           </div>
         );
       })()}
 
-      {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div
-          style={{
-            margin: '12px 30px 0',
-            padding: '10px 16px',
-            background: '#1f1b30',
-            borderRadius: 8,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
-            {selected.size} selected
-          </span>
-          <button
-            onClick={() => void handleBulkReextract()}
-            style={bulkBtn}
-          >
-            Re-extract
-          </button>
-          <button
-            onClick={() => exportCsv('/api/invoices/export/csv')}
-            style={bulkBtn}
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={() => void handleBulkDelete()}
-            style={{ ...bulkBtn, color: '#ff8080' }}
-          >
-            Delete
-          </button>
-          <button
-            onClick={() => setSelected(new Set())}
-            style={{ ...bulkBtn, marginLeft: 'auto' }}
-          >
-            Clear
-          </button>
+        <div style={{
+          margin: '12px 28px 0', padding: '10px 16px', background: T.ink, borderRadius: 8,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{selected.size} selected</span>
+          <button onClick={() => void handleBulkReextract()} style={bulkBtn}>Re-extract</button>
+          <button onClick={() => void exportCsv('/api/invoices/export/csv')} style={bulkBtn}>Export CSV</button>
+          <button onClick={() => void handleBulkDelete()} style={{ ...bulkBtn, color: '#ffb0a8' }}>Delete</button>
+          <button onClick={() => setSelected(new Set())} style={{ ...bulkBtn, marginLeft: 'auto' }}>Clear</button>
         </div>
       )}
 
-      {/* Main content area */}
-      <div style={{ padding: '16px 30px 40px' }}>
-        {/* Table */}
-        <div
-          style={{
-            background: T.panel,
-            border: `1px solid ${T.border}`,
-            borderRadius: 10,
-            overflow: 'hidden',
-          }}
-        >
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 13,
-              fontFamily: T.font,
-            }}
-          >
+      {/* Two-column: table + preview */}
+      <div className="inv-split" style={{
+        padding: '16px 28px 40px', display: 'flex', gap: 16, alignItems: 'flex-start',
+      }}>
+        <div style={{
+          flex: '1.35 1 0', minWidth: 0, background: T.surface,
+          border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden',
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: T.font }}>
             <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}`, background: T.rail }}>
+              <tr style={{ borderBottom: `1px solid ${T.border}`, background: '#FAF9F5' }}>
                 <th style={thBase}>
                   <input
                     type="checkbox"
                     checked={isAllSelected}
-                    ref={(el) => {
-                      if (el) el.indeterminate = isPartialSelected;
-                    }}
+                    ref={(el) => { if (el) el.indeterminate = isPartialSelected; }}
                     onChange={toggleAll}
                     style={{ cursor: 'pointer' }}
                   />
                 </th>
-                {/* Status */}
-                <th
-                  style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => toggleSort('status')}
-                >
+                <th style={{ ...thBase, cursor: 'pointer' }} onClick={() => toggleSort('status')}>
                   Status {sort === 'status' ? (dir === 'asc' ? '▲' : '▼') : ''}
                 </th>
-                {/* Vendor */}
-                <th
-                  style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => toggleSort('vendorName')}
-                >
+                <th style={{ ...thBase, cursor: 'pointer' }} onClick={() => toggleSort('vendorName')}>
                   Vendor {sort === 'vendorName' ? (dir === 'asc' ? '▲' : '▼') : ''}
                 </th>
-                {/* Invoice # */}
-                <th style={thBase}>Invoice #</th>
-                {/* Reg */}
-                <th style={thBase}>Reg No</th>
-                {/* GSTIN */}
-                <th style={thBase}>GSTIN</th>
-                {/* PAN */}
-                <th style={thBase}>PAN</th>
-                {/* Date */}
-                <th
-                  style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => toggleSort('invoiceDate')}
-                >
+                <th style={{ ...thBase, cursor: 'pointer' }} onClick={() => toggleSort('invoiceDate')}>
                   Date {sort === 'invoiceDate' ? (dir === 'asc' ? '▲' : '▼') : ''}
                 </th>
-                {/* Pipeline / Model */}
                 <th style={thBase}>Pipeline</th>
-                {/* Confidence */}
-                <th
-                  style={{ ...thBase, cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => toggleSort('confidence')}
-                >
-                  Confidence {sort === 'confidence' ? (dir === 'asc' ? '▲' : '▼') : ''}
-                </th>
-                {/* Items */}
                 <th style={{ ...thBase, textAlign: 'right' }}>Items</th>
-                {/* Total */}
-                <th
-                  style={{ ...thBase, textAlign: 'right', cursor: 'pointer', userSelect: 'none' }}
-                  onClick={() => toggleSort('totalAmount')}
-                >
+                <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer' }} onClick={() => toggleSort('totalAmount')}>
                   Total {sort === 'totalAmount' ? (dir === 'asc' ? '▲' : '▼') : ''}
                 </th>
-                {/* Cost */}
                 <th style={{ ...thBase, textAlign: 'right' }}>Cost</th>
               </tr>
             </thead>
             <tbody>
-              {/* Loading skeleton */}
-              {loading && allInvoices.length === 0 &&
-                skeletonRows.map((_, i) => (
-                  <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                    <td style={tdBase} />
-                    {Array.from({ length: 12 }).map((__, j) => (
-                      <td key={j} style={tdBase}>
-                        <div
-                          style={{
-                            height: 14,
-                            borderRadius: 4,
-                            background: '#ede9e2',
-                            width: j === 1 ? '70%' : j === 7 ? '50%' : '60%',
-                            animation: 'shimmer 1.4s ease-in-out infinite',
-                          }}
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+              {loading && allInvoices.length === 0 && skeletonRows.map((_, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={tdBase} />
+                  {Array.from({ length: 7 }).map((__, j) => (
+                    <td key={j} style={tdBase}>
+                      <div style={{ height: 14, borderRadius: 4, background: '#EDEAE2', width: j === 1 ? '70%' : '55%' }} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
 
-              {/* Empty states */}
               {!loading && displayedRows.length === 0 && (
                 <tr>
-                  <td colSpan={13} style={{ textAlign: 'center', padding: '60px 24px' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '56px 24px' }}>
                     {allInvoices.length === 0 && !hasSearch && !hasAdvancedFilters && statusFilter === 'ALL' ? (
                       <div>
-                        <div style={{ fontSize: 16, fontWeight: 600, color: T.text, marginBottom: 8 }}>
-                          No invoices yet
-                        </div>
-                        <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>
-                          Upload your first invoice to get started.
-                        </div>
-                        <button
-                          onClick={() => setShowUpload(true)}
-                          style={{
-                            padding: '9px 20px',
-                            background: T.accent,
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: 7,
-                            fontSize: 13,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            fontFamily: T.font,
-                          }}
-                        >
+                        <div style={{ fontFamily: T.heading, fontSize: 16, fontWeight: 600, color: T.ink, marginBottom: 8 }}>No invoices yet</div>
+                        <div style={{ fontSize: 13, color: T.inkSoft, marginBottom: 20 }}>Upload your first invoice to get started.</div>
+                        <button onClick={() => setShowUpload(true)} style={{
+                          padding: '9px 20px', background: T.accent, color: '#fff', border: 'none',
+                          borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
+                        }}>
                           Upload bills
                         </button>
                       </div>
                     ) : (
-                      <div style={{ color: T.muted, fontSize: 13 }}>
-                        No invoices match your search or filter.
-                      </div>
+                      <div style={{ color: T.inkSoft, fontSize: 13 }}>No invoices match this filter.</div>
                     )}
                   </td>
                 </tr>
               )}
 
-              {/* Data rows */}
               {displayedRows.map((row) => {
-                const isSelected = selected.has(row.id);
+                const isChecked = selected.has(row.id);
+                const isPreview = previewInvoice?.id === row.id;
                 return (
                   <tr
                     key={row.id}
-                    onClick={() => navigate('/invoices/' + row.id)}
+                    tabIndex={0}
+                    onClick={() => setPreviewId(row.id)}
+                    onDoubleClick={() => navigate('/invoices/' + row.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') navigate('/invoices/' + row.id);
+                      if (e.key === ' ') { e.preventDefault(); setPreviewId(row.id); }
+                    }}
                     style={{
                       borderBottom: `1px solid ${T.border}`,
-                      background: isSelected ? T.accentSoft : undefined,
+                      background: isPreview ? T.accentSoft : undefined,
                       cursor: 'pointer',
-                      transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected) (e.currentTarget as HTMLTableRowElement).style.background = '#fbf8f3';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected) (e.currentTarget as HTMLTableRowElement).style.background = '';
                     }}
                   >
-                    {/* Checkbox */}
-                    <td
-                      style={{ ...tdBase, width: 40 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleRow(row.id);
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleRow(row.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ cursor: 'pointer' }}
-                      />
+                    <td style={{ ...tdBase, width: 36 }} onClick={(e) => { e.stopPropagation(); toggleRow(row.id); }}>
+                      <input type="checkbox" checked={isChecked} onChange={() => toggleRow(row.id)}
+                        onClick={(e) => e.stopPropagation()} style={{ cursor: 'pointer' }} />
                     </td>
-
-                    {/* Status */}
                     <td style={tdBase}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <StatusDot status={row.status} />
+                        <StatusDot status={rowDisplayStatus(row)} />
                         {(row.status === 'PROCESSING' || row.status === 'PENDING') && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleCancel(row.id);
-                            }}
-                            title="Stop this extraction"
-                            style={stopBtn}
-                          >
-                            Stop
-                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); void handleCancel(row.id); }}
+                            title="Stop this extraction" style={stopBtn}>Stop</button>
                         )}
                       </div>
                     </td>
-
-                    {/* Vendor */}
                     <td style={tdBase}>
-                      <div style={{ fontWeight: 600, color: T.text }}>
-                        {row.vendorName ?? '—'}
-                      </div>
-                      {(row.fileName || row.vendorAddress) && (
-                        <div style={{ fontSize: 11, color: T.faint, marginTop: 2 }}>
-                          {row.fileName || row.vendorAddress}
+                      <div style={{ fontWeight: 600, color: T.accent }}>{row.vendorName ?? '—'}</div>
+                      {row.fileName && (
+                        <div style={{ fontSize: 11, color: T.inkFaint, marginTop: 2, fontFamily: T.mono }}>
+                          {row.fileName}
                         </div>
                       )}
-                      {row.batch && (
-                        <span style={{ display: 'inline-block', marginTop: 4, padding: '1px 7px', background: T.accentSoft, color: T.accent, borderRadius: 5, fontSize: 10, fontWeight: 600 }}>
-                          {row.batch.name}
-                        </span>
-                      )}
                     </td>
-
-                    {/* Invoice # */}
-                    <td style={{ ...tdBase, fontFamily: T.mono, color: T.muted }}>
-                      {row.invoiceNumber ?? '—'}
-                    </td>
-
-                    {/* Reg No */}
-                    <td style={{ ...tdBase, fontFamily: T.mono, fontSize: 12, color: T.text }}>
-                      {row.registrationNumber ?? '—'}
-                    </td>
-
-                    {/* GSTIN */}
-                    <td style={{ ...tdBase, fontFamily: T.mono, fontSize: 11, color: T.muted }} title={row.gstin ?? row.vendorTaxId ?? undefined}>
-                      {row.gstin ?? row.vendorTaxId ?? '—'}
-                    </td>
-
-                    {/* PAN */}
-                    <td style={{ ...tdBase, fontFamily: T.mono, fontSize: 11, color: T.muted }}>
-                      {row.pan ?? '—'}
-                    </td>
-
-                    {/* Date */}
-                    <td style={tdBase}>{dateFmt(row.invoiceDate)}</td>
-
-                    {/* Provider + Model */}
+                    <td style={{ ...tdBase, color: T.inkSoft }}>{dateFmt(row.invoiceDate)}</td>
                     <td style={tdBase}>
                       {row.extractionProvider || row.provider ? (
                         <div>
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              padding: '2px 8px',
-                              background: row.pipelineMode === 'single' ? '#e8f4fd' : T.rail,
-                              border: `1px solid ${row.pipelineMode === 'single' ? '#b8ddf0' : T.border}`,
-                              borderRadius: 5,
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: row.pipelineMode === 'single' ? '#1a6fa0' : T.muted,
-                            }}
-                          >
+                          <span style={{
+                            display: 'inline-block', padding: '2px 8px',
+                            background: row.pipelineMode === 'single' ? T.accentSoft : '#F3F2EC',
+                            border: `1px solid ${row.pipelineMode === 'single' ? '#C5D4E4' : T.border}`,
+                            borderRadius: 5, fontSize: 11, fontWeight: 600,
+                            color: row.pipelineMode === 'single' ? T.accent : T.inkSoft,
+                          }}>
                             {row.pipelineMode === 'single' ? 'Single' : 'Split'}
                           </span>
-                          <div style={{ fontSize: 10, color: T.faint, marginTop: 2 }}>
+                          <div style={{ fontSize: 10, color: T.inkFaint, marginTop: 2, fontFamily: T.mono }}>
                             {row.extractionModel ?? row.extractionProvider ?? row.provider ?? '—'}
                           </div>
                         </div>
-                      ) : (
-                        <span style={{ color: T.faint }}>—</span>
-                      )}
+                      ) : <span style={{ color: T.inkFaint }}>—</span>}
                     </td>
-
-                    {/* Confidence */}
-                    <td style={tdBase}>
-                      <ConfidenceBar value={row.confidence} verified={row.verified} />
-                    </td>
-
-                    {/* Items */}
-                    <td style={{ ...tdBase, textAlign: 'right', color: T.muted }}>
+                    <td style={{ ...tdBase, textAlign: 'right', color: T.inkSoft, fontFamily: T.mono }}>
                       {row.itemCount ?? '—'}
                     </td>
-
-                    {/* Total — prefer the final Net Bill Amount when present */}
-                    <td style={{ ...tdBase, textAlign: 'right', fontWeight: 600, color: T.text }}>
-                      {money(row.netAmount ?? row.totalAmount, row.currency ?? 'USD')}
+                    <td style={{ ...tdBase, textAlign: 'right', fontWeight: 600, fontFamily: T.mono, color: T.ink }}>
+                      {money(row.netAmount ?? row.totalAmount, row.currency ?? 'INR')}
                     </td>
-
-                    {/* Cost (total; hover for the extraction/structuring split) */}
-                    <td
-                      style={{ ...tdBase, textAlign: 'right', color: row.costEstimate ? T.text : T.green, fontWeight: 500 }}
+                    <td style={{ ...tdBase, textAlign: 'right', fontFamily: T.mono, color: T.inkSoft }}
                       title={
                         row.pipelineMode === 'single'
                           ? `Single call ${costFmt(row.costEstimate)}`
@@ -1183,51 +814,43 @@ export function InvoicesPage() {
             </tbody>
           </table>
         </div>
+
+        <DocumentPreview invoice={previewInvoice} />
       </div>
 
-      {/* Toast */}
       {toast && (
-        <Toast
-          message={toast}
-          actionLabel="Dismiss"
-          onAction={() => setToast('')}
-        />
+        <Toast message={toast} actionLabel="Dismiss" onAction={() => setToast('')} />
       )}
-
-      {/* Shimmer keyframes (injected inline via style tag trick) */}
-      <style>{`@keyframes shimmer{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
     </div>
   );
 }
 
-// Style constants
 const thBase: React.CSSProperties = {
   padding: '10px 14px',
   textAlign: 'left',
   fontSize: 11,
   fontWeight: 600,
-  color: '#8d877c',
+  color: '#67665D',
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
   whiteSpace: 'nowrap',
 };
 
 const tdBase: React.CSSProperties = {
-  padding: '11px 14px',
+  padding: '12px 14px',
   verticalAlign: 'middle',
-  color: '#1c1a17',
+  color: '#1B1D19',
 };
 
 const stopBtn: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid #e0b4b4',
-  color: '#c0392b',
+  border: '1px solid #E8B4B0',
+  color: '#B3261E',
   borderRadius: 5,
   fontSize: 11,
   fontWeight: 600,
   padding: '2px 8px',
   cursor: 'pointer',
-  lineHeight: 1.4,
 };
 
 const bulkBtn: React.CSSProperties = {
