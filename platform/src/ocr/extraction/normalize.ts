@@ -1,6 +1,6 @@
 import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem, VehicleDetails } from '../parsing/types.js';
 import { resolveBillSummary, columnNet } from './billSummary.js';
-import { resolveVendorFromMarkdown, isJunkVendorName } from './vendorExtract.js';
+import { resolveVendorFromMarkdown, isJunkVendorName, isLlmJsonBlob } from './vendorExtract.js';
 import { normalizeInvoiceDateFields } from './dateExtract.js';
 
 // ── Vehicle registration normalization ──────────────────────────
@@ -200,21 +200,24 @@ function fillPanFromGstin(pan: string | null | undefined, gstin: string | null |
  * Post-parse cleanup: fix parts taxable from qty×rate, resolve bill summary via single pipeline.
  */
 export function enrichParsedInvoice(data: ParsedInvoiceData, markdown?: string): ParsedInvoiceData {
-  const vendorResolved = resolveVendorFromMarkdown(data, markdown);
-  const dates = normalizeInvoiceDateFields(vendorResolved, markdown);
-  const vehicle = normalizeVehicleDetails(vendorResolved.vehicle_details, markdown);
+  // Single-mode rawOcr is LLM JSON — only use real OCR markdown for vendor/date fallbacks.
+  const ocrMarkdown = markdown && !isLlmJsonBlob(markdown) ? markdown : undefined;
+
+  const vendorResolved = resolveVendorFromMarkdown(data, ocrMarkdown);
+  const dates = normalizeInvoiceDateFields(vendorResolved, ocrMarkdown);
+  const vehicle = normalizeVehicleDetails(vendorResolved.vehicle_details, ocrMarkdown);
   const withDates = {
     ...vendorResolved,
     ...dates,
     vehicle_details: vehicle,
     company_name: cleanCompanyName(vendorResolved.company_name),
-    invoice_number: fallbackInvoiceNumber(vendorResolved.invoice_number, markdown),
+    invoice_number: fallbackInvoiceNumber(vendorResolved.invoice_number, ocrMarkdown),
     pan: fillPanFromGstin(vendorResolved.pan, vendorResolved.gstin),
   };
   const labourRaw = filterLabourLineItems(
     (withDates.labour_service_line_items ?? []).map(normalizeLabourLineItem),
   );
-  const summary = resolveBillSummary(withDates, markdown);
+  const summary = resolveBillSummary(withDates, ocrMarkdown);
   const parts = alignPartsTaxableToGross(
     (withDates.parts_line_items ?? []).map(normalizePartsLineItem),
     summary.parts_total,
@@ -223,6 +226,6 @@ export function enrichParsedInvoice(data: ParsedInvoiceData, markdown?: string):
   const enriched = { ...withDates, parts_line_items: parts, labour_service_line_items: labour };
   return {
     ...enriched,
-    totals_and_tax_summary: resolveBillSummary(enriched, markdown),
+    totals_and_tax_summary: resolveBillSummary(enriched, ocrMarkdown),
   };
 }

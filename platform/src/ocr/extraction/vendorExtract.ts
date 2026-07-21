@@ -155,6 +155,14 @@ function findForSignatoryName(rawLines: string[]): string | null {
   return candidates.find((c) => c.nearSignatory)?.name ?? candidates[0]?.name ?? null;
 }
 
+/** True when text is LLM structured JSON (single-mode rawOcr), not OCR markdown. */
+export function isLlmJsonBlob(text: string | null | undefined): boolean {
+  if (!text?.trim()) return false;
+  const t = text.trim();
+  if (t[0] !== '{' && t[0] !== '[') return false;
+  return /"parsed_data"\s*:/.test(t) || /"output"\s*:\s*\{/.test(t);
+}
+
 /** A vendor name that is clearly a document blob / boilerplate, not a real company name. */
 export function isJunkVendorName(name: string | null | undefined): boolean {
   const t = name?.trim();
@@ -165,6 +173,8 @@ export function isJunkVendorName(name: string | null | undefined): boolean {
   if (/^(invoice|bill|receipt|statement|proforma|credit\s*note|debit\s*note|tax\s*invoice)$/i.test(t)) return true;
   // Raw LLM JSON / schema leakage (e.g. whole {"output":{"entries":…}} dumped into company_name)
   if (/^\s*[\{\[]/.test(t) || /"parsed_data"\s*:|"output"\s*:\s*\{/.test(t)) return true;
+  // Trailing JSON braces wrongly captured as a name (e.g. "}}]}}")
+  if (/^[}\]\s{]+$/.test(t)) return true;
   if (t.length > 70) return true;
   if (t.split(/\s+/).length > 9) return true;
   return false;
@@ -313,6 +323,8 @@ export function resolveVendorFromMarkdown(
   markdown?: string,
 ): ParsedInvoiceData {
   if (!markdown?.trim()) return parsed;
+  // Single-mode passes LLM JSON as rawOcr — never treat that as OCR markdown.
+  if (isLlmJsonBlob(markdown)) return parsed;
 
   const parties = extractParties(markdown);
   const { seller } = parties;
