@@ -1,9 +1,13 @@
 /**
  * Human-review flag generation — advisory warnings for the UI.
  * These never mutate parsed_data or block storage.
+ *
+ * Merges ALL validation failures into reviewReasons so the frontend
+ * "Needs review" banner shows every problem (GST, totals, rates, etc.).
  */
 import type { ParsedInvoiceData } from '../types/invoice.js';
 import { looksLikeTableHeader } from './normalize/vendor.js';
+import { validateParsedInvoice } from './validate.js';
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
@@ -17,6 +21,25 @@ function sumLineItems(parsed: ParsedInvoiceData): number {
 
 const GSTIN_RE = /^\d{2}[A-Z0-9]{13}$/;
 const PAN_RE = /^[A-Z]{5}\d{4}[A-Z]$/;
+
+function pushUnique(reasons: string[], message: string): void {
+  const norm = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (reasons.some((r) => r.toLowerCase().replace(/\s+/g, ' ').trim() === norm)) return;
+
+  // Skip near-duplicates for the same field topic already covered
+  if (/gstin/i.test(message) && /format|invalid/i.test(message)
+    && reasons.some((r) => /gstin/i.test(r) && /invalid|format/i.test(r))) return;
+  if (/\bpan\b/i.test(message) && /format|invalid/i.test(message)
+    && reasons.some((r) => /\bpan\b/i.test(r) && /invalid|format/i.test(r))) return;
+  if (/line item/i.test(message)
+    && reasons.some((r) => /line item/i.test(r))) return;
+  if (/company_name|company name|vendor/i.test(message)
+    && reasons.some((r) => /vendor|company/i.test(r))) return;
+  if (/grand_total|total amount not found/i.test(message)
+    && reasons.some((r) => /total amount not found|grand_total/i.test(r))) return;
+
+  reasons.push(message);
+}
 
 export function computeReviewReasons(parsed: ParsedInvoiceData): string[] {
   const reasons: string[] = [];
@@ -60,6 +83,11 @@ export function computeReviewReasons(parsed: ParsedInvoiceData): string[] {
         `Line items sum to ₹${lineSum.toLocaleString('en-IN')} but printed total is ₹${grand.toLocaleString('en-IN')} — verify amounts.`,
       );
     }
+  }
+
+  // Surface EVERY validation failure on the UI banner (read-only).
+  for (const issue of validateParsedInvoice(parsed)) {
+    pushUnique(reasons, issue.message);
   }
 
   return reasons;

@@ -67,6 +67,68 @@ export async function listBills(opts: {
   return snap.docs.map((d) => d.data() as BillDoc);
 }
 
+export interface PaginatedBills {
+  bills: BillDoc[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+/**
+ * Count bills matching optional status filter.
+ * Uses Firestore count() aggregation in production (no document reads).
+ */
+export async function countBills(status?: BillStatus): Promise<number> {
+  if (env.localDev) {
+    let rows = Array.from(devStore.bills.values());
+    if (status) rows = rows.filter((b) => b.ocr_status === status);
+    return rows.length;
+  }
+  let q: FirebaseFirestore.Query = billsRef();
+  if (status) q = q.where('ocr_status', '==', status);
+  const snap = await q.count().get();
+  return snap.data().count;
+}
+
+/**
+ * Page-based pagination ordered by updated_at DESC.
+ * Returns the requested page along with total/totalPages for UI controls.
+ */
+export async function listBillsPaginated(opts: {
+  page?: number;
+  pageSize?: number;
+  status?: BillStatus;
+} = {}): Promise<PaginatedBills> {
+  const pageSize = Math.min(Math.max(opts.pageSize ?? 10, 1), 100);
+  const page = Math.max(opts.page ?? 1, 1);
+  const skip = (page - 1) * pageSize;
+
+  if (env.localDev) {
+    let rows = Array.from(devStore.bills.values());
+    if (opts.status) rows = rows.filter((b) => b.ocr_status === opts.status);
+    rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const total = rows.length;
+    const bills = rows.slice(skip, skip + pageSize);
+    return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+  }
+
+  const [total, snap] = await Promise.all([
+    countBills(opts.status),
+    (() => {
+      let q: FirebaseFirestore.Query = billsRef();
+      if (opts.status) q = q.where('ocr_status', '==', opts.status);
+      q = q.orderBy('updated_at', 'desc');
+      if (skip > 0) q = q.offset(skip);
+      q = q.limit(pageSize);
+      return q.get();
+    })(),
+  ]);
+
+  const bills = snap.docs.map((d) => d.data() as BillDoc);
+  return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+}
+
 export async function deleteBill(billId: string): Promise<void> {
   if (env.localDev) {
     const bill = devStore.bills.get(billId);

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { v4 as uuid } from 'uuid';
 import {
-  getBill, listBills, deleteBill, updateBill, createBill, updateBillStatus,
+  getBill, listBills, listBillsPaginated, deleteBill, updateBill, createBill, updateBillStatus,
   getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts,
   getSettings, type ParsedInvoiceData,
 } from './repository.js';
@@ -106,18 +106,35 @@ function processInBackground(
 
 export async function billRoutes(app: FastifyInstance) {
   /**
-   * GET /api/invoices — list all bills as Invoice[] for the frontend.
+   * GET /api/invoices — paginated invoice list.
+   *
+   * Query params:
+   *   page      — 1-based page number (default 1)
+   *   pageSize  — items per page (default 10, max 100)
+   *   status    — filter by BillStatus (e.g. OCR_COMPLETED, FAILED)
+   *
+   * Response: { invoices, total, page, pageSize, totalPages }
+   *
+   * Line items are NOT returned in the list view (saves N+1 DB reads).
+   * Use GET /api/invoices/:id for full detail including parts.
    */
-  app.get('/api/invoices', async (_req, reply) => {
+  app.get('/api/invoices', async (req, reply) => {
     try {
-      const bills = await listBills({ limit: 500 });
-      const invoices = await Promise.all(
-        bills.map(async (b) => {
-          const parts = await getPartsForBill(b.bill_id);
-          return billToInvoice(b, parts);
-        }),
-      );
-      return { invoices };
+      const qs = req.query as Record<string, string | undefined>;
+      const page = Math.max(Number(qs.page) || 1, 1);
+      const pageSize = Math.min(Math.max(Number(qs.pageSize) || 10, 1), 100);
+      const status = qs.status as import('../shared/types.js').BillStatus | undefined;
+
+      const result = await listBillsPaginated({ page, pageSize, status });
+      const invoices = result.bills.map((b) => billToInvoice(b));
+
+      return {
+        invoices,
+        total: result.total,
+        page: result.page,
+        pageSize: result.pageSize,
+        totalPages: result.totalPages,
+      };
     } catch (err) {
       return reply.code(500).send({ error: 'Failed to list invoices' });
     }

@@ -2,15 +2,33 @@ import { describe, expect, it } from 'vitest';
 import { computeReviewReasons } from '../../../src/ocr/transformer/review.js';
 import type { ParsedInvoiceData } from '../../../src/ocr/types/invoice.js';
 
+/** Fixture that passes both review heuristics and full validation. */
 function parsed(overrides: Partial<ParsedInvoiceData> = {}): ParsedInvoiceData {
   return {
     company_name: 'ARPANNA MOTORS PVT LTD',
     gstin: '27AADCA4487F1ZM',
     pan: 'AADCA4487F',
     invoice_number: 'INV-1',
-    parts_line_items: [{ taxable_amount: 100 }],
+    invoice_date: '15/01/2025',
+    vehicle_details: { registration_number: 'MH01FE2778' },
+    parts_line_items: [{
+      quantity: 1,
+      rate: 100,
+      taxable_amount: 100,
+      tax_percentage: 18,
+      hsn_sac_code: '87089900',
+    }],
     labour_service_line_items: [],
-    totals_and_tax_summary: { grand_total_invoice: 118 },
+    totals_and_tax_summary: {
+      parts_total: 100,
+      labour_total: 0,
+      parts_cgst_rate: 9,
+      parts_sgst_rate: 9,
+      parts_cgst_amount: 9,
+      parts_sgst_amount: 9,
+      sub_total_calculated: 118,
+      grand_total_invoice: 118,
+    },
     confidence: 0.9,
     ...overrides,
   };
@@ -26,14 +44,14 @@ describe('computeReviewReasons', () => {
     expect(reasons.some((r) => /handwritten/i.test(r))).toBe(true);
   });
 
-  it('does NOT warn about PAN when GSTIN is present', () => {
+  it('does NOT warn about missing PAN when GSTIN is present', () => {
     const reasons = computeReviewReasons(parsed({ pan: null }));
-    expect(reasons.some((r) => /PAN|GSTIN/i.test(r))).toBe(false);
+    expect(reasons.some((r) => /PAN format|PAN is missing|handwritten/i.test(r))).toBe(false);
   });
 
-  it('does NOT warn when PAN is present even if GSTIN is missing', () => {
+  it('warns when GSTIN is missing even if PAN is present', () => {
     const reasons = computeReviewReasons(parsed({ gstin: null }));
-    expect(reasons.some((r) => /PAN|GSTIN/i.test(r))).toBe(false);
+    expect(reasons.some((r) => /GSTIN is missing/i.test(r))).toBe(true);
   });
 
   it('warns when a present GSTIN is malformed', () => {
@@ -54,7 +72,9 @@ describe('computeReviewReasons', () => {
   });
 
   it('flags missing grand total', () => {
-    const reasons = computeReviewReasons(parsed({ totals_and_tax_summary: {} }));
+    const reasons = computeReviewReasons(parsed({
+      totals_and_tax_summary: { parts_total: 100, labour_total: 0 },
+    }));
     expect(reasons.some((r) => /total/i.test(r))).toBe(true);
   });
 
@@ -63,5 +83,57 @@ describe('computeReviewReasons', () => {
       parsed({ parts_line_items: [], labour_service_line_items: [] }),
     );
     expect(reasons.some((r) => /line item/i.test(r))).toBe(true);
+  });
+
+  it('surfaces invalid vehicle registration from validation', () => {
+    const reasons = computeReviewReasons(
+      parsed({ vehicle_details: { registration_number: 'NOT-A-PLATE' } }),
+    );
+    expect(reasons.some((r) => /registration/i.test(r))).toBe(true);
+  });
+
+  it('surfaces missing vehicle registration from validation', () => {
+    const reasons = computeReviewReasons(parsed({ vehicle_details: {} }));
+    expect(reasons.some((r) => /registration/i.test(r))).toBe(true);
+  });
+
+  it('surfaces invalid GST rate on the banner', () => {
+    const reasons = computeReviewReasons(parsed({
+      parts_line_items: [{ quantity: 1, rate: 100, taxable_amount: 100, tax_percentage: 9, hsn_sac_code: '87089900' }],
+    }));
+    expect(reasons.some((r) => /valid Indian GST rates/i.test(r))).toBe(true);
+  });
+
+  it('surfaces totals mismatch on the banner', () => {
+    const reasons = computeReviewReasons(parsed({
+      parts_line_items: [{ quantity: 1, rate: 100, taxable_amount: 100, tax_percentage: 18, hsn_sac_code: '87089900' }],
+      totals_and_tax_summary: {
+        parts_total: 500,
+        labour_total: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        parts_cgst_amount: 45,
+        parts_sgst_amount: 45,
+        grand_total_invoice: 590,
+        sub_total_calculated: 590,
+      },
+    }));
+    expect(reasons.some((r) => /parts_total/i.test(r))).toBe(true);
+  });
+
+  it('surfaces GST amount mismatch on the banner', () => {
+    const reasons = computeReviewReasons(parsed({
+      totals_and_tax_summary: {
+        parts_total: 100,
+        labour_total: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        parts_cgst_amount: 50,
+        parts_sgst_amount: 9,
+        grand_total_invoice: 159,
+        sub_total_calculated: 159,
+      },
+    }));
+    expect(reasons.some((r) => /GST amount|CGST == SGST/i.test(r))).toBe(true);
   });
 });
