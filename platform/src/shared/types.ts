@@ -195,6 +195,9 @@ export interface BillDoc {
   structuring_latency_ms?: number | null;
   total_latency_ms?: number | null;
 
+  /** Linked vendor from Vendor Registry (set after OCR completion). */
+  vendor_id?: string | null;
+
   schema_version: number;
 
   created_at: string;

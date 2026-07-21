@@ -14,6 +14,7 @@ import { deductTokens, trackOcrCost, type UserDoc } from '../users/service.js';
 import { enrichParsedInvoice } from './extraction/normalize.js';
 import { runPipeline } from './structuringService.js';
 import { cacheInvalidate } from '../shared/cache.js';
+import { upsertVendorFromInvoice } from '../vendor/vendorService.js';
 
 /** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill (so UI shows the chosen model, not mistral). */
 async function applyPipelineSettingsToBill(bill: import('../shared/types.js').BillDoc): Promise<void> {
@@ -79,6 +80,11 @@ function processInBackground(
 
       const parts = extractPartsFromParsed(billId, parsed);
       await saveBillParts(parts);
+
+      // Vendor Registry — fire-and-forget; never blocks or affects OCR pipeline
+      upsertVendorFromInvoice(billId, parsed)
+        .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
+        .catch((e) => console.warn(`[vendor] ${billId} — registry update failed:`, (e as Error).message));
 
       if (userId) {
         try {
@@ -534,6 +540,11 @@ export async function billRoutes(app: FastifyInstance) {
       await createBill(bill);
       const parts = extractPartsFromParsed(billId, parsed);
       await saveBillParts(parts);
+
+      // Vendor Registry — fire-and-forget
+      upsertVendorFromInvoice(billId, parsed)
+        .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
+        .catch(() => {});
 
       if (user.role !== 'admin') {
         const amt = Math.round(costInfo.total_cost_usd * 10000) / 10000 || 0.001;

@@ -8,6 +8,7 @@ import type { AppSettings } from './settings.js';
 const bills = new Map<string, BillDoc>();
 const parts = new Map<string, import('./types.js').BillPartDoc>();
 const files = new Map<string, { buf: Buffer; contentType: string }>();
+const vendors = new Map<string, import('../vendor/vendorTypes.js').VendorDoc>();
 const users = new Map<string, import('../users/repository.js').UserDoc>();
 const tokenTransactions: import('../users/repository.js').TokenTransactionDoc[] = [];
 const apiKeys: import('../users/repository.js').ApiKeyDoc[] = [];
@@ -25,6 +26,7 @@ export const devStore = {
   bills,
   parts,
   files,
+  vendors,
   users,
   tokenTransactions,
   apiKeys,

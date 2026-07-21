@@ -7,6 +7,7 @@ import { userRoutes } from './users/route.js';
 import { billRoutes } from './ocr/route.js';
 import { analyticsRoutes } from './analytics/route.js';
 import { fraudRoutes } from './fraud/route.js';
+import { vendorRoutes } from './vendor/route.js';
 import { configRoutes } from './routes/config.js';
 import { settingsRoutes } from './routes/settings.js';
 
@@ -25,6 +26,7 @@ export async function buildApp() {
   await app.register(billRoutes);
   await app.register(analyticsRoutes);
   await app.register(fraudRoutes);
+  await app.register(vendorRoutes);
   await app.register(configRoutes);
   await app.register(settingsRoutes);
 
