@@ -82,3 +82,48 @@ describe('fallbackInvoiceNumber (via enrichParsedInvoice)', () => {
     expect(result.invoice_number).toBeNull();
   });
 });
+
+describe('fillPanFromGstin (via enrichParsedInvoice)', () => {
+  it('derives seller PAN from GSTIN when pan is null', () => {
+    const data = {
+      ...EMPTY,
+      gstin: '09AABCV0931B1ZS',
+      pan: null,
+      company_name: 'VIPUL MOTORS PVT. LTD.',
+    };
+    const result = enrichParsedInvoice(data);
+    expect(result.pan).toBe('AABCV0931B');
+    expect(result.gstin).toBe('09AABCV0931B1ZS');
+  });
+
+  it('does NOT override an existing PAN', () => {
+    const data = {
+      ...EMPTY,
+      gstin: '09AABCV0931B1ZS',
+      pan: 'EXISTING1A',
+    };
+    const result = enrichParsedInvoice(data);
+    expect(result.pan).toBe('EXISTING1A');
+  });
+
+  it('Vipul proforma: Job Card No. + PAN from GSTIN', () => {
+    const md = `
+PROFORMA INVOICE
+Job Card No.: JC26007246
+Reg.No.: HR55BA7133
+VIPUL MOTORS PVT. LTD.
+Dealer GSTIN: 09AABCV0931B1ZS
+`;
+    const data: ParsedInvoiceData = {
+      ...EMPTY,
+      company_name: 'VIPUL MOTORS PVT. LTD.',
+      gstin: '09AABCV0931B1ZS',
+      pan: null,
+      invoice_number: null,
+      invoice_date: '25/06/2026',
+    };
+    const result = enrichParsedInvoice(data, md);
+    expect(result.invoice_number).toBe('JC26007246');
+    expect(result.pan).toBe('AABCV0931B');
+  });
+});

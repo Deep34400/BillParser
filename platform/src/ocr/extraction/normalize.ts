@@ -187,6 +187,15 @@ function fallbackInvoiceNumber(current: string | null | undefined, markdown?: st
   return null;
 }
 
+/** Derive seller PAN from Indian GSTIN (chars 3–12) when PAN was not printed/extracted. */
+function fillPanFromGstin(pan: string | null | undefined, gstin: string | null | undefined): string | null {
+  if (pan?.trim()) return pan.trim().toUpperCase();
+  const g = gstin?.replace(/\s/g, '').toUpperCase() ?? '';
+  if (g.length !== 15) return pan ?? null;
+  if (!/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/.test(g)) return pan ?? null;
+  return g.slice(2, 12);
+}
+
 /**
  * Post-parse cleanup: fix parts taxable from qty×rate, resolve bill summary via single pipeline.
  */
@@ -200,6 +209,7 @@ export function enrichParsedInvoice(data: ParsedInvoiceData, markdown?: string):
     vehicle_details: vehicle,
     company_name: cleanCompanyName(vendorResolved.company_name),
     invoice_number: fallbackInvoiceNumber(vendorResolved.invoice_number, markdown),
+    pan: fillPanFromGstin(vendorResolved.pan, vendorResolved.gstin),
   };
   const labourRaw = filterLabourLineItems(
     (withDates.labour_service_line_items ?? []).map(normalizeLabourLineItem),

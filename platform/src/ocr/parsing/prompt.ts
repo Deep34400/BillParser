@@ -94,6 +94,8 @@ export const STRUCTURING_PROMPT =
   '  Never use the page title alone ("Invoice", "Tax Invoice", "Receipt").\n' +
   '  For SaaS/Stripe-style bills: use the legal entity (e.g. "Anysphere, Inc.") or the From-section brand ("Cursor").\n' +
   '  Bill To / customer / ship-to is NOT company_name. US EIN / Tax ID → pan when no GSTIN.\n' +
+  '- invoice_number: Invoice No. / Bill No. / Tax Invoice No. On proforma/job-card bills with no invoice number, use Job Card No.\n' +
+  '- pan: seller PAN when printed; if only GSTIN is printed you may still set pan from the GSTIN middle 10 chars.\n' +
   '- parts_line_items = physical goods/products/parts; labour_service_line_items = services, subscriptions, labour.\n' +
   '  For SaaS/subscription invoices: put the plan/line items in labour_service_line_items.\n' +
   '- Line items are GROSS (amount BEFORE any discount). taxable_amount = quantity × rate.\n' +
