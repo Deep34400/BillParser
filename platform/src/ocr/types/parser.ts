@@ -1,15 +1,7 @@
 /**
- * Parsing-layer types — re-exports from models/types.ts + parsing-specific shapes.
+ * Parser types — shapes returned by the parsing layer.
  */
-export type {
-  ParsedInvoiceData,
-  PartsLineItem,
-  LabourServiceLineItem,
-  ServiceDetails,
-  VehicleDetails,
-  TotalsAndTaxSummary,
-  GstBreakdownLine,
-} from '../../shared/types.js';
+import type { ParsedInvoiceData } from '../../shared/types.js';
 
 export interface InvoiceSchemaEntry {
   id?: string;
@@ -29,7 +21,7 @@ export interface ValidationIssue {
 }
 
 export interface ParseResult {
-  parsed: import('../../shared/types.js').ParsedInvoiceData;
+  parsed: ParsedInvoiceData;
   raw: Record<string, unknown>;
   format: 'schema' | 'legacy';
   validation: ValidationIssue[];

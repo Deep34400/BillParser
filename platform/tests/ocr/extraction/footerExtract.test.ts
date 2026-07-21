@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { extractSummaryFromMarkdown } from '../../../src/ocr/extraction/footerExtract.js';
-import { resolveBillSummary } from '../../../src/ocr/extraction/billSummary.js';
-import type { ParsedInvoiceData } from '../../../src/ocr/parsing/types.js';
+import { extractSummaryFromMarkdown } from '../../../src/ocr/transformer/normalize/footer.js';
+import { resolveBillSummary } from '../../../src/ocr/transformer/normalize/totals.js';
+import type { ParsedInvoiceData } from '../../../src/ocr/types/invoice.js';
 
 const VARUN_FOOTER = `
 | Sub Total Amount | : | 18,859.51 | 0.00 | 16,001.68 |

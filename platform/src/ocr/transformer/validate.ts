@@ -1,6 +1,11 @@
-import type { ParsedInvoiceData, ValidationIssue } from './types.js';
-import { toNum } from './coerce.js';
-import { partsTaxableMismatch, roundMoney, columnNet } from '../extraction/normalize.js';
+/**
+ * Structural / business-rule validation for ParsedInvoiceData.
+ * Produces warning/error ValidationIssue[] — never mutates parsed data.
+ */
+import type { ParsedInvoiceData } from '../types/invoice.js';
+import type { ValidationIssue } from '../types/parser.js';
+import { toNum } from '../parser/parser.js';
+import { partsTaxableMismatch, roundMoney, columnNet } from './normalize/index.js';
 
 export function validateParsedInvoice(data: ParsedInvoiceData, markdown?: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -64,7 +69,6 @@ export function validateParsedInvoice(data: ParsedInvoiceData, markdown?: string
     if (cgst > 0 && igst > 0) {
       issues.push({ path: 'parsed_data.totals_and_tax_summary', message: 'Both CGST/SGST and IGST amounts present — check GST regime', severity: 'warning' });
     }
-    // Warn when rate is printed but amount missing — do not auto-calculate GST.
     const rateAmtPairs = [
       ['parts_cgst_rate', 'parts_cgst_amount'], ['parts_sgst_rate', 'parts_sgst_amount'], ['parts_igst_rate', 'parts_igst_amount'],
       ['labour_cgst_rate', 'labour_cgst_amount'], ['labour_sgst_rate', 'labour_sgst_amount'], ['labour_igst_rate', 'labour_igst_amount'],

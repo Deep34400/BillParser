@@ -3,7 +3,7 @@
  * All data comes through repository.ts. No direct Firestore access.
  */
 import { fetchAllBills, type BillDoc } from './repository.js';
-import { isJunkVendorName } from '../ocr/extraction/vendorExtract.js';
+import { isJunkVendorName } from '../ocr/transformer/normalize/vendor.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

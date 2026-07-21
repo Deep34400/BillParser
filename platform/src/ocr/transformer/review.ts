@@ -1,5 +1,9 @@
-import type { ParsedInvoiceData } from '../parsing/types.js';
-import { looksLikeTableHeader } from './vendorExtract.js';
+/**
+ * Human-review flag generation — advisory warnings for the UI.
+ * These never mutate parsed_data or block storage.
+ */
+import type { ParsedInvoiceData } from '../types/invoice.js';
+import { looksLikeTableHeader } from './normalize/vendor.js';
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
@@ -14,13 +18,6 @@ function sumLineItems(parsed: ParsedInvoiceData): number {
 const GSTIN_RE = /^\d{2}[A-Z0-9]{13}$/;
 const PAN_RE = /^[A-Z]{5}\d{4}[A-Z]$/;
 
-/**
- * Human-review reasons for a parsed bill. These surface as a UI warning banner so an
- * operator can reconcile fields the OCR could not confirm — especially handwritten /
- * informal bills that carry no GSTIN or PAN.
- *
- * These are advisory only: they never mutate parsed_data or block storage.
- */
 export function computeReviewReasons(parsed: ParsedInvoiceData): string[] {
   const reasons: string[] = [];
 
@@ -31,12 +28,9 @@ export function computeReviewReasons(parsed: ParsedInvoiceData): string[] {
   const hasGstin = !!gstin;
   const hasPan = !!pan;
 
-  // Only warn about tax identifiers when BOTH are missing (handwritten/informal bill).
-  // If either a GSTIN or a PAN is present, that is sufficient — no missing-id warning.
   if (!hasGstin && !hasPan) {
     reasons.push('No GSTIN or PAN detected — likely a handwritten/informal bill. Verify vendor details manually.');
   } else {
-    // A present identifier that is clearly malformed still deserves a flag.
     if (hasGstin && !GSTIN_RE.test(gstin.toUpperCase())) reasons.push('GSTIN format looks invalid — verify.');
     if (hasPan && !PAN_RE.test(pan.toUpperCase())) reasons.push('PAN format looks invalid — verify.');
   }
@@ -61,7 +55,6 @@ export function computeReviewReasons(parsed: ParsedInvoiceData): string[] {
       (t?.labour_cgst_amount ?? 0) + (t?.labour_sgst_amount ?? 0) + (t?.labour_igst_amount ?? 0),
     );
     const lineSum = sumLineItems(parsed);
-    // Informal/no-tax cash memos: OCR line-sum often exceeds printed TOTAL (duplicate rows).
     if (totalTax === 0 && lineSum > grand + 1) {
       reasons.push(
         `Line items sum to ₹${lineSum.toLocaleString('en-IN')} but printed total is ₹${grand.toLocaleString('en-IN')} — verify amounts.`,

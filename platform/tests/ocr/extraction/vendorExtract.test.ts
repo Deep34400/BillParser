@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveVendorFromMarkdown, isJunkVendorName } from '../../../src/ocr/extraction/vendorExtract.js';
-import type { ParsedInvoiceData } from '../../../src/ocr/parsing/types.js';
+import { resolveVendorFromMarkdown, isJunkVendorName } from '../../../src/ocr/transformer/normalize/vendor.js';
+import type { ParsedInvoiceData } from '../../../src/ocr/types/invoice.js';
 
 const ARPANNA_MARKDOWN = `
 Arpanna Motors Private Ltd

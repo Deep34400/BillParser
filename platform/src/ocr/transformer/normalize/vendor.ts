@@ -1,9 +1,16 @@
-import type { ParsedInvoiceData } from '../parsing/types.js';
-import { env } from '../../config/env.js';
+/**
+ * Vendor extraction — detect seller vs buyer from OCR markdown and correct
+ * mis-assigned vendor fields (company_name, gstin, pan).
+ *
+ * Handles both layouts:
+ *   - seller at top, buyer under "Bill To" / "Details of Receiver"
+ *   - buyer at top ("Customer Name"), seller at bottom ("For <co>", "Dealer GSTIN")
+ */
+import type { ParsedInvoiceData } from '../../types/invoice.js';
+import { env } from '../../../config/env.js';
 
 /** Indian GSTIN — 15 chars (chars 3–12 = PAN). */
 const GSTIN_RE = /\b(\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9])\b/gi;
-const PAN_RE = /\b([A-Z]{5}\d{4}[A-Z])\b/;
 
 /** Section labels that introduce the BUYER / customer / receiver block. */
 const BUYER_SECTION_LABELS = [
@@ -33,10 +40,6 @@ const TABLE_HEADER_TOKENS = [
   /\bpart\s*(?:no|number)\b/i,
 ];
 
-/**
- * True when a string is really a line-item table header (e.g.
- * "S.No. PARTICULARS QTY. RATE AMOUNT Rs. P.") rather than a company name.
- */
 export function looksLikeTableHeader(s: string): boolean {
   const t = s.trim();
   if (!t) return false;
@@ -44,14 +47,10 @@ export function looksLikeTableHeader(s: string): boolean {
   return hits >= 2;
 }
 
-/** Max lines scanned per buyer section for GSTIN/name — keep small so a buyer block at the
- *  top of a Tally OCR (Buyer before Seller letterhead) cannot swallow the seller GSTIN. */
 const BUYER_BLOCK_LINES = 6;
 
-/** Footer labels for the ISSUER's PAN (Tally / e-invoice). */
 const COMPANY_PAN_RE = /Company'?s?\s*PAN\s*[:\-*]?\s*\**([A-Z]{5}\d{4}[A-Z])\b/i;
 const SELLER_KW = /\b(dealer|seller|supplier|issued\s*by)\b/i;
-/** Keywords that mark a GSTIN line as the BUYER/customer/receiver. */
 const BUYER_KW =
   /\b(cust|customer|buyer|receiver|consignee|party|billed?\s*to|bill\s*to|purchaser)\b/i;
 
@@ -64,11 +63,9 @@ const ADDRESS_LINE_RE =
 const COMPANY_NAME_HINT_RE =
   /\b(pvt|ltd|limited|motors|motor|garage|automobiles?|automotive|workshop|enterprises?|agency|agencies|corp|inc|llp|company|co\.|services?|autozone|toyota|honda|maruti|hyundai|tata|nexa)\b/i;
 
-/** "For <COMPANY>" — allow up to 6 words for long names like TYRESNMORE ONLINE PRIVATE LIMITED. */
 const FOR_INLINE_RE = /\b[Ff][Oo][Rr]\s+([A-Z][A-Z0-9&.]+(?:\s+[A-Z][A-Z0-9&.]+){0,5})/g;
 const SIGNATORY_RE = /authoris(?:e|ed|ing)?\s*signatory|authorized\s*signatory|signatory|signature/i;
 
-/** Words that follow "For" on invoice-copy notices — never a seller name. */
 const FOR_STOPWORDS = new Set([
   'RECIPIENT', 'TRANSPORTER', 'SUPPLIER', 'CONSIGNEE', 'ORIGINAL', 'DUPLICATE', 'TRIPLICATE',
   'OFFICE', 'CUSTOMER', 'PAYMENT', 'DETAILS', 'THE', 'YOUR', 'OUR', 'ANY', 'ALL', 'GST', 'PAN',
@@ -86,7 +83,6 @@ interface Parties {
   buyerGstins: Set<string>;
   buyerPans: Set<string>;
   buyerNames: string[];
-  /** True when seller GSTIN/name came from an explicit label (authoritative). */
   sellerConfident: boolean;
 }
 
@@ -131,14 +127,12 @@ function panFromGstin(gstin: string | null): string | null {
   return gstin.slice(2, 12).toUpperCase();
 }
 
-/** Classify a GSTIN-bearing line as seller/buyer/unknown by its inline label. */
 function classifyGstinLine(line: string): 'seller' | 'buyer' | 'unknown' {
   if (SELLER_KW.test(line)) return 'seller';
   if (BUYER_KW.test(line)) return 'buyer';
   return 'unknown';
 }
 
-/** Find the seller name from a "For <COMPANY>" mention, preferring one next to a signatory. */
 function findForSignatoryName(rawLines: string[]): string | null {
   const text = rawLines.map(clean).join('\n');
   const candidates: { name: string; nearSignatory: boolean }[] = [];
@@ -169,11 +163,8 @@ export function isJunkVendorName(name: string | null | undefined): boolean {
   if (!t) return false;
   if (looksLikeTableHeader(t)) return true;
   if (/bill\s*\/?\s*cash\s*memo|tax\s*invoice|cash\s*memo|estimate|quotation/i.test(t)) return true;
-  // Bare document titles (SaaS PDFs often title the page "Invoice")
   if (/^(invoice|bill|receipt|statement|proforma|credit\s*note|debit\s*note|tax\s*invoice)$/i.test(t)) return true;
-  // Raw LLM JSON / schema leakage (e.g. whole {"output":{"entries":…}} dumped into company_name)
   if (/^\s*[\{\[]/.test(t) || /"parsed_data"\s*:|"output"\s*:\s*\{/.test(t)) return true;
-  // Trailing JSON braces wrongly captured as a name (e.g. "}}]}}")
   if (/^[}\]\s{]+$/.test(t)) return true;
   if (t.length > 70) return true;
   if (t.split(/\s+/).length > 9) return true;
@@ -210,7 +201,6 @@ function extractParties(markdown: string): Parties {
   const buyerPans = new Set<string>();
   const buyerNames: string[] = [];
 
-  // Tally footer "Company's PAN" identifies the issuer — never treat that GSTIN as buyer.
   const companyPanM = markdown.match(COMPANY_PAN_RE);
   const issuerPan = companyPanM?.[1]?.toUpperCase() ?? null;
 
@@ -248,7 +238,6 @@ function extractParties(markdown: string): Parties {
   const sellerGstinHit = labeledSeller ?? panMatchedSeller ?? positionalSeller ?? anySeller ?? null;
   const sellerGstin = sellerGstinHit?.gstin ?? null;
 
-  // Buyer PAN: any PAN inside a buyer section — used to blocklist across state codes.
   for (const start of buyerStarts) {
     const blockText = lines.slice(start, start + BUYER_BLOCK_LINES).join('\n');
     const pm = blockText.match(/\bPAN\s*[:\-/]?\s*([A-Z]{5}\d{4}[A-Z])/i);
@@ -259,8 +248,6 @@ function extractParties(markdown: string): Parties {
     if (p) buyerPans.add(p);
   }
 
-  // Seller name: 1) "For <company>" near signatory, 2) line adjacent to seller GSTIN,
-  // 3) positional header name (before buyer section), excluding buyer names.
   const forName = findForSignatoryName(rawLines);
   let sellerName: string | null = forName;
   if (!sellerName && sellerGstinHit) {
@@ -279,7 +266,6 @@ function extractParties(markdown: string): Parties {
       headerLines.find((l) => !ADDRESS_LINE_RE.test(l) && l.length >= 4) ??
       null;
   }
-  // Never accept a table header as the seller name.
   if (sellerName && looksLikeTableHeader(sellerName)) sellerName = null;
 
   const sellerPan =
@@ -312,18 +298,11 @@ function isBuyerCompany(name: string | null | undefined, p: Parties): boolean {
   return p.buyerNames.some((b) => namesSimilar(name, b));
 }
 
-/**
- * Correct vendor fields when the LLM picks the buyer (customer / Bill To / Receiver)
- * instead of the issuer workshop/dealer. Handles both layouts:
- *   - seller at top, buyer under "Bill To" / "Details of Receiver"
- *   - buyer at top ("Customer Name & Address"), seller at bottom ("For <co>", "Dealer GSTIN")
- */
 export function resolveVendorFromMarkdown(
   parsed: ParsedInvoiceData,
   markdown?: string,
 ): ParsedInvoiceData {
   if (!markdown?.trim()) return parsed;
-  // Single-mode passes LLM JSON as rawOcr — never treat that as OCR markdown.
   if (isLlmJsonBlob(markdown)) return parsed;
 
   const parties = extractParties(markdown);
@@ -332,11 +311,8 @@ export function resolveVendorFromMarkdown(
   const parsedGstin = parsed.gstin?.toUpperCase() ?? null;
   const gstinIsBuyer = parsedGstin != null && isBuyerGstin(parsedGstin, parties);
   const nameIsBuyer = isBuyerCompany(parsed.company_name, parties);
-  // The LLM sometimes grabs the line-item table header ("S.No. PARTICULARS QTY. RATE …"),
-  // the invoice title, or the whole header blob as company_name — all junk vendor names.
   const nameIsJunk = isJunkVendorName(parsed.company_name);
 
-  // A confident (labeled) seller GSTIN that differs from what was parsed is authoritative.
   const authoritativeMismatch =
     parties.sellerConfident &&
     seller.gstin != null &&

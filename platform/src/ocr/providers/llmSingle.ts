@@ -3,10 +3,10 @@
  * Supports: Gemini, Claude, OpenAI (vision), Mistral Pixtral (images).
  * Each call has a 120s timeout.
  */
-import { STRUCTURING_PROMPT } from '../parsing/prompt.js';
-import { structureFromLlmResponse } from '../parsing/parse.js';
-import type { ParsedInvoiceData } from '../parsing/types.js';
-import type { LlmUsage, OcrStepCost } from './types.js';
+import { STRUCTURING_PROMPT } from '../parser/prompt.js';
+import { structureFromLlmResponse } from '../parser/parser.js';
+import type { ParsedInvoiceData } from '../types/invoice.js';
+import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { resolveProviderKey } from './resolveKey.js';
 import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
 import { isPdf } from '../../shared/storage.js';

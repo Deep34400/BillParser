@@ -1,10 +1,10 @@
-import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem, TotalsAndTaxSummary } from '../parsing/types.js';
+import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem, TotalsAndTaxSummary } from '../../types/invoice.js';
 import {
   applyFooterFromMarkdown,
   stripCalculatedFooterAmounts,
   extractGatePassAmount,
   extractCashMemoTotal,
-} from './footerExtract.js';
+} from './footer.js';
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;

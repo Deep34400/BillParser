@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   extractInvoiceDateFromMarkdown,
   normalizeInvoiceDateFields,
-} from '../../../src/ocr/extraction/dateExtract.js';
+} from '../../../src/ocr/transformer/normalize/date.js';
 
 describe('extractInvoiceDateFromMarkdown', () => {
   it('parses DD/MM/YYYY with time from "Date :" label', () => {

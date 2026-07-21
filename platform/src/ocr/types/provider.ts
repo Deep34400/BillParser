@@ -1,6 +1,6 @@
 /** OCR provider types — token usage, costs, and pipeline info. */
 
-/** Legacy canonical shape used only by parsing/legacy.ts fallback path. */
+/** Legacy canonical shape used only by parser/parser.ts fallback path. */
 export interface CanonicalLineItem {
   lineNumber: number;
   description?: string;

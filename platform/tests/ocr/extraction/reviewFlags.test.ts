@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { computeReviewReasons } from '../../../src/ocr/extraction/reviewFlags.js';
-import type { ParsedInvoiceData } from '../../../src/ocr/parsing/types.js';
+import { computeReviewReasons } from '../../../src/ocr/transformer/review.js';
+import type { ParsedInvoiceData } from '../../../src/ocr/types/invoice.js';
 
 function parsed(overrides: Partial<ParsedInvoiceData> = {}): ParsedInvoiceData {
   return {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { devStore } from '../../../src/shared/devStore.js';
-import { GEMINI_SINGLE_FALLBACK_MODEL } from '../../../src/ocr/structuringService.js';
+import { GEMINI_SINGLE_FALLBACK_MODEL } from '../../../src/ocr/process.js';
 
 describe('pipeline settings from devStore', () => {
   it('default pipelineMode is single', () => {

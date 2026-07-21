@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { extractCashMemoTotal } from '../../../src/ocr/extraction/footerExtract.js';
-import { enrichParsedInvoice } from '../../../src/ocr/extraction/normalize.js';
-import { computeReviewReasons } from '../../../src/ocr/extraction/reviewFlags.js';
-import type { ParsedInvoiceData } from '../../../src/ocr/parsing/types.js';
+import { extractCashMemoTotal } from '../../../src/ocr/transformer/normalize/footer.js';
+import { enrichParsedInvoice } from '../../../src/ocr/transformer/normalize/index.js';
+import { computeReviewReasons } from '../../../src/ocr/transformer/review.js';
+import type { ParsedInvoiceData } from '../../../src/ocr/types/invoice.js';
 
 const AJAY_PAL_FOOTER =
   '|   | Received the above goods in good order & condition |  | TOTAL | 5700 |   |';

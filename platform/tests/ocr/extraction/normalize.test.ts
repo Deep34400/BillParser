@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { enrichParsedInvoice } from '../../../src/ocr/extraction/normalize.js';
-import type { ParsedInvoiceData } from '../../../src/ocr/parsing/types.js';
+import { enrichParsedInvoice } from '../../../src/ocr/transformer/normalize/index.js';
+import type { ParsedInvoiceData } from '../../../src/ocr/types/invoice.js';
 
 const EMPTY: ParsedInvoiceData = {
   irn: null, pan: null, gstin: null, company_name: null,

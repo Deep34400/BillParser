@@ -1,54 +1,27 @@
-import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem, VehicleDetails } from '../parsing/types.js';
-import { resolveBillSummary, columnNet } from './billSummary.js';
-import { resolveVendorFromMarkdown, isJunkVendorName, isLlmJsonBlob } from './vendorExtract.js';
-import { normalizeInvoiceDateFields } from './dateExtract.js';
+/**
+ * Post-parse enrichment pipeline — the single entry point for normalizing
+ * ParsedInvoiceData after LLM parsing.
+ *
+ * Pipeline: vendor → date → vehicle → company name → invoice number → PAN →
+ *           labour filter → bill summary → parts alignment → labour alignment
+ */
+import type { ParsedInvoiceData, PartsLineItem, LabourServiceLineItem } from '../../types/invoice.js';
+import { resolveBillSummary, columnNet } from './totals.js';
+import { resolveVendorFromMarkdown, isJunkVendorName, isLlmJsonBlob } from './vendor.js';
+import { normalizeInvoiceDateFields } from './date.js';
+import { normalizeVehicleDetails } from './vehicle.js';
 
-// ── Vehicle registration normalization ──────────────────────────
-
-const INDIAN_REG_RE = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$|^\d{2}BH\d{4}[A-Z]$/;
-
-const REG_LABEL_RE =
-  /\b(?:reg(?:istration)?\.?\s*(?:no|number)?|vehicle\s*(?:reg(?:istration)?)?\.?\s*(?:no|number)?|veh\.?\s*no)\.?\s*[:\-/]?\s*([A-Z0-9][A-Z0-9\s]{2,14})/gi;
-
-export function normalizeRegistrationNumber(raw: string | null | undefined): string | null {
-  if (!raw?.trim()) return null;
-  const compact = raw.replace(/\s+/g, '').toUpperCase();
-  return INDIAN_REG_RE.test(compact) ? compact : null;
-}
-
-function cleanRegCapture(raw: string): string {
-  return raw.split(/[(,;\n|]/)[0].trim();
-}
-
-export function extractRegistrationFromMarkdown(markdown?: string | null): string | null {
-  if (!markdown) return null;
-  for (const m of markdown.matchAll(REG_LABEL_RE)) {
-    const candidate = normalizeRegistrationNumber(cleanRegCapture(m[1]));
-    if (candidate) return candidate;
-  }
-  for (const line of markdown.split(/\r?\n/)) {
-    const t = line.trim();
-    if (t.length < 6 || t.length > 16) continue;
-    const candidate = normalizeRegistrationNumber(t);
-    if (candidate) return candidate;
-  }
-  return null;
-}
-
-export function normalizeVehicleDetails(
-  vehicle: VehicleDetails | null | undefined,
-  markdown?: string | null,
-): VehicleDetails | null {
-  const vd = vehicle ?? {};
-  const fromParsed = normalizeRegistrationNumber(vd.registration_number);
-  const fromMarkdown = extractRegistrationFromMarkdown(markdown);
-  return {
-    ...vd,
-    registration_number: fromParsed ?? fromMarkdown ?? vd.registration_number ?? null,
-    chassis_number: vd.chassis_number?.trim() || vd.chassis_number || null,
-    mileage_odometer_reading: vd.mileage_odometer_reading ?? null,
-  };
-}
+// Re-exports for backward compatibility (used by validate.ts, tests, etc.)
+export { resolveBillSummary, columnNet } from './totals.js';
+export { fillMissingGstAmounts } from './totals.js';
+export { resolveVendorFromMarkdown, isJunkVendorName, isLlmJsonBlob, looksLikeTableHeader } from './vendor.js';
+export { normalizeVehicleDetails, normalizeRegistrationNumber, extractRegistrationFromMarkdown } from './vehicle.js';
+export { normalizeInvoiceDateFields, extractInvoiceDateFromMarkdown } from './date.js';
+export {
+  extractSummaryFromMarkdown, applyFooterFromMarkdown, stripCalculatedFooterAmounts,
+  extractGatePassAmount, footerMissingInMarkdown, clearUntrustedZeroDiscounts,
+  isCalculatedGstAmount, footerColumnAmounts, extractCashMemoTotal,
+} from './footer.js';
 
 // ── Labour line item filtering ──────────────────────────────────
 
@@ -76,22 +49,16 @@ export function filterLabourLineItems(items: LabourServiceLineItem[]): LabourSer
   });
 }
 
-// ── Core normalize logic ────────────────────────────────────────
+// ── Core normalize helpers ──────────────────────────────────────
 
-export { extractSummaryFromMarkdown, applyFooterFromMarkdown, stripCalculatedFooterAmounts, extractGatePassAmount, footerMissingInMarkdown, clearUntrustedZeroDiscounts, isCalculatedGstAmount, footerColumnAmounts } from './footerExtract.js';
-export { resolveBillSummary, columnNet } from './billSummary.js';
-
-/** Round to 2 decimal places — invoice money fields. */
 export function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Tolerance for qty × rate vs printed taxable (₹0.05 or 2%). */
 export function taxableTolerance(expected: number): number {
   return Math.max(0.05, Math.abs(expected) * 0.02);
 }
 
-/** True when qty × rate disagrees with printed taxable beyond tolerance. */
 export function partsTaxableMismatch(li: PartsLineItem): boolean {
   const qty = li.quantity;
   const rate = li.rate;
@@ -101,7 +68,6 @@ export function partsTaxableMismatch(li: PartsLineItem): boolean {
   return Math.abs(taxable - expected) > taxableTolerance(expected);
 }
 
-/** Normalize one parts row: fill taxable from qty×rate when missing; snap when close. */
 export function normalizePartsLineItem(li: PartsLineItem): PartsLineItem {
   const qty = li.quantity;
   const rate = li.rate;
@@ -116,12 +82,10 @@ export function normalizePartsLineItem(li: PartsLineItem): PartsLineItem {
   return { ...li, taxable_amount: taxable ?? undefined };
 }
 
-/** Labour rows use labour_charges directly — never derive from qty/rate. */
 export function normalizeLabourLineItem(li: LabourServiceLineItem): LabourServiceLineItem {
   return { ...li, labour_charges: li.labour_charges ?? undefined };
 }
 
-/** When footer has gross parts_total, show qty×rate on lines (discount is footer-only). */
 function alignPartsTaxableToGross(parts: PartsLineItem[], partsTotal?: number | null): PartsLineItem[] {
   if (partsTotal == null || partsTotal <= 0 || !parts.length) return parts;
   const grossSum = roundMoney(parts.reduce((a, p) => {
@@ -137,7 +101,6 @@ function alignPartsTaxableToGross(parts: PartsLineItem[], partsTotal?: number | 
   });
 }
 
-/** When footer has gross labour_total, show gross on line (discount is footer-only). */
 function alignLabourChargesToGross(
   items: LabourServiceLineItem[],
   labourTotal?: number | null,
@@ -154,10 +117,8 @@ function alignLabourChargesToGross(
   return items;
 }
 
-/** Strip junk from company_name: newlines, trailing GST labels, table noise. */
 function cleanCompanyName(name: string | null | undefined): string | null {
   if (!name) return null;
-  // Always drop junk — even when there is no OCR markdown (Gemini single mode).
   if (isJunkVendorName(name)) return null;
   let s = name
     .replace(/\r?\n/g, ' ')
@@ -169,7 +130,6 @@ function cleanCompanyName(name: string | null | undefined): string | null {
   return s;
 }
 
-/** If invoice_number is missing, try Job Card No., Tax Invoice No., etc. from markdown. */
 function fallbackInvoiceNumber(current: string | null | undefined, markdown?: string): string | null {
   if (current) return current;
   if (!markdown) return null;
@@ -187,7 +147,6 @@ function fallbackInvoiceNumber(current: string | null | undefined, markdown?: st
   return null;
 }
 
-/** Derive seller PAN from Indian GSTIN (chars 3–12) when PAN was not printed/extracted. */
 function fillPanFromGstin(pan: string | null | undefined, gstin: string | null | undefined): string | null {
   if (pan?.trim()) return pan.trim().toUpperCase();
   const g = gstin?.replace(/\s/g, '').toUpperCase() ?? '';
@@ -196,11 +155,9 @@ function fillPanFromGstin(pan: string | null | undefined, gstin: string | null |
   return g.slice(2, 12);
 }
 
-/**
- * Post-parse cleanup: fix parts taxable from qty×rate, resolve bill summary via single pipeline.
- */
+// ── Main enrichment entry point ─────────────────────────────────
+
 export function enrichParsedInvoice(data: ParsedInvoiceData, markdown?: string): ParsedInvoiceData {
-  // Single-mode rawOcr is LLM JSON — only use real OCR markdown for vendor/date fallbacks.
   const ocrMarkdown = markdown && !isLlmJsonBlob(markdown) ? markdown : undefined;
 
   const vendorResolved = resolveVendorFromMarkdown(data, ocrMarkdown);

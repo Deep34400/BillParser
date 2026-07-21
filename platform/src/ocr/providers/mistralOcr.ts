@@ -2,7 +2,7 @@
  * Mistral OCR — extract markdown from PDF/image using Mistral's dedicated OCR endpoint.
  * POST https://api.mistral.ai/v1/ocr (NOT chat/completions)
  */
-import type { LlmUsage, OcrStepCost } from './types.js';
+import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { isPdf, isImage } from '../../shared/storage.js';
 import { resolveProviderKey } from './resolveKey.js';
 

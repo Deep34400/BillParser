@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   filterLabourLineItems,
   isLabourSectionHeader,
-} from '../../../src/ocr/extraction/normalize.js';
-import type { LabourServiceLineItem } from '../../../src/ocr/parsing/types.js';
+} from '../../../src/ocr/transformer/normalize/index.js';
+import type { LabourServiceLineItem } from '../../../src/ocr/types/invoice.js';
 
 describe('isLabourSectionHeader', () => {
   it('detects Toyota/Maruti table grouping rows', () => {

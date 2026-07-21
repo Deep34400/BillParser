@@ -1,12 +1,10 @@
 /**
  * Deterministic invoice-date fallback.
  *
- * Some dealer formats (e.g. JN Car Care / Autorox) print the date as "Date: Jun 19 2026",
- * which the LLM occasionally drops — yielding invoice_date: null and breaking downstream
- * "bill_date is required" validation. This re-reads the date straight from the OCR markdown.
+ * Some dealer formats print the date as "Date: Jun 19 2026", which the LLM
+ * occasionally drops. This re-reads the date straight from the OCR markdown.
  *
- * Output is normalized to day-first DD/MM/YYYY (the dominant Indian invoice format the LLM
- * already emits for these dealers), so it stays consistent with LLM-extracted dates.
+ * Output is normalized to DD/MM/YYYY (the dominant Indian invoice format).
  */
 
 const MONTHS: Record<string, number> = {
@@ -14,9 +12,7 @@ const MONTHS: Record<string, number> = {
   jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
 };
 
-// Labels that are NOT the invoice date and must never be picked as a fallback.
 const EXCLUDED_LABELS = /(due|ro|next|serv|job|gate|deliver|print|order|valid|warranty|reg|birth)/i;
-/** Full-line patterns to skip (Job Card Date, Gate Pass, etc.). */
 const SKIP_DATE_LINE = /job\s*card\s*date|gate\s*pass|next\s*service|due\s*date|delivery\s*date|print\s*date|bill\s*date\s*:/i;
 
 function lineContaining(markdown: string, index: number): string {
@@ -36,26 +32,21 @@ function toDMY(day: number, month: number, year: number): string | null {
   return `${pad2(day)}/${pad2(month)}/${y}`;
 }
 
-/** Parse a single date token out of a short value string. Returns DD/MM/YYYY or null. */
 function parseDateValue(value: string): string | null {
-  // Strip trailing time (HH:MM:SS or HH:MM) — common on Maruti/Varun "Date : DD/MM/YYYY HH:MM:SS"
   const v = value.trim().replace(/\s+\d{1,2}:\d{2}(?::\d{2})?\s*$/, '').trim();
 
-  // "Mon DD YYYY" / "Mon DD, YYYY" (e.g. "Jun 19 2026")
   const monDay = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})\s*,?\s+(\d{4})\b/.exec(v);
   if (monDay) {
     const m = MONTHS[monDay[1].toLowerCase()];
     if (m) return toDMY(Number(monDay[2]), m, Number(monDay[3]));
   }
 
-  // "DD Mon YYYY" (e.g. "19 Jun 2026")
   const dayMon = /\b(\d{1,2})\s+([A-Za-z]{3,9})\.?\s*,?\s+(\d{4})\b/.exec(v);
   if (dayMon) {
     const m = MONTHS[dayMon[2].toLowerCase()];
     if (m) return toDMY(Number(dayMon[1]), m, Number(dayMon[3]));
   }
 
-  // Numeric day-first "DD/MM/YYYY", "DD.MM.YYYY", "DD-MM-YYYY"
   const numeric = /\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/.exec(v);
   if (numeric) {
     return toDMY(Number(numeric[1]), Number(numeric[2]), Number(numeric[3]));
@@ -64,11 +55,6 @@ function parseDateValue(value: string): string | null {
   return null;
 }
 
-/**
- * Find the invoice date in OCR markdown.
- * Prefers an explicit "Invoice Date" / "Bill Date" label; otherwise falls back to a plain
- * "Date:" whose value parses to a valid date, skipping Due/RO/Next-Service style labels.
- */
 export function extractInvoiceDateFromMarkdown(markdown?: string | null): string | null {
   if (!markdown) return null;
 
@@ -84,23 +70,19 @@ export function extractInvoiceDateFromMarkdown(markdown?: string | null): string
     const parsed = parseDateValue(value);
     if (!parsed) continue;
 
-    // Explicit invoice/bill/tax date — highest priority.
     if (/invoice|bill|tax/i.test(before)) return parsed;
 
-    // Bare "Date:" (invoice date on Maruti/Varun job cards) — beats Job Card Date fallbacks.
     if (before === '' && !EXCLUDED_LABELS.test(before)) {
       bareDate = parsed;
       continue;
     }
 
-    // Other labelled dates — lowest priority, only if nothing better found.
     if (!EXCLUDED_LABELS.test(before) && bareDate == null) bareDate = parsed;
   }
 
   return bareDate;
 }
 
-/** Split "DD/MM/YYYY HH:MM:SS" into date + time parts. */
 function splitDateTime(raw: string): { date: string; time: string | null } {
   const m = raw.trim().match(
     /^(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*$/,
@@ -116,12 +98,6 @@ export interface InvoiceDateFields {
   invoice_time?: string | null;
 }
 
-/**
- * Normalize invoice_date / invoice_time:
- *  - split combined datetime strings
- *  - normalize date to DD/MM/YYYY
- *  - fallback to markdown extraction when date is missing
- */
 export function normalizeInvoiceDateFields(
   fields: InvoiceDateFields,
   markdown?: string | null,

@@ -5,7 +5,7 @@
  */
 import { GoogleAuth } from 'google-auth-library';
 import { env } from '../../config/env.js';
-import type { LlmUsage, OcrStepCost } from './types.js';
+import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 
 /**
  * Per-model $/1K token pricing (converted from ai.google.dev/gemini-api/docs/pricing,

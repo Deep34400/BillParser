@@ -1,4 +1,4 @@
-import type { TotalsAndTaxSummary, GstBreakdownLine } from '../parsing/types.js';
+import type { TotalsAndTaxSummary, GstBreakdownLine } from '../../types/invoice.js';
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;

@@ -10,8 +10,8 @@ import type {
   TotalsAndTaxSummary, PartsLineItem, LabourServiceLineItem,
   ServiceDetails, VehicleDetails,
 } from '../shared/types.js';
-import type { OcrCostInfo } from './providers/types.js';
-import { computeReviewReasons } from './extraction/reviewFlags.js';
+import type { OcrCostInfo } from './types/provider.js';
+import { computeReviewReasons } from './transformer/review.js';
 
 // ── mapParsedToBill ─────────────────────────────────────────────
 

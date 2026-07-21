@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fillMissingGstAmounts, resolveBillSummary } from '../../../src/ocr/extraction/billSummary.js';
-import type { ParsedInvoiceData, TotalsAndTaxSummary } from '../../../src/ocr/parsing/types.js';
+import { fillMissingGstAmounts, resolveBillSummary } from '../../../src/ocr/transformer/normalize/totals.js';
+import type { ParsedInvoiceData, TotalsAndTaxSummary } from '../../../src/ocr/types/invoice.js';
 
 describe('fillMissingGstAmounts — Kataria-style footer (rates only)', () => {
   it('fills CGST/SGST amounts from (subtotal − discount) × rate%', () => {

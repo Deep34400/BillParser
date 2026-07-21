@@ -1,18 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { v4 as uuid } from 'uuid';
-import { processUpload, processFromUrl, verifyBill } from './processingService.js';
 import {
   getBill, listBills, deleteBill, updateBill, createBill, updateBillStatus,
   getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts,
-  getSettings, type BillType, type ParsedInvoiceData,
+  getSettings, type ParsedInvoiceData,
 } from './repository.js';
 import { billToInvoice, toApiParsed, mapParsedToBill } from './mapper.js';
 import { isPdf, isImage, uploadFile, getStoredFile } from '../shared/storage.js';
 import { env } from '../config/env.js';
-import type { OcrCostInfo, OcrStepCost } from './providers/types.js';
-import { deductTokens, trackOcrCost, type UserDoc } from '../users/service.js';
-import { enrichParsedInvoice } from './extraction/normalize.js';
-import { runPipeline } from './structuringService.js';
+import { deductTokens, trackOcrCost } from '../users/service.js';
+import { enrichParsedInvoice } from './transformer/normalize/index.js';
+import { runPipeline } from './process.js';
 import { cacheInvalidate } from '../shared/cache.js';
 import { upsertVendorFromInvoice } from '../vendor/vendorService.js';
 
