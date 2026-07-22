@@ -129,6 +129,35 @@ export async function listBillsPaginated(opts: {
   return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
 }
 
+/**
+ * Find existing bills with the same invoice_number (and optionally vendor_gstin).
+ * Excludes the bill with excludeId so a bill doesn't match itself.
+ * Returns [] if invoice_number is null/empty.
+ */
+export async function findDuplicateBills(
+  invoiceNumber: string | null | undefined,
+  vendorGstin: string | null | undefined,
+  excludeId: string,
+): Promise<BillDoc[]> {
+  if (!invoiceNumber) return [];
+
+  if (env.localDev) {
+    return Array.from(devStore.bills.values()).filter((b) =>
+      b.bill_id !== excludeId &&
+      b.invoice_number === invoiceNumber &&
+      (!vendorGstin || !b.vendor_gstin || b.vendor_gstin === vendorGstin),
+    );
+  }
+
+  let q: FirebaseFirestore.Query = billsRef().where('invoice_number', '==', invoiceNumber);
+  if (vendorGstin) q = q.where('vendor_gstin', '==', vendorGstin);
+  q = q.limit(5);
+  const snap = await q.get();
+  return snap.docs
+    .map((d) => d.data() as BillDoc)
+    .filter((b) => b.bill_id !== excludeId);
+}
+
 export async function deleteBill(billId: string): Promise<void> {
   if (env.localDev) {
     const bill = devStore.bills.get(billId);

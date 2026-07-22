@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import {
   getBill, listBills, listBillsPaginated, deleteBill, updateBill, createBill, updateBillStatus,
   getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts,
-  getSettings, type ParsedInvoiceData,
+  getSettings, findDuplicateBills, type ParsedInvoiceData,
 } from './repository.js';
 import { billToInvoice, toApiParsed, mapParsedToBill } from './mapper.js';
 import { isPdf, isImage, uploadFile, getStoredFile } from '../shared/storage.js';
@@ -75,6 +75,20 @@ function processInBackground(
 
       await updateBillStatus(billId, 'OCR_COMPLETED', bill);
       cacheInvalidate('analytics');
+
+      // Duplicate check — non-blocking warning only
+      try {
+        const dupes = await findDuplicateBills(parsed.invoice_number, parsed.gstin, billId);
+        if (dupes.length > 0) {
+          const dupMsg = `Duplicate: invoice ${parsed.invoice_number} already exists (${dupes.length} match)`;
+          const reasons = bill.review_reasons ?? [];
+          if (!reasons.includes(dupMsg)) reasons.push(dupMsg);
+          await updateBill(billId, { review_reasons: reasons });
+          console.warn(`[OCR] ${billId} — ${dupMsg}`);
+        }
+      } catch (e) {
+        console.warn(`[OCR] ${billId} — duplicate check failed:`, (e as Error).message);
+      }
 
       const parts = extractPartsFromParsed(billId, parsed);
       await saveBillParts(parts);

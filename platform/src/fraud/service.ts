@@ -14,22 +14,9 @@ export interface FraudAlert {
   details: Record<string, unknown>;
 }
 
-interface GstSide {
-  label: string;
-  grossAmount: number | null;
-  discount: number | null;
-  special_discount: number | null;
-  cgstRate: number | null;
-  sgstRate: number | null;
-  igstRate: number | null;
-  cgstAmount: number | null;
-  sgstAmount: number | null;
-  igstAmount: number | null;
-}
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-// ─── Helpers (used by detection functions below) ─────────────────────────────
-
-function sumNums(...vals: (number | null | undefined)[]): number | null {
+function sum(...vals: (number | null | undefined)[]): number | null {
   const nums = vals.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   return nums.length ? nums.reduce((a, b) => a + b, 0) : null;
 }
@@ -39,42 +26,53 @@ function round2(v: number): number {
 }
 
 /**
- * Validate GST on one side (parts or labour).
- * taxable base = gross − discount. GST = taxable × rate%.
- * Tolerance: max(₹1, 1% of expected).
+ * Check if expected GST matches actual within tolerance (max ₹1 or 1%).
  */
-function checkGstSide(side: GstSide): string[] {
+function gstCloseEnough(taxable: number, rate: number, actual: number): boolean {
+  const expected = round2(taxable * rate / 100);
+  return Math.abs(expected - actual) <= Math.max(1, expected * 0.01);
+}
+
+/**
+ * Validate GST for one side (parts or labour) of a bill.
+ *
+ * Indian invoices use two conventions for parts_total / labour_total:
+ *   Style A — already post-discount (Toyota) → GST = amount × rate
+ *   Style B — pre-discount line sum (Maruti)  → GST = (amount − discount) × rate
+ *
+ * We accept either. Alert only when neither matches.
+ */
+function checkGstSide(
+  label: string,
+  amount: number | null,
+  discount: number,
+  rate: number,
+  gstActual: number | null,
+  cgstRate: number | null,
+  sgstRate: number | null,
+  cgstAmount: number | null,
+  sgstAmount: number | null,
+): string[] {
+  if (amount == null || gstActual == null || rate <= 0) return [];
+
   const issues: string[] = [];
-  const totalGstAmount = sumNums(side.cgstAmount, side.sgstAmount, side.igstAmount);
-  const hasRate = side.cgstRate != null || side.sgstRate != null || side.igstRate != null;
-  if (side.grossAmount == null || totalGstAmount == null || !hasRate) return issues;
 
-  const isInterState = (side.igstRate ?? 0) > 0 || (side.igstAmount ?? 0) > 0;
-
-  if (!isInterState && side.cgstRate != null && side.sgstRate != null) {
-    if (Math.abs(side.cgstRate - side.sgstRate) > 0.01) {
-      issues.push(`${side.label}: CGST rate (${side.cgstRate}%) ≠ SGST rate (${side.sgstRate}%)`);
-    }
-    if (side.cgstAmount != null && side.sgstAmount != null &&
-        Math.abs(side.cgstAmount - side.sgstAmount) > 1) {
-      issues.push(`${side.label}: CGST amount (₹${side.cgstAmount}) ≠ SGST amount (₹${side.sgstAmount})`);
-    }
+  // Check 1: CGST must equal SGST (intra-state only)
+  if (cgstRate != null && sgstRate != null && Math.abs(cgstRate - sgstRate) > 0.01) {
+    issues.push(`${label}: CGST rate (${cgstRate}%) ≠ SGST rate (${sgstRate}%)`);
+  }
+  if (cgstAmount != null && sgstAmount != null && Math.abs(cgstAmount - sgstAmount) > 1) {
+    issues.push(`${label}: CGST amount (₹${cgstAmount}) ≠ SGST amount (₹${sgstAmount})`);
   }
 
-  const totalRate = isInterState
-    ? (side.igstRate ?? 0)
-    : (side.cgstRate ?? 0) + (side.sgstRate ?? 0);
+  // Check 2: GST amount matches taxable × rate (accept either convention)
+  const styleA = gstCloseEnough(amount, rate, gstActual);
+  const styleB = discount > 0 && gstCloseEnough(amount - discount, rate, gstActual);
 
-  if (totalRate > 0) {
-    const taxableBase = side.grossAmount - (side.discount ?? 0) - (side.special_discount ?? 0);
-    const expected = Math.round(taxableBase * (totalRate / 100) * 100) / 100;
-    const tolerance = Math.max(1, expected * 0.01);
-    if (Math.abs(expected - totalGstAmount) > tolerance) {
-      issues.push(
-        `${side.label}: total GST expected ₹${expected} ` +
-        `(₹${taxableBase} × ${totalRate}%), got ₹${round2(totalGstAmount)}`,
-      );
-    }
+  if (!styleA && !styleB) {
+    const taxable = discount > 0 ? round2(amount - discount) : amount;
+    const expected = round2(taxable * rate / 100);
+    issues.push(`${label}: GST expected ₹${expected} (₹${round2(taxable)} × ${rate}%), got ₹${round2(gstActual)}`);
   }
 
   return issues;
@@ -120,33 +118,37 @@ export async function detectGstAnomalies(): Promise<FraudAlert[]> {
   const alerts: FraudAlert[] = [];
 
   for (const bill of bills) {
-    const totals = bill.parsed_data?.totals_and_tax_summary;
+    const t = bill.parsed_data?.totals_and_tax_summary;
 
-    const partsIssues = checkGstSide({
-      label: 'Parts',
-      grossAmount: bill.parts_amount ?? null,
-      discount: totals?.parts_discount ?? null,
-      special_discount: totals?.parts_special_discount ?? null,
-      cgstRate: bill.parts_cgst_rate ?? null,
-      sgstRate: bill.parts_sgst_rate ?? null,
-      igstRate: bill.parts_igst_rate ?? null,
-      cgstAmount: bill.parts_cgst_amount ?? null,
-      sgstAmount: bill.parts_sgst_amount ?? null,
-      igstAmount: bill.parts_igst_amount ?? null,
-    });
+    const pDisc = (t?.parts_discount ?? 0) + (t?.parts_special_discount ?? 0);
+    const lDisc = (t?.labour_discount ?? 0) + (t?.labour_special_discount ?? 0);
 
-    const labourIssues = checkGstSide({
-      label: 'Labour',
-      grossAmount: bill.labour_amount ?? null,
-      discount: totals?.labour_discount ?? null,
-      special_discount: totals?.labour_special_discount ?? null,
-      cgstRate: bill.labour_cgst_rate ?? null,
-      sgstRate: bill.labour_sgst_rate ?? null,
-      igstRate: bill.labour_igst_rate ?? null,
-      cgstAmount: bill.labour_cgst_amount ?? null,
-      sgstAmount: bill.labour_sgst_amount ?? null,
-      igstAmount: bill.labour_igst_amount ?? null,
-    });
+    const isInterParts = (bill.parts_igst_rate ?? 0) > 0;
+    const isInterLabour = (bill.labour_igst_rate ?? 0) > 0;
+
+    const partsIssues = checkGstSide(
+      'Parts',
+      bill.parts_amount ?? null,
+      pDisc,
+      isInterParts ? (bill.parts_igst_rate ?? 0) : (bill.parts_cgst_rate ?? 0) + (bill.parts_sgst_rate ?? 0),
+      sum(bill.parts_cgst_amount, bill.parts_sgst_amount, bill.parts_igst_amount),
+      isInterParts ? null : (bill.parts_cgst_rate ?? null),
+      isInterParts ? null : (bill.parts_sgst_rate ?? null),
+      isInterParts ? null : (bill.parts_cgst_amount ?? null),
+      isInterParts ? null : (bill.parts_sgst_amount ?? null),
+    );
+
+    const labourIssues = checkGstSide(
+      'Labour',
+      bill.labour_amount ?? null,
+      lDisc,
+      isInterLabour ? (bill.labour_igst_rate ?? 0) : (bill.labour_cgst_rate ?? 0) + (bill.labour_sgst_rate ?? 0),
+      sum(bill.labour_cgst_amount, bill.labour_sgst_amount, bill.labour_igst_amount),
+      isInterLabour ? null : (bill.labour_cgst_rate ?? null),
+      isInterLabour ? null : (bill.labour_sgst_rate ?? null),
+      isInterLabour ? null : (bill.labour_cgst_amount ?? null),
+      isInterLabour ? null : (bill.labour_sgst_amount ?? null),
+    );
 
     const issues = [...partsIssues, ...labourIssues];
 
