@@ -309,6 +309,20 @@ function CostKmView() {
 
   return (
     <Panel title="Cost per km" note="Needs 2+ odometer readings per vehicle">
+      <div style={{
+        background: '#F0F4F8', border: '1px solid #D4DEE8', borderRadius: 8,
+        padding: '12px 16px', marginBottom: 14, fontSize: 12, lineHeight: 1.8,
+      }}>
+        <div style={{ fontWeight: 600, color: T.ink, marginBottom: 4 }}>How is this calculated?</div>
+        <div style={{ fontFamily: T.mono, color: T.accent, fontSize: 13 }}>
+          Cost/km = Total Spend / Km Range
+        </div>
+        <div style={{ color: T.muted, fontSize: 11, marginTop: 4 }}>
+          <b>Total Spend</b> = Sum of grand totals from all invoices for this vehicle<br />
+          <b>Km Range</b> = Max odometer reading − Min odometer reading (across all invoices)<br />
+          <b>Requires</b> at least 2 invoices with odometer readings for the same vehicle
+        </div>
+      </div>
       <table style={tableStyle}>
         <thead>
           <tr style={{ borderBottom: `2px solid ${T.border}` }}>
@@ -316,6 +330,7 @@ function CostKmView() {
             <th style={{ ...thStyle, textAlign: 'right' }}>₹/km</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>Total spend</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>Km range</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Formula</th>
           </tr>
         </thead>
         <tbody>
@@ -330,6 +345,11 @@ function CostKmView() {
               <td style={{ ...tdStyle, textAlign: 'right' }} title={moneyFull(r.total_spend)}>{moneyCompact(r.total_spend)}</td>
               <td style={{ ...tdStyle, textAlign: 'right', color: T.muted }}>
                 {r.km_range != null ? `${countFmt(r.km_range)} km` : '—'}
+              </td>
+              <td style={{ ...tdStyle, textAlign: 'right', fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+                {r.cost_per_km != null && r.km_range != null
+                  ? `${moneyCompact(r.total_spend)} ÷ ${countFmt(r.km_range)}`
+                  : 'insufficient data'}
               </td>
             </tr>
           ))}

@@ -16,7 +16,7 @@ export function invalidateInvoiceCache() { invCache = null; }
 
 const DEFAULT_PAGE_SIZE = 10;
 
-type SortKey = 'status' | 'vendorName' | 'invoiceDate' | 'confidence' | 'totalAmount';
+type SortKey = 'none' | 'status' | 'vendorName' | 'invoiceDate' | 'confidence' | 'totalAmount';
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'ALL' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NEEDS_REVIEW';
 
@@ -47,9 +47,8 @@ function needsReview(inv: Invoice): boolean {
 
 function applyClientFilters(invoices: Invoice[], statusFilter: StatusFilter): Invoice[] {
   if (statusFilter === 'ALL') return invoices;
-  if (statusFilter === 'NEEDS_REVIEW') {
-    return invoices.filter(needsReview);
-  }
+  if (statusFilter === 'NEEDS_REVIEW') return invoices.filter(needsReview);
+  if (statusFilter === 'COMPLETED') return invoices.filter((inv) => inv.status === 'COMPLETED' && !needsReview(inv));
   return invoices.filter((inv) => inv.status === statusFilter);
 }
 
@@ -65,9 +64,11 @@ function countsByStatus(invoices: Invoice[]): Record<StatusFilter, number> {
   for (const inv of invoices) {
     if (inv.status === 'PENDING') counts.PENDING++;
     else if (inv.status === 'PROCESSING') counts.PROCESSING++;
-    else if (inv.status === 'COMPLETED') counts.COMPLETED++;
+    else if (inv.status === 'COMPLETED') {
+      if (needsReview(inv)) counts.NEEDS_REVIEW++;
+      else counts.COMPLETED++;
+    }
     else if (inv.status === 'FAILED') counts.FAILED++;
-    if (needsReview(inv)) counts.NEEDS_REVIEW++;
   }
   return counts;
 }
@@ -86,6 +87,10 @@ function rowDisplayStatus(inv: Invoice): string {
   return inv.status;
 }
 
+function isDuplicate(inv: Invoice): boolean {
+  return (inv.reviewReasons ?? []).some((r) => r.startsWith('Duplicate:'));
+}
+
 export function InvoicesPage() {
   const navigate = useNavigate();
 
@@ -101,7 +106,7 @@ export function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [q, setQ] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [sort, setSort] = useState<SortKey>('invoiceDate');
+  const [sort, setSort] = useState<SortKey>('none');
   const [dir, setDir] = useState<SortDir>('desc');
   const [minTotal, setMinTotal] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -221,7 +226,8 @@ export function InvoicesPage() {
       rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate <= dateTo);
     }
 
-    // Sort
+    // Sort (none = server order = latest updated first)
+    if (sort !== 'none') {
     rows = [...rows].sort((a, b) => {
       let av: string | number | null | undefined;
       let bv: string | number | null | undefined;
@@ -252,6 +258,7 @@ export function InvoicesPage() {
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
       return dir === 'asc' ? cmp : -cmp;
     });
+    }
 
     return rows;
   })();
@@ -774,8 +781,15 @@ export function InvoicesPage() {
                         onClick={(e) => e.stopPropagation()} style={{ cursor: 'pointer' }} />
                     </td>
                     <td style={tdBase}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <StatusDot status={rowDisplayStatus(row)} />
+                        {isDuplicate(row) && (
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                            padding: '1px 5px', borderRadius: 3,
+                            background: '#FEF3CD', color: '#8B6914', border: '1px solid #F0C040',
+                          }}>DUP</span>
+                        )}
                         {(row.status === 'PROCESSING' || row.status === 'PENDING') && (
                           <button onClick={(e) => { e.stopPropagation(); void handleCancel(row.id); }}
                             title="Stop this extraction" style={stopBtn}>Stop</button>

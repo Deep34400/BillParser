@@ -9,10 +9,10 @@ import { DocNote, type DocItem } from '../components/DocNote.js';
 type CheckType = 'all' | 'duplicates' | 'gst' | 'prices' | 'odometer';
 
 const FRAUD_FORMULAS: DocItem[] = [
-  { label: 'Duplicate Invoices', severity: 'HIGH', formula: 'GROUP BY (invoice_number + vendor_gstin) → alert if count > 1', description: 'Same invoice number from same vendor GSTIN submitted more than once.', sourceFile: 'platform/src/services/fraud/fraudDetectionService.ts → detectDuplicateInvoices()' },
-  { label: 'GST Anomalies', severity: 'MEDIUM', formula: 'taxable = gross − discount · total GST = CGST + SGST + IGST · alert if mismatch', description: 'Validates combined GST against taxable base after discount.', sourceFile: 'platform/src/services/fraud/fraudDetectionService.ts → checkGstSide()' },
-  { label: 'Price Anomalies', severity: 'MEDIUM', formula: 'median × 1.5 threshold · needs 3+ bills per part', description: 'Parts priced >50% above median rate.', sourceFile: 'platform/src/services/fraud/fraudDetectionService.ts → detectPriceAnomalies()' },
-  { label: 'Odometer Issues', severity: 'HIGH', formula: 'current_odometer < previous_odometer → alert', description: 'Odometer rollback for same vehicle.', sourceFile: 'platform/src/services/fraud/fraudDetectionService.ts → detectOdometerInconsistency()' },
+  { label: 'Duplicate Invoices', severity: 'HIGH', formula: 'GROUP BY (invoice_number + vendor_gstin) → alert if count > 1', description: 'Same invoice number from same vendor GSTIN submitted more than once.', sourceFile: 'platform/src/fraud/service.ts → detectDuplicateInvoices()' },
+  { label: 'GST Anomalies', severity: 'MEDIUM', formula: 'accept if GST ≈ amount×rate% OR (amount−discount)×rate% · tolerance max(₹1, 1%)', description: 'Handles both invoice styles: (A) amount already post-discount, (B) amount is pre-discount line sum. True mismatch only when neither matches.', sourceFile: 'platform/src/fraud/service.ts → checkGstSide()' },
+  { label: 'Price Anomalies', severity: 'MEDIUM', formula: 'median × 1.5 threshold · needs 3+ bills per part', description: 'Parts priced >50% above median rate.', sourceFile: 'platform/src/fraud/service.ts → detectPriceAnomalies()' },
+  { label: 'Odometer Issues', severity: 'HIGH', formula: 'current_odometer < previous_odometer → alert', description: 'Odometer rollback for same vehicle.', sourceFile: 'platform/src/fraud/service.ts → detectOdometerInconsistency()' },
 ];
 
 const CHECKS: { key: CheckType; label: string; icon: string; desc: string; types: string[] }[] = [

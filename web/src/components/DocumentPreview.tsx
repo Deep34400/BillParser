@@ -82,6 +82,24 @@ export function DocumentPreview({ invoice }: { invoice: Invoice | null }) {
         </span>
       </div>
 
+      {/* Review warnings banner */}
+      {invoice.reviewReasons && invoice.reviewReasons.length > 0 && (
+        <div style={{
+          background: invoice.reviewReasons.some((r) => r.startsWith('Duplicate:')) ? '#FEF3CD' : '#FFF8E1',
+          border: `1px solid ${invoice.reviewReasons.some((r) => r.startsWith('Duplicate:')) ? '#F0C040' : '#FFE082'}`,
+          borderRadius: 6, padding: '10px 12px', marginBottom: 12, fontSize: 12, lineHeight: 1.6,
+        }}>
+          {invoice.reviewReasons.map((r, i) => (
+            <div key={i} style={{
+              color: r.startsWith('Duplicate:') ? '#8B6914' : '#F57F17',
+              fontWeight: r.startsWith('Duplicate:') ? 600 : 400,
+            }}>
+              {r.startsWith('Duplicate:') ? '⚠ ' : '• '}{r}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Mock document with bounding boxes */}
       <div style={{
         background: '#F3F2EC', borderRadius: 8, padding: 16, marginBottom: 16,
