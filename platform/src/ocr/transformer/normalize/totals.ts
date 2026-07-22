@@ -41,21 +41,102 @@ function coalesceDiscount(
   return stored ?? undefined;
 }
 
+function dominantTaxRate(items: { tax_percentage?: number | null }[]): number | null {
+  const rates = items
+    .map((i) => i.tax_percentage)
+    .filter((r): r is number => typeof r === 'number' && r > 0);
+  if (!rates.length) return null;
+  // Most common positive rate (handles mixed 0% + 18%)
+  const counts = new Map<number, number>();
+  for (const r of rates) counts.set(r, (counts.get(r) ?? 0) + 1);
+  let best = rates[0];
+  let bestN = 0;
+  for (const [r, n] of counts) {
+    if (n > bestN) { best = r; bestN = n; }
+  }
+  return best;
+}
+
+function lineItemGst(
+  parts: PartsLineItem[],
+  labour: LabourServiceLineItem[],
+): { parts: number; labour: number; partsRate: number | null; labourRate: number | null } {
+  const partsGst = roundMoney(
+    parts.reduce((s, p) => s + (p.taxable_amount ?? 0) * ((p.tax_percentage ?? 0) / 100), 0),
+  );
+  const labourGst = roundMoney(
+    labour.reduce((s, l) => s + (l.labour_charges ?? 0) * ((l.tax_percentage ?? 0) / 100), 0),
+  );
+  return {
+    parts: partsGst,
+    labour: labourGst,
+    partsRate: dominantTaxRate(parts),
+    labourRate: dominantTaxRate(labour),
+  };
+}
+
+function hasAnyGstAmount(t: TotalsAndTaxSummary): boolean {
+  return (
+    (t.parts_cgst_amount ?? 0) > 0 || (t.parts_sgst_amount ?? 0) > 0 || (t.parts_igst_amount ?? 0) > 0 ||
+    (t.labour_cgst_amount ?? 0) > 0 || (t.labour_sgst_amount ?? 0) > 0 || (t.labour_igst_amount ?? 0) > 0
+  );
+}
+
+function hasCgstSgstRate(t: TotalsAndTaxSummary): boolean {
+  return (
+    (t.parts_cgst_rate ?? 0) > 0 || (t.parts_sgst_rate ?? 0) > 0 ||
+    (t.labour_cgst_rate ?? 0) > 0 || (t.labour_sgst_rate ?? 0) > 0
+  );
+}
+
+function hasIgstSignal(t: TotalsAndTaxSummary, data: ParsedInvoiceData, markdown?: string | null): boolean {
+  if ((t.parts_igst_rate ?? 0) > 0 || (t.labour_igst_rate ?? 0) > 0) return true;
+  if ((t.parts_igst_amount ?? 0) > 0 || (t.labour_igst_amount ?? 0) > 0) return true;
+  if (!markdown) return false;
+
+  // Footer: "Add : IGST 1,057.50" with CGST/SGST zero or absent
+  const igstFooter = /Add\s*:\s*IGST\s*([\d,]+\.?\d*)/i.exec(markdown);
+  if (igstFooter) {
+    const amt = parseFloat(igstFooter[1].replace(/,/g, ''));
+    if (Number.isFinite(amt) && amt > 0) return true;
+  }
+
+  // Inter-state: seller GSTIN state ≠ any other GSTIN state in the text
+  const seller = (data.gstin ?? '').replace(/\s/g, '').toUpperCase();
+  const sellerState = seller.length >= 2 ? seller.slice(0, 2) : '';
+  if (!sellerState) return false;
+  const all = markdown.match(/\b(\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9])\b/gi) ?? [];
+  for (const g of all) {
+    const u = g.toUpperCase();
+    if (u === seller) continue;
+    if (u.slice(0, 2) !== sellerState) return true;
+  }
+  return false;
+}
+
+/**
+ * Infer missing rates only from existing amounts / line-item % — do NOT invent CGST/SGST
+ * when the footer is empty (that wrongly turns IGST bills into CGST+SGST).
+ */
 function inferGstRates(t: TotalsAndTaxSummary, data: ParsedInvoiceData): void {
-  const full = (items: { tax_percentage?: number | null }[]) =>
-    items.find((i) => i.tax_percentage != null && i.tax_percentage > 0)?.tax_percentage ?? null;
-  const pFull = full(data.parts_line_items ?? []);
-  const lFull = full(data.labour_service_line_items ?? []);
-  const half = (f: number | null) => (f != null ? f / 2 : null);
-  const pHalf = half(pFull);
-  const lHalf = half(lFull);
-  // Intra-state: CGST = SGST = half the GST rate.
-  if (t.parts_cgst_rate == null && pHalf != null) { t.parts_cgst_rate = pHalf; t.parts_sgst_rate = pHalf; }
-  if (t.labour_cgst_rate == null && lHalf != null) { t.labour_cgst_rate = lHalf; t.labour_sgst_rate = lHalf; }
-  // Inter-state: IGST = the full GST rate. Infer it when an IGST amount is charged but the footer
-  // printed only the amount (rate lives in the line-item "IGST%" column, e.g. MG/Morris Garages).
+  const pFull = dominantTaxRate(data.parts_line_items ?? []);
+  const lFull = dominantTaxRate(data.labour_service_line_items ?? []);
+  const pHalf = pFull != null ? pFull / 2 : null;
+  const lHalf = lFull != null ? lFull / 2 : null;
+
+  // IGST amount present → fill IGST rate from line items
   if (t.parts_igst_rate == null && (t.parts_igst_amount ?? 0) > 0 && pFull != null) t.parts_igst_rate = pFull;
   if (t.labour_igst_rate == null && (t.labour_igst_amount ?? 0) > 0 && lFull != null) t.labour_igst_rate = lFull;
+
+  // CGST/SGST amount present → fill half rates
+  if (t.parts_cgst_rate == null && (t.parts_cgst_amount ?? 0) > 0 && pHalf != null) {
+    t.parts_cgst_rate = pHalf;
+    if (t.parts_sgst_rate == null) t.parts_sgst_rate = pHalf;
+  }
+  if (t.labour_cgst_rate == null && (t.labour_cgst_amount ?? 0) > 0 && lHalf != null) {
+    t.labour_cgst_rate = lHalf;
+    if (t.labour_sgst_rate == null) t.labour_sgst_rate = lHalf;
+  }
 }
 
 /**
@@ -83,6 +164,65 @@ export function fillMissingGstAmounts(t: TotalsAndTaxSummary): void {
     }
     if (sgstRate != null && sgstRate > 0 && t[`${side}_sgst_amount`] == null) {
       t[`${side}_sgst_amount`] = roundMoney(taxable * sgstRate / 100);
+    }
+  }
+}
+
+/**
+ * When ALL GST amounts are still missing, compute from line items (handles mixed 0%/18%).
+ * Prefers IGST when footer/markdown/IGST rate says inter-state, or when no CGST/SGST rates
+ * were printed (UnifyGST "GST Rate" column → IGST for inter-state bills).
+ */
+function fillMissingGstFromLineItems(
+  t: TotalsAndTaxSummary,
+  data: ParsedInvoiceData,
+  markdown?: string | null,
+): void {
+  if (hasAnyGstAmount(t)) return;
+
+  const { parts, labour, partsRate, labourRate } = lineItemGst(
+    data.parts_line_items ?? [],
+    data.labour_service_line_items ?? [],
+  );
+  if (parts <= 0 && labour <= 0) return;
+
+  // Prefer IGST when signaled, or when footer has no CGST/SGST rates at all
+  // (Gemini single leaves rates null — default to IGST for a single GST bucket).
+  const useIgst = hasIgstSignal(t, data, markdown) || !hasCgstSgstRate(t);
+
+  if (useIgst) {
+    if (parts > 0) {
+      t.parts_igst_amount = parts;
+      if (t.parts_igst_rate == null && partsRate != null) t.parts_igst_rate = partsRate;
+      t.parts_cgst_amount = null; t.parts_sgst_amount = null;
+      t.parts_cgst_rate = null; t.parts_sgst_rate = null;
+    }
+    if (labour > 0) {
+      t.labour_igst_amount = labour;
+      if (t.labour_igst_rate == null && labourRate != null) t.labour_igst_rate = labourRate;
+      t.labour_cgst_amount = null; t.labour_sgst_amount = null;
+      t.labour_cgst_rate = null; t.labour_sgst_rate = null;
+    }
+    return;
+  }
+
+  // Intra-state: split line GST into equal CGST + SGST
+  if (parts > 0) {
+    const half = roundMoney(parts / 2);
+    t.parts_cgst_amount = half;
+    t.parts_sgst_amount = half;
+    if (t.parts_cgst_rate == null && partsRate != null) {
+      t.parts_cgst_rate = partsRate / 2;
+      t.parts_sgst_rate = partsRate / 2;
+    }
+  }
+  if (labour > 0) {
+    const half = roundMoney(labour / 2);
+    t.labour_cgst_amount = half;
+    t.labour_sgst_amount = half;
+    if (t.labour_cgst_rate == null && labourRate != null) {
+      t.labour_cgst_rate = labourRate / 2;
+      t.labour_sgst_rate = labourRate / 2;
     }
   }
 }
@@ -237,6 +377,7 @@ export function resolveBillSummary(
 
   inferGstRates(t, data);
   fillMissingGstAmounts(t);
+  fillMissingGstFromLineItems(t, data, markdown);
   reconcileSideGst(t);
   stripCalculatedFooterAmounts(t);
   dedupeSingleColumnDuplicate(t, data, footerParts, footerLabour);
