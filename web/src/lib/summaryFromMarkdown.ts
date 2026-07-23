@@ -639,6 +639,23 @@ function coalesceDiscount(stored: number | null | undefined, _otherSide: number 
   return stored ?? undefined;
 }
 
+/**
+ * Style A: LLM returns column total already post-discount (≈ lineSum − discount)
+ * while still emitting the discount. Normalize to Style B so UI applies discount once.
+ */
+function restorePreDiscountColumnTotal(
+  t: TotalsAndTaxSummary,
+  side: 'parts' | 'labour',
+  lineSum: number | null,
+): void {
+  const sub = t[`${side}_total`];
+  const disc = (t[`${side}_discount`] ?? 0) + (t[`${side}_special_discount`] ?? 0);
+  if (sub == null || disc <= 0 || lineSum == null || lineSum <= 0) return;
+  if (Math.abs(sub - roundMoney(lineSum - disc)) < 0.15 && Math.abs(lineSum - sub) > 0.15) {
+    t[`${side}_total`] = roundMoney(lineSum);
+  }
+}
+
 function inferGstRates(t: TotalsAndTaxSummary, data: ParsedInvoiceData): void {
   const full = (items: { tax_percentage?: number | null }[]) =>
     items.find((i) => i.tax_percentage != null && i.tax_percentage > 0)?.tax_percentage ?? null;
@@ -766,16 +783,24 @@ export function resolveBillSummary(data: ParsedInvoiceData, markdown?: string | 
   const footerParts = markdown ? t.parts_total : undefined;
   const footerLabour = markdown ? t.labour_total : undefined;
 
-  t.parts_total = coalesceColumnTotal(t.parts_total, sumParts(data));
-  t.labour_total = coalesceColumnTotal(t.labour_total, sumLabour(data));
+  const partsSum = sumParts(data);
+  const labourSum = sumLabour(data);
+
+  t.parts_total = coalesceColumnTotal(t.parts_total, partsSum);
+  t.labour_total = coalesceColumnTotal(t.labour_total, labourSum);
 
   t.parts_discount = coalesceDiscount(t.parts_discount, t.labour_discount);
   t.labour_discount = coalesceDiscount(t.labour_discount, t.parts_discount);
+
+  restorePreDiscountColumnTotal(t, 'parts', partsSum);
+  restorePreDiscountColumnTotal(t, 'labour', labourSum);
 
   inferGstRates(t, data);
   fillMissingGstAmounts(t);
   reconcileSideGst(t);
   stripCalculatedFooterAmounts(t);
+  // After stripping gross×rate GST mistakes, refill from (subtotal − discount) × rate
+  fillMissingGstAmounts(t);
   dedupeSingleColumnDuplicate(t, data, footerParts, footerLabour);
 
   const gp = markdown ? extractGatePassAmount(markdown) : null;
