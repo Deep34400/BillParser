@@ -41,6 +41,24 @@ function coalesceDiscount(
   return stored ?? undefined;
 }
 
+/**
+ * Style A (Toyota/Chevrolet): LLM returns column total already post-discount
+ * (≈ lineSum − discount) while still emitting the discount. Normalize to Style B
+ * so UI applies discount once: Sub Total = lineSum, Less Discount, GST on taxable.
+ */
+function restorePreDiscountColumnTotal(
+  t: TotalsAndTaxSummary,
+  side: 'parts' | 'labour',
+  lineSum: number | null,
+): void {
+  const sub = t[`${side}_total`];
+  const disc = (t[`${side}_discount`] ?? 0) + (t[`${side}_special_discount`] ?? 0);
+  if (sub == null || disc <= 0 || lineSum == null || lineSum <= 0) return;
+  if (Math.abs(sub - roundMoney(lineSum - disc)) < 0.15 && Math.abs(lineSum - sub) > 0.15) {
+    t[`${side}_total`] = roundMoney(lineSum);
+  }
+}
+
 function dominantTaxRate(items: { tax_percentage?: number | null }[]): number | null {
   const rates = items
     .map((i) => i.tax_percentage)
@@ -375,11 +393,16 @@ export function resolveBillSummary(
   t.parts_discount = coalesceDiscount(t.parts_discount, t.labour_discount);
   t.labour_discount = coalesceDiscount(t.labour_discount, t.parts_discount);
 
+  restorePreDiscountColumnTotal(t, 'parts', partsSum);
+  restorePreDiscountColumnTotal(t, 'labour', labourSum);
+
   inferGstRates(t, data);
   fillMissingGstAmounts(t);
   fillMissingGstFromLineItems(t, data, markdown);
   reconcileSideGst(t);
   stripCalculatedFooterAmounts(t);
+  // Refill after stripping gross×rate mistakes → (subtotal − discount) × rate
+  fillMissingGstAmounts(t);
   dedupeSingleColumnDuplicate(t, data, footerParts, footerLabour);
 
   reconcilePrintedTotal(t, data, partsSum, labourSum, markdown);

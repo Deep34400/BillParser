@@ -13,6 +13,7 @@ import { enrichParsedInvoice } from './transformer/normalize/index.js';
 import { runPipeline } from './process.js';
 import { cacheInvalidate } from '../shared/cache.js';
 import { upsertVendorFromInvoice } from '../vendor/vendorService.js';
+import { bearerFromRequest } from '../middleware/auth.js';
 
 /** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill (so UI shows the chosen model, not mistral). */
 async function applyPipelineSettingsToBill(bill: import('../shared/types.js').BillDoc): Promise<void> {
@@ -59,9 +60,8 @@ function processInBackground(
       }
 
       const enriched = enrichParsedInvoice(result.parsed, rawOcr);
-      const parsed = toApiParsed(enriched) as unknown as ParsedInvoiceData;
 
-      const bill = mapParsedToBill(billId, parsed, {
+      const bill = mapParsedToBill(billId, enriched, {
         fileUrl,
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
@@ -78,9 +78,9 @@ function processInBackground(
 
       // Duplicate check — non-blocking warning only
       try {
-        const dupes = await findDuplicateBills(parsed.invoice_number, parsed.gstin, billId);
+        const dupes = await findDuplicateBills(enriched.invoice_number, enriched.gstin, billId);
         if (dupes.length > 0) {
-          const dupMsg = `Duplicate: invoice ${parsed.invoice_number} already exists (${dupes.length} match)`;
+          const dupMsg = `Duplicate: invoice ${enriched.invoice_number} already exists (${dupes.length} match)`;
           const reasons = bill.review_reasons ?? [];
           if (!reasons.includes(dupMsg)) reasons.push(dupMsg);
           await updateBill(billId, { review_reasons: reasons });
@@ -90,11 +90,11 @@ function processInBackground(
         console.warn(`[OCR] ${billId} — duplicate check failed:`, (e as Error).message);
       }
 
-      const parts = extractPartsFromParsed(billId, parsed);
+      const parts = extractPartsFromParsed(billId, enriched);
       await saveBillParts(parts);
 
       // Vendor Registry — fire-and-forget; never blocks or affects OCR pipeline
-      upsertVendorFromInvoice(billId, parsed)
+      upsertVendorFromInvoice(billId, enriched)
         .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
         .catch((e) => console.warn(`[vendor] ${billId} — registry update failed:`, (e as Error).message));
 
@@ -156,12 +156,35 @@ export async function billRoutes(app: FastifyInstance) {
 
   /**
    * GET /api/invoices/:id — single invoice detail.
+   *
+   * API key (Bearer inv_…): lean OCR payload only
+   *   { success, data: { bill_id, status, parsed_data, review_reasons, fallback_reason } }
+   *
+   * JWT / UI session: full FrontendInvoice (camelCase) for the detail page.
    */
   app.get('/api/invoices/:id', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
       const bill = await getBill(id);
       if (!bill) return reply.code(404).send({ error: 'Invoice not found' });
+
+      const token = bearerFromRequest(req);
+      const isApiKey = !!token?.startsWith('inv_');
+
+      if (isApiKey) {
+        const inv = billToInvoice(bill);
+        return {
+          success: true,
+          data: {
+            bill_id: bill.bill_id,
+            status: inv.status,
+            parsedData: toApiParsed(bill.parsed_data),
+            review_reasons: inv.reviewReasons ?? [],
+            fallback_reason: inv.fallbackReason ?? null,
+          },
+        };
+      }
+
       const parts = await getPartsForBill(id);
       return billToInvoice(bill, parts);
     } catch (err) {
@@ -549,7 +572,6 @@ export async function billRoutes(app: FastifyInstance) {
       const { costInfo, rawOcr, providers } = result;
 
       const enriched = enrichParsedInvoice(result.parsed, rawOcr);
-      const parsed = toApiParsed(enriched) as unknown as ParsedInvoiceData;
 
       const billId = uuid();
       const fileName = 'api-sync-upload';
@@ -558,7 +580,7 @@ export async function billRoutes(app: FastifyInstance) {
         contentType: isPdf(buf) ? 'application/pdf' : 'image/jpeg',
       });
 
-      const bill = mapParsedToBill(billId, parsed, {
+      const bill = mapParsedToBill(billId, enriched, {
         fileUrl: publicUrl,
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
@@ -566,12 +588,15 @@ export async function billRoutes(app: FastifyInstance) {
         pipelineMode: providers.mode,
       });
       bill.ocr_status = 'OCR_COMPLETED';
+      if (result.fallbackReason) {
+        bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
+      }
       await createBill(bill);
-      const parts = extractPartsFromParsed(billId, parsed);
+      const parts = extractPartsFromParsed(billId, enriched);
       await saveBillParts(parts);
 
       // Vendor Registry — fire-and-forget
-      upsertVendorFromInvoice(billId, parsed)
+      upsertVendorFromInvoice(billId, enriched)
         .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
         .catch(() => {});
 
@@ -586,6 +611,8 @@ export async function billRoutes(app: FastifyInstance) {
         data: {
           bill_id: billId,
           parsed_data: toApiParsed(enriched),
+          review_reasons: bill.review_reasons ?? [],
+          fallback_reason: result.fallbackReason ?? null,
           raw_ocr: rawOcr,
           cost: {
             mode: providers.mode,

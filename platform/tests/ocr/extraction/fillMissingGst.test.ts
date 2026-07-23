@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { fillMissingGstAmounts, resolveBillSummary } from '../../../src/ocr/transformer/normalize/totals.js';
+import {
+  columnNet,
+  fillMissingGstAmounts,
+  resolveBillSummary,
+} from '../../../src/ocr/transformer/normalize/totals.js';
 import type { ParsedInvoiceData, TotalsAndTaxSummary } from '../../../src/ocr/types/invoice.js';
 
 describe('fillMissingGstAmounts — Kataria-style footer (rates only)', () => {
@@ -157,5 +161,62 @@ Our GSTIN : 27AZFPP2560C1ZJ
     const totalIgst = (t.parts_igst_amount ?? 0) + (t.labour_igst_amount ?? 0);
     expect(totalIgst).toBeCloseTo(1057.5, 1);
     expect((t.parts_cgst_amount ?? 0) + (t.labour_cgst_amount ?? 0)).toBe(0);
+  });
+});
+
+/**
+ * JSB Mobility / Chevrolet-style: LLM returns labour_total already post-discount
+ * (lineSum − discount) plus the same discount again. GST is correctly on the
+ * post-discount taxable. UI must not subtract discount twice.
+ */
+describe('resolveBillSummary — post-discount labour_total (JSB Mobility)', () => {
+  function jsbInvoice(): ParsedInvoiceData {
+    return {
+      company_name: 'JSB MOBILITY PVT LTD',
+      gstin: '07AAGCJ6656E1ZF',
+      invoice_number: 'DW21S26100348',
+      parts_line_items: [
+        { item_name_description: 'Hydraulic Brake Fluid 0.25L', taxable_amount: 467.8, tax_percentage: 18 },
+        { item_name_description: 'Solvent-Wdo Clnr', taxable_amount: 101.69, tax_percentage: 18 },
+        { item_name_description: 'FILTER-POLLEN', taxable_amount: 423.73, tax_percentage: 18 },
+        { item_name_description: 'BLADE ASM-WSW', taxable_amount: 295.76, tax_percentage: 18 },
+        { item_name_description: 'PAD ASM-FRT BRK SYS', taxable_amount: 9916.1, tax_percentage: 18 },
+        { item_name_description: 'BLADE ASM-R/WDO WPR', taxable_amount: 535.59, tax_percentage: 18 },
+        { item_name_description: 'BLADE ASM-WSW', taxable_amount: 351.69, tax_percentage: 18 },
+        { item_name_description: 'Engine Coolant 5 L', taxable_amount: 1449.15, tax_percentage: 18 },
+      ],
+      labour_service_line_items: [
+        { labour_description: 'Paid Service/60000 KM EV', labour_charges: 2700, tax_percentage: 18 },
+        { labour_description: 'Front brake pads - set - renew', labour_charges: 962.5, tax_percentage: 18 },
+      ],
+      totals_and_tax_summary: {
+        parts_total: 13541.51,
+        labour_total: 3566.25, // already = 3662.50 − 96.25
+        parts_discount: 0,
+        labour_discount: 96.25,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        parts_cgst_amount: 1218.73,
+        parts_sgst_amount: 1218.73,
+        labour_cgst_rate: 9,
+        labour_sgst_rate: 9,
+        labour_cgst_amount: 320.96, // 9% of 3566.25 (correct Style A)
+        labour_sgst_amount: 320.96,
+        grand_total_invoice: 20187.14,
+      },
+      confidence: 0.95,
+    };
+  }
+
+  it('restores pre-discount labour_total and keeps GST; labour net + parts net = grand total', () => {
+    const t = resolveBillSummary(jsbInvoice());
+    expect(t.labour_total).toBeCloseTo(3662.5, 2);
+    expect(t.labour_discount).toBeCloseTo(96.25, 2);
+    expect(t.labour_cgst_amount).toBeCloseTo(320.96, 2);
+    expect(t.labour_sgst_amount).toBeCloseTo(320.96, 2);
+    expect(columnNet(t, 'labour')).toBeCloseTo(4208.17, 2);
+    expect(columnNet(t, 'parts')).toBeCloseTo(15978.97, 2);
+    const netSum = (columnNet(t, 'parts') ?? 0) + (columnNet(t, 'labour') ?? 0);
+    expect(netSum).toBeCloseTo(20187.14, 1);
   });
 });
