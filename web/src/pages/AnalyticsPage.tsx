@@ -294,10 +294,11 @@ function MonthsView() {
   );
 }
 
-/* ─── Cost per km (lazy-loaded) ───────────────────────────────────────── */
+/* ─── Cost per km (lazy-loaded, with vehicle search) ──────────────────── */
 function CostKmView() {
   const [data, setData] = useState<CostPerKm[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
 
   useEffect(() => {
     cachedFetch('costkm', () => api.analyticsCostkm().then((r) => r.costPerKm))
@@ -307,8 +308,16 @@ function CostKmView() {
   if (loading) return <Panel title="Cost per km"><div style={{ color: T.muted }}>Loading…</div></Panel>;
   if (!data || data.length === 0) return <Panel title="Cost per km"><Empty>Need 2+ invoices with odometer for the same vehicle</Empty></Panel>;
 
+  const lower = q.trim().toLowerCase();
+  const rows = lower
+    ? data.filter((r) =>
+        (r.registration_number ?? '').toLowerCase().includes(lower)
+        || (r.vehicle_id ?? '').toLowerCase().includes(lower))
+    : data;
+
   return (
     <Panel title="Cost per km" note="Needs 2+ odometer readings per vehicle">
+      <SearchInput value={q} onChange={setQ} placeholder="Search vehicle / reg no…" />
       <div style={{
         background: '#F0F4F8', border: '1px solid #D4DEE8', borderRadius: 8,
         padding: '12px 16px', marginBottom: 14, fontSize: 12, lineHeight: 1.8,
@@ -323,6 +332,7 @@ function CostKmView() {
           <b>Requires</b> at least 2 invoices with odometer readings for the same vehicle
         </div>
       </div>
+      {rows.length === 0 ? <Empty>No vehicles match “{q}”</Empty> : (
       <table style={tableStyle}>
         <thead>
           <tr style={{ borderBottom: `2px solid ${T.border}` }}>
@@ -334,7 +344,7 @@ function CostKmView() {
           </tr>
         </thead>
         <tbody>
-          {data.map((r) => (
+          {rows.map((r) => (
             <tr key={r.vehicle_id} style={{ borderBottom: `1px solid ${T.border}` }}>
               <td style={{ ...tdStyle, fontWeight: 600, fontFamily: T.mono, fontSize: 12 }}>
                 {r.registration_number ?? r.vehicle_id}
@@ -355,6 +365,7 @@ function CostKmView() {
           ))}
         </tbody>
       </table>
+      )}
     </Panel>
   );
 }

@@ -11,8 +11,9 @@ import { usePolling } from '../hooks/usePolling.js';
 
 /* Client-side invoice list cache (30s TTL) */
 const INV_CACHE_TTL = 30_000;
-let invCache: { invoices: Invoice[]; batches: Batch[]; total: number; page: number; pageSize: number; totalPages: number; at: number } | null = null;
-export function invalidateInvoiceCache() { invCache = null; }
+let invCache: { invoices: Invoice[]; batches: Batch[]; total: number; page: number; pageSize: number; totalPages: number; at: number; cacheKey: string } | null = null;
+let countsCache: { counts: Record<string, number>; at: number } | null = null;
+export function invalidateInvoiceCache() { invCache = null; countsCache = null; }
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -101,6 +102,9 @@ export function InvoicesPage() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [totalRecords, setTotalRecords] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [globalCounts, setGlobalCounts] = useState<Record<StatusFilter, number>>({
+    ALL: 0, PENDING: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0, NEEDS_REVIEW: 0,
+  });
 
   // Filter / sort state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -134,11 +138,24 @@ export function InvoicesPage() {
   // Debounce ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchPage = useCallback(async (page: number, size: number) => {
+  const statusToApiParams = (sf: StatusFilter): Record<string, string | undefined> => {
+    switch (sf) {
+      case 'PENDING': return { status: 'UPLOADED' };
+      case 'PROCESSING': return { status: 'PROCESSING' };
+      case 'COMPLETED': return { completed: '1' }; // OCR_COMPLETED + VERIFIED
+      case 'FAILED': return { status: 'FAILED' };
+      case 'NEEDS_REVIEW': return { needsReview: '1' };
+      default: return {};
+    }
+  };
+
+  const fetchPage = useCallback(async (page: number, size: number, search?: string, status?: StatusFilter) => {
     setLoading(true);
+    setAllInvoices([]);
     try {
-      const cacheKey = `${page}-${size}`;
-      if (invCache && Date.now() - invCache.at < INV_CACHE_TTL && invCache.page === page && invCache.pageSize === size) {
+      const statusParams = statusToApiParams(status ?? 'ALL');
+      const cacheKey = `${page}-${size}-${search ?? ''}-${JSON.stringify(statusParams)}`;
+      if (invCache && Date.now() - invCache.at < INV_CACHE_TTL && invCache.cacheKey === cacheKey) {
         setAllInvoices(invCache.invoices);
         setBatches(invCache.batches);
         setTotalRecords(invCache.total);
@@ -146,40 +163,86 @@ export function InvoicesPage() {
         setCurrentPage(invCache.page);
         return;
       }
-      const qs = `?page=${page}&pageSize=${size}`;
+      const params: Record<string, string | undefined> = {
+        page: String(page),
+        pageSize: String(size),
+        ...statusParams,
+      };
+      if (search) params.q = search;
+      const qs = buildQs(params);
       const [inv, bat] = await Promise.all([api.list(qs), api.batches().catch(() => ({ batches: [] }))]);
-      invCache = { invoices: inv.invoices, batches: bat.batches, total: inv.total, page: inv.page, pageSize: inv.pageSize, totalPages: inv.totalPages, at: Date.now() };
+      invCache = { invoices: inv.invoices, batches: bat.batches, total: inv.total, page: inv.page, pageSize: inv.pageSize, totalPages: inv.totalPages, at: Date.now(), cacheKey };
       setAllInvoices(inv.invoices);
       setBatches(bat.batches);
       setTotalRecords(inv.total);
       setTotalPages(inv.totalPages);
       setCurrentPage(inv.page);
-    } catch (_e) {
-      // silently ignore
+    } catch (e) {
+      setAllInvoices([]);
+      setTotalRecords(0);
+      setTotalPages(1);
+      setToast(e instanceof Error ? e.message : 'Failed to load invoices');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const refetch = useCallback(async () => {
-    await fetchPage(currentPage, pageSize);
-  }, [fetchPage, currentPage, pageSize]);
+  const fetchGlobalCounts = useCallback(async () => {
+    try {
+      if (countsCache && Date.now() - countsCache.at < INV_CACHE_TTL) {
+        applyCountsToState(countsCache.counts);
+        return;
+      }
+      const res = await api.counts();
+      countsCache = { counts: res.counts, at: Date.now() };
+      applyCountsToState(res.counts);
+    } catch (_e) { /* ignore */ }
+  }, []);
 
-  // Fetch when page or pageSize changes
+  const applyCountsToState = useCallback((c: Record<string, number>) => {
+    const completedRaw = (c['OCR_COMPLETED'] ?? 0) + (c['VERIFIED'] ?? 0);
+    const completedClean = c['completed_clean'] ?? completedRaw;
+    setGlobalCounts({
+      ALL: c['all'] ?? 0,
+      PENDING: c['UPLOADED'] ?? 0,
+      PROCESSING: c['PROCESSING'] ?? 0,
+      COMPLETED: completedClean,
+      FAILED: c['FAILED'] ?? 0,
+      NEEDS_REVIEW: c['needs_review'] ?? 0,
+    });
+  }, []);
+
+  const refetch = useCallback(async () => {
+    await fetchPage(currentPage, pageSize, q || undefined, statusFilter);
+  }, [fetchPage, currentPage, pageSize, q, statusFilter]);
+
+  // Fetch when page, pageSize, search, or status changes
   useEffect(() => {
-    void fetchPage(currentPage, pageSize);
-  }, [fetchPage, currentPage, pageSize]);
+    void fetchPage(currentPage, pageSize, q || undefined, statusFilter);
+  }, [fetchPage, currentPage, pageSize, q, statusFilter]);
+
+  // Fetch global counts on mount; re-fetch once after lean cache warms (needs_review)
+  useEffect(() => {
+    void fetchGlobalCounts();
+    const t = setTimeout(() => {
+      countsCache = null;
+      void fetchGlobalCounts();
+    }, 12_000);
+    return () => clearTimeout(t);
+  }, [fetchGlobalCounts]);
 
   // Also call api.config on mount (as per spec / test mock)
   useEffect(() => {
     void api.config();
   }, []);
 
-  // Debounced search
+  // Debounced search — reset to page 1 on new search
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setQ(searchInput);
+      setCurrentPage(1);
+      invalidateInvoiceCache();
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -187,34 +250,26 @@ export function InvoicesPage() {
   }, [searchInput]);
 
   // Polling: refetch when some rows are PENDING or PROCESSING
+  const refetchWithCounts = useCallback(async () => {
+    invalidateInvoiceCache();
+    await Promise.all([refetch(), fetchGlobalCounts()]);
+  }, [refetch, fetchGlobalCounts]);
+
   usePolling(
-    refetch,
+    refetchWithCounts,
     () => allInvoices.some((r) => r.status === 'PENDING' || r.status === 'PROCESSING'),
     3000,
   );
 
-  // Compute displayed rows: client-side filter + sort
-  const counts = countsByStatus(allInvoices);
+  const counts = globalCounts;
 
   const hasAdvancedFilters = !!(minTotal || dateFrom || dateTo);
   const hasSearch = !!q;
 
   const displayedRows: Invoice[] = (() => {
-    let rows = applyClientFilters(allInvoices, statusFilter);
+    let rows = [...allInvoices];
     if (batchFilter) rows = rows.filter((inv) => inv.batchId === batchFilter);
 
-    // Apply text search client-side
-    if (q) {
-      const lower = q.toLowerCase();
-      rows = rows.filter(
-        (inv) =>
-          (inv.vendorName ?? '').toLowerCase().includes(lower) ||
-          (inv.invoiceNumber ?? '').toLowerCase().includes(lower) ||
-          (inv.fileName ?? '').toLowerCase().includes(lower),
-      );
-    }
-
-    // Apply advanced filters client-side
     if (minTotal) {
       const min = parseFloat(minTotal);
       if (!isNaN(min)) rows = rows.filter((inv) => ((inv.netAmount ?? inv.totalAmount) ?? 0) >= min);
@@ -492,7 +547,9 @@ export function InvoicesPage() {
           <div style={{ fontSize: 13, color: T.inkSoft, marginTop: 4 }}>
             {loading && allInvoices.length === 0
               ? 'Loading…'
-              : `${displayedRows.length} invoice${displayedRows.length !== 1 ? 's' : ''}`}
+              : statusFilter === 'ALL'
+                ? `${totalRecords.toLocaleString()} invoice${totalRecords !== 1 ? 's' : ''}`
+                : `${totalRecords.toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${globalCounts.ALL.toLocaleString()} total`}
           </div>
         </div>
 
@@ -631,7 +688,7 @@ export function InvoicesPage() {
         {STATUS_PILLS.map(({ key, label }) => {
           const active = statusFilter === key;
           return (
-            <button key={key} onClick={() => setStatusFilter(key)} style={{
+            <button key={key} onClick={() => { setStatusFilter(key); setCurrentPage(1); invalidateInvoiceCache(); }} style={{
               padding: '6px 14px', borderRadius: 999,
               border: `1px solid ${active ? T.accent : T.border}`,
               background: active ? T.accent : T.surface,
