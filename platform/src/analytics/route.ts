@@ -12,7 +12,7 @@ import {
 } from './service.js';
 import { cacheGet, cacheSet } from '../shared/cache.js';
 
-const CACHE_TTL = 30_000;
+const CACHE_TTL = 300_000; // 5 minutes — aggregation is expensive at scale
 
 export async function analyticsRoutes(app: FastifyInstance) {
 
@@ -50,12 +50,18 @@ export async function analyticsRoutes(app: FastifyInstance) {
     return { months: byMonth };
   });
 
-  app.get('/api/analytics/costkm', async () => {
+  app.get('/api/analytics/costkm', async (req) => {
+    const q = (req.query as Record<string, string>).q?.toLowerCase();
     const cacheKey = 'analytics:costkm';
     let data = cacheGet<CostPerKmResult[]>(cacheKey);
     if (!data) {
       data = await getCostPerKm();
       cacheSet(cacheKey, data, CACHE_TTL);
+    }
+    if (q) {
+      data = data.filter((v) =>
+        (v.registration_number ?? '').toLowerCase().includes(q)
+        || (v.vehicle_id ?? '').toLowerCase().includes(q));
     }
     return { costPerKm: data };
   });

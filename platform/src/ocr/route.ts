@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import {
   getBill, listBills, listBillsPaginated, deleteBill, updateBill, createBill, updateBillStatus,
   getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts,
-  getSettings, findDuplicateBills, type ParsedInvoiceData,
+  getSettings, findDuplicateBills, countAllStatuses, type ParsedInvoiceData,
 } from './repository.js';
 import { billToInvoice, toApiParsed, mapParsedToBill } from './mapper.js';
 import { isPdf, isImage, uploadFile, getStoredFile } from '../shared/storage.js';
@@ -138,8 +138,19 @@ export async function billRoutes(app: FastifyInstance) {
       const page = Math.max(Number(qs.page) || 1, 1);
       const pageSize = Math.min(Math.max(Number(qs.pageSize) || 10, 1), 100);
       const status = qs.status as import('../shared/types.js').BillStatus | undefined;
+      const q = qs.q?.trim().toLowerCase();
+      const needsReview = qs.needsReview === '1' || qs.needsReview === 'true';
+      const completed = qs.completed === '1' || qs.completed === 'true';
 
-      const result = await listBillsPaginated({ page, pageSize, status });
+      const result = await listBillsPaginated({
+        page,
+        pageSize,
+        status: completed || needsReview ? undefined : status,
+        statuses: completed ? ['OCR_COMPLETED', 'VERIFIED'] : undefined,
+        needsReview: needsReview || undefined,
+        excludeNeedsReview: completed || undefined,
+        q,
+      });
       const invoices = result.bills.map((b) => billToInvoice(b));
 
       return {
@@ -150,7 +161,17 @@ export async function billRoutes(app: FastifyInstance) {
         totalPages: result.totalPages,
       };
     } catch (err) {
-      return reply.code(500).send({ error: 'Failed to list invoices' });
+      req.log.error(err, 'Failed to list invoices');
+      return reply.code(500).send({ error: 'Failed to list invoices', message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/api/invoices/counts', async (_req, reply) => {
+    try {
+      const counts = await countAllStatuses();
+      return { counts };
+    } catch (err) {
+      return reply.code(500).send({ error: 'Failed to count invoices' });
     }
   });
 

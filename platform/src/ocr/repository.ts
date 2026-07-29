@@ -7,6 +7,7 @@ import { env } from '../config/env.js';
 import { db, col } from '../config/firebase.js';
 import { devStore } from '../shared/devStore.js';
 import { getSettings } from '../shared/settings.js';
+import { cacheGet, cacheSet } from '../shared/cache.js';
 import type { BillDoc, BillPartDoc, BillType, BillStatus, ParsedInvoiceData, LineType } from '../shared/types.js';
 import type { AppSettings } from '../shared/settings.js';
 
@@ -67,6 +68,95 @@ export async function listBills(opts: {
   return snap.docs.map((d) => d.data() as BillDoc);
 }
 
+const LEAN_BILL_FIELDS = [
+  'bill_id', 'fleet_id', 'vehicle_id', 'bill_type', 'vendor_name', 'vendor_gstin',
+  'company_name', 'gstin', 'pan', 'invoice_number', 'invoice_date', 'invoice_time',
+  'subtotal_amount', 'parts_amount', 'labour_amount',
+  'parts_cgst_amount', 'parts_sgst_amount', 'parts_igst_amount',
+  'parts_cgst_rate', 'parts_sgst_rate', 'parts_igst_rate',
+  'labour_cgst_amount', 'labour_sgst_amount', 'labour_igst_amount',
+  'labour_cgst_rate', 'labour_sgst_rate', 'labour_igst_rate',
+  'total_tax_amount', 'grand_total_amount', 'deductibles', 'salvage',
+  'odometer_reading', 'registration_number', 'ocr_status', 'confidence_score',
+  'review_reasons', 'pipeline_mode',
+  'extraction_cost_usd', 'structuring_cost_usd', 'total_cost_usd',
+  'extraction_tokens', 'structuring_tokens', 'total_tokens',
+  'extraction_provider', 'structuring_provider',
+  'schema_version', 'created_at', 'updated_at',
+] as const;
+
+/** Cap aggregation scans so analytics/fraud stay fast at 100k+ scale. */
+const AGG_MAX_DOCS = 25_000;
+const AGG_BATCH = 2_500;
+
+/**
+ * Cursor-based lean scan for aggregation (analytics, fraud).
+ * Excludes parsed_data/raw_ocr. Caps at maxDocs (default 25k newest).
+ * Dedupes concurrent callers via shared in-flight promise + TTL cache.
+ */
+let leanBillsInflight: Promise<BillDoc[]> | null = null;
+
+export async function listAllBillsLean(opts: {
+  status?: BillStatus;
+  maxDocs?: number;
+  cacheKey?: string;
+  cacheTtlMs?: number;
+} = {}): Promise<BillDoc[]> {
+  const maxDocs = opts.maxDocs ?? AGG_MAX_DOCS;
+  const cacheKey = opts.cacheKey ?? `lean:bills:${opts.status ?? 'all'}:${maxDocs}`;
+  const ttl = opts.cacheTtlMs ?? 300_000; // 5 min
+
+  const cached = cacheGet<BillDoc[]>(cacheKey);
+  if (cached) return cached;
+
+  if (!opts.status && leanBillsInflight) return leanBillsInflight;
+
+  const run = async (): Promise<BillDoc[]> => {
+    if (env.localDev) {
+      let rows = Array.from(devStore.bills.values());
+      if (opts.status) rows = rows.filter((b) => b.ocr_status === opts.status);
+      rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      return rows.slice(0, maxDocs);
+    }
+
+    const all: BillDoc[] = [];
+    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+    while (all.length < maxDocs) {
+      const batchSize = Math.min(AGG_BATCH, maxDocs - all.length);
+      let q: FirebaseFirestore.Query = billsRef();
+      if (opts.status) q = q.where('ocr_status', '==', opts.status);
+      q = q.select(...LEAN_BILL_FIELDS).orderBy('created_at', 'desc');
+      if (lastDoc) q = q.startAfter(lastDoc);
+      q = q.limit(batchSize);
+      const snap = await q.get();
+      for (const doc of snap.docs) all.push(doc.data() as BillDoc);
+      if (snap.docs.length < batchSize) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+    return all;
+  };
+
+  const promise = run().then((bills) => {
+    cacheSet(cacheKey, bills, ttl);
+    if (!opts.status) leanBillsInflight = null;
+    return bills;
+  }).catch((err) => {
+    if (!opts.status) leanBillsInflight = null;
+    throw err;
+  });
+
+  if (!opts.status) leanBillsInflight = promise;
+  return promise;
+}
+
+export function billNeedsReview(b: BillDoc): boolean {
+  if (b.ocr_status === 'VERIFIED') return false;
+  if (b.ocr_status !== 'OCR_COMPLETED') return false;
+  if ((b.confidence_score ?? 1) < 0.75) return true;
+  return (b.review_reasons?.length ?? 0) > 0;
+}
+
 export interface PaginatedBills {
   bills: BillDoc[];
   total: number;
@@ -92,40 +182,166 @@ export async function countBills(status?: BillStatus): Promise<number> {
 }
 
 /**
+ * Count bills per status using Firestore count() aggregation (no doc reads).
+ * Also estimates needs_review from a cached lean scan of completed bills.
+ */
+export async function countAllStatuses(): Promise<Record<string, number>> {
+  const statuses: BillStatus[] = ['UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'VERIFIED', 'FAILED'];
+  if (env.localDev) {
+    const rows = Array.from(devStore.bills.values());
+    const counts: Record<string, number> = { all: rows.length };
+    for (const s of statuses) counts[s] = rows.filter((b) => b.ocr_status === s).length;
+    counts.needs_review = rows.filter(billNeedsReview).length;
+    const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+    counts.completed_clean = Math.max(0, completedRaw - counts.needs_review);
+    return counts;
+  }
+  const results = await Promise.all([
+    countBills(),
+    ...statuses.map((s) => countBills(s)),
+  ]);
+  const counts: Record<string, number> = { all: results[0] };
+  statuses.forEach((s, i) => { counts[s] = results[i + 1]; });
+
+  // Needs-review + completed-clean from cached lean bills (mutually exclusive counts)
+  try {
+    const leanKey = `lean:bills:all:${AGG_MAX_DOCS}`;
+    const lean = cacheGet<BillDoc[]>(leanKey);
+    if (lean) {
+      const needsReview = lean.filter(billNeedsReview).length;
+      counts.needs_review = needsReview;
+      const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+      counts.completed_clean = Math.max(0, completedRaw - needsReview);
+    } else {
+      counts.needs_review = 0;
+      counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+      void listAllBillsLean(); // warm for next counts / fraud / analytics
+    }
+  } catch {
+    counts.needs_review = 0;
+    counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+  }
+  return counts;
+}
+
+/**
  * Page-based pagination ordered by updated_at DESC.
- * Returns the requested page along with total/totalPages for UI controls.
+ * Supports status, multi-status (statuses), needsReview, and text search (q).
+ *
+ * Status / completed / needsReview filters use the lean in-memory scan so we
+ * never depend on a Firestore composite index (ocr_status + updated_at) —
+ * missing indexes were returning HTTP 500 and the UI kept showing stale rows.
  */
 export async function listBillsPaginated(opts: {
   page?: number;
   pageSize?: number;
   status?: BillStatus;
+  /** When set, match any of these statuses (e.g. OCR_COMPLETED + VERIFIED). */
+  statuses?: BillStatus[];
+  /** Only bills that need human review (low confidence / review_reasons). */
+  needsReview?: boolean;
+  /** When true with statuses=completed, exclude needs-review bills. */
+  excludeNeedsReview?: boolean;
+  q?: string;
 } = {}): Promise<PaginatedBills> {
   const pageSize = Math.min(Math.max(opts.pageSize ?? 10, 1), 100);
   const page = Math.max(opts.page ?? 1, 1);
   const skip = (page - 1) * pageSize;
+  const searchTerm = opts.q?.trim().toLowerCase();
+
+  const filterRows = (rows: BillDoc[]): BillDoc[] => {
+    let out = rows;
+    if (opts.needsReview) out = out.filter(billNeedsReview);
+    else if (opts.statuses?.length) {
+      out = out.filter((b) => opts.statuses!.includes(b.ocr_status));
+      if (opts.excludeNeedsReview) out = out.filter((b) => !billNeedsReview(b));
+    } else if (opts.status) {
+      out = out.filter((b) => b.ocr_status === opts.status);
+    }
+    if (searchTerm) out = out.filter((b) => billMatchesSearch(b, searchTerm));
+    out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return out;
+  };
 
   if (env.localDev) {
-    let rows = Array.from(devStore.bills.values());
-    if (opts.status) rows = rows.filter((b) => b.ocr_status === opts.status);
-    rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    const rows = filterRows(Array.from(devStore.bills.values()));
     const total = rows.length;
-    const bills = rows.slice(skip, skip + pageSize);
-    return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+    return { bills: rows.slice(skip, skip + pageSize), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
   }
 
+  // Any status / review filter → lean scan (no composite index required)
+  if (opts.needsReview || opts.statuses?.length || opts.status) {
+    const lean = await listAllBillsLean({ maxDocs: AGG_MAX_DOCS });
+    const rows = filterRows(lean);
+    const total = rows.length;
+    return { bills: rows.slice(skip, skip + pageSize), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+  }
+
+  if (searchTerm) {
+    return searchBillsPaginated(searchTerm, undefined, page, pageSize);
+  }
+
+  // Unfiltered "All" list — single-field orderBy works without composite index
   const [total, snap] = await Promise.all([
-    countBills(opts.status),
-    (() => {
-      let q: FirebaseFirestore.Query = billsRef();
-      if (opts.status) q = q.where('ocr_status', '==', opts.status);
-      q = q.orderBy('updated_at', 'desc');
-      if (skip > 0) q = q.offset(skip);
-      q = q.limit(pageSize);
-      return q.get();
-    })(),
+    countBills(),
+    billsRef().orderBy('updated_at', 'desc').offset(skip).limit(pageSize).get(),
   ]);
 
   const bills = snap.docs.map((d) => d.data() as BillDoc);
+  return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+}
+
+function billMatchesSearch(b: BillDoc, term: string): boolean {
+  return (b.vendor_name ?? '').toLowerCase().includes(term)
+    || (b.company_name ?? '').toLowerCase().includes(term)
+    || (b.invoice_number ?? '').toLowerCase().includes(term)
+    || (b.registration_number ?? '').toLowerCase().includes(term);
+}
+
+/**
+ * Server-side search: parallel prefix queries on vendor_name and invoice_number,
+ * merge + dedupe, then paginate in memory. Caps at 500 results per field.
+ */
+async function searchBillsPaginated(
+  term: string, status: BillStatus | undefined, page: number, pageSize: number,
+): Promise<PaginatedBills> {
+  const SEARCH_LIMIT = 500;
+  const upperTerm = term.charAt(0).toUpperCase() + term.slice(1);
+  const endChar = '\uf8ff';
+
+  const buildQuery = (field: string, prefix: string) => {
+    let q: FirebaseFirestore.Query = billsRef()
+      .where(field, '>=', prefix)
+      .where(field, '<=', prefix + endChar);
+    if (status) q = q.where('ocr_status', '==', status);
+    return q.limit(SEARCH_LIMIT).get();
+  };
+
+  const [vendorLower, vendorUpper, invoiceRes, regRes] = await Promise.all([
+    buildQuery('vendor_name', term),
+    term !== upperTerm ? buildQuery('vendor_name', upperTerm) : Promise.resolve(null),
+    buildQuery('invoice_number', term),
+    buildQuery('registration_number', term.toUpperCase()),
+  ]);
+
+  const seen = new Set<string>();
+  const merged: BillDoc[] = [];
+  const addDocs = (snap: FirebaseFirestore.QuerySnapshot | null) => {
+    if (!snap) return;
+    for (const doc of snap.docs) {
+      const b = doc.data() as BillDoc;
+      if (!seen.has(b.bill_id)) { seen.add(b.bill_id); merged.push(b); }
+    }
+  };
+  addDocs(vendorLower);
+  addDocs(vendorUpper);
+  addDocs(invoiceRes);
+  addDocs(regRes);
+
+  merged.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const total = merged.length;
+  const skip = (page - 1) * pageSize;
+  const bills = merged.slice(skip, skip + pageSize);
   return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
 }
 

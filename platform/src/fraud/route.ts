@@ -7,11 +7,17 @@ import {
   runAllChecks,
 } from './service.js';
 import { success, serverError } from '../shared/apiResponse.js';
+import { cacheGet, cacheSet } from '../shared/cache.js';
+
+const CACHE_TTL = 300_000; // 5 minutes
 
 export async function fraudRoutes(app: FastifyInstance) {
   app.get('/api/fraud/scan', async (_req, reply) => {
     try {
+      const cached = cacheGet<ReturnType<typeof runAllChecks> extends Promise<infer T> ? T : never>('fraud:scan');
+      if (cached) return success(cached, `${cached.length} alert(s) found`, { total: cached.length, by_type: groupBy(cached, 'type'), by_severity: groupBy(cached, 'severity') });
       const alerts = await runAllChecks();
+      cacheSet('fraud:scan', alerts, CACHE_TTL);
       return success(alerts, `${alerts.length} alert(s) found`, {
         total: alerts.length,
         by_type: groupBy(alerts, 'type'),

@@ -122,6 +122,51 @@ describe('listBillsPaginated', () => {
     const result = await listBillsPaginated({ pageSize: 200 });
     expect(result.pageSize).toBe(100);
   });
+
+  it('returns all completed (OCR_COMPLETED + VERIFIED) when statuses set', async () => {
+    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
+    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z', 'VERIFIED'));
+    devStore.bills.set('b3', makeBill('b3', '2026-07-03T00:00:00Z', 'FAILED'));
+    const result = await listBillsPaginated({ statuses: ['OCR_COMPLETED', 'VERIFIED'] });
+    expect(result.total).toBe(2);
+    expect(result.bills.map((b) => b.bill_id).sort()).toEqual(['b1', 'b2']);
+  });
+
+  it('excludes needs-review bills from completed when excludeNeedsReview=true', async () => {
+    const clean = makeBill('clean', '2026-07-05T00:00:00Z', 'OCR_COMPLETED');
+    clean.confidence_score = 0.95;
+    const flagged = makeBill('flag', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
+    flagged.confidence_score = 0.5;
+    devStore.bills.set('clean', clean);
+    devStore.bills.set('flag', flagged);
+
+    const result = await listBillsPaginated({
+      statuses: ['OCR_COMPLETED', 'VERIFIED'],
+      excludeNeedsReview: true,
+    });
+    expect(result.bills.map((b) => b.bill_id)).toEqual(['clean']);
+    expect(result.total).toBe(1);
+  });
+
+  it('returns only bills that need review when needsReview=true', async () => {
+    const low = makeBill('low', '2026-07-05T00:00:00Z', 'OCR_COMPLETED');
+    low.confidence_score = 0.5;
+    const ok = makeBill('ok', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
+    ok.confidence_score = 0.95;
+    const flagged = makeBill('flag', '2026-07-03T00:00:00Z', 'OCR_COMPLETED');
+    flagged.confidence_score = 0.9;
+    flagged.review_reasons = ['Duplicate: INV-1'];
+    const verified = makeBill('ver', '2026-07-02T00:00:00Z', 'VERIFIED');
+    verified.confidence_score = 0.4;
+    devStore.bills.set('low', low);
+    devStore.bills.set('ok', ok);
+    devStore.bills.set('flag', flagged);
+    devStore.bills.set('ver', verified);
+
+    const result = await listBillsPaginated({ needsReview: true });
+    expect(result.bills.map((b) => b.bill_id).sort()).toEqual(['flag', 'low']);
+    expect(result.total).toBe(2);
+  });
 });
 
 describe('countBills', () => {

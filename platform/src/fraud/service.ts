@@ -250,11 +250,128 @@ export async function detectOdometerInconsistency(): Promise<FraudAlert[]> {
 // ─── Combined Scan ──────────────────────────────────────────────────────────
 
 export async function runAllChecks(): Promise<FraudAlert[]> {
+  const [bills, parts] = await Promise.all([
+    fetchCompletedBills(),
+    fetchAllParts(),
+  ]);
   const [dupes, gst, prices, odometer] = await Promise.all([
-    detectDuplicateInvoices(),
-    detectGstAnomalies(),
-    detectPriceAnomalies(),
-    detectOdometerInconsistency(),
+    detectDuplicateInvoicesFromBills(bills),
+    detectGstAnomaliesFromBills(bills),
+    detectPriceAnomaliesFromParts(parts),
+    detectOdometerFromBills(bills),
   ]);
   return [...dupes, ...gst, ...prices, ...odometer];
+}
+
+function detectDuplicateInvoicesFromBills(bills: BillDoc[]): FraudAlert[] {
+  const alerts: FraudAlert[] = [];
+  const seen = new Map<string, BillDoc[]>();
+  for (const bill of bills) {
+    if (!bill.invoice_number) continue;
+    const key = `${bill.invoice_number}__${bill.vendor_gstin ?? ''}`;
+    const group = seen.get(key) ?? [];
+    group.push(bill);
+    seen.set(key, group);
+  }
+  for (const [, group] of seen) {
+    if (group.length > 1) {
+      alerts.push({
+        type: 'DUPLICATE_INVOICE', severity: 'HIGH',
+        message: `Duplicate invoice: ${group[0].invoice_number} from ${group[0].vendor_name ?? 'Unknown'}`,
+        bill_ids: group.map((b) => b.bill_id),
+        details: { invoice_number: group[0].invoice_number, vendor: group[0].vendor_name, count: group.length, amounts: group.map((b) => b.grand_total_amount) },
+      });
+    }
+  }
+  return alerts;
+}
+
+function detectGstAnomaliesFromBills(bills: BillDoc[]): FraudAlert[] {
+  const alerts: FraudAlert[] = [];
+  for (const bill of bills) {
+    const t = bill.parsed_data?.totals_and_tax_summary;
+    const pDisc = (t?.parts_discount ?? 0) + (t?.parts_special_discount ?? 0);
+    const lDisc = (t?.labour_discount ?? 0) + (t?.labour_special_discount ?? 0);
+    const isInterParts = (bill.parts_igst_rate ?? 0) > 0;
+    const isInterLabour = (bill.labour_igst_rate ?? 0) > 0;
+    const partsIssues = checkGstSide('Parts', bill.parts_amount ?? null, pDisc,
+      isInterParts ? (bill.parts_igst_rate ?? 0) : (bill.parts_cgst_rate ?? 0) + (bill.parts_sgst_rate ?? 0),
+      sum(bill.parts_cgst_amount, bill.parts_sgst_amount, bill.parts_igst_amount),
+      isInterParts ? null : (bill.parts_cgst_rate ?? null), isInterParts ? null : (bill.parts_sgst_rate ?? null),
+      isInterParts ? null : (bill.parts_cgst_amount ?? null), isInterParts ? null : (bill.parts_sgst_amount ?? null));
+    const labourIssues = checkGstSide('Labour', bill.labour_amount ?? null, lDisc,
+      isInterLabour ? (bill.labour_igst_rate ?? 0) : (bill.labour_cgst_rate ?? 0) + (bill.labour_sgst_rate ?? 0),
+      sum(bill.labour_cgst_amount, bill.labour_sgst_amount, bill.labour_igst_amount),
+      isInterLabour ? null : (bill.labour_cgst_rate ?? null), isInterLabour ? null : (bill.labour_sgst_rate ?? null),
+      isInterLabour ? null : (bill.labour_cgst_amount ?? null), isInterLabour ? null : (bill.labour_sgst_amount ?? null));
+    const issues = [...partsIssues, ...labourIssues];
+    if (issues.length) {
+      alerts.push({
+        type: 'GST_MISMATCH', severity: 'MEDIUM',
+        message: `GST mismatch on invoice ${bill.invoice_number ?? bill.bill_id}`,
+        bill_ids: [bill.bill_id],
+        details: { invoice_number: bill.invoice_number, vendor: bill.vendor_name, grand_total: bill.grand_total_amount, issues },
+      });
+    }
+  }
+  return alerts;
+}
+
+function detectPriceAnomaliesFromParts(parts: BillPartDoc[], thresholdPct = 50): FraudAlert[] {
+  const alerts: FraudAlert[] = [];
+  const byPart = new Map<string, BillPartDoc[]>();
+  for (const part of parts) {
+    if (part.line_type !== 'PART') continue;
+    const key = (part.normalized_name ?? part.name ?? '').toLowerCase().trim();
+    if (!key || !part.rate) continue;
+    const group = byPart.get(key) ?? [];
+    group.push(part);
+    byPart.set(key, group);
+  }
+  for (const [name, group] of byPart) {
+    if (group.length < 3) continue;
+    const rates = group.map((p) => p.rate!).sort((a, b) => a - b);
+    const median = rates[Math.floor(rates.length / 2)];
+    const threshold = median * (1 + thresholdPct / 100);
+    for (const part of group) {
+      if (part.rate! > threshold) {
+        alerts.push({
+          type: 'PRICE_ANOMALY', severity: 'MEDIUM',
+          message: `${part.name} priced at ₹${part.rate} (median: ₹${median})`,
+          bill_ids: [part.bill_id],
+          details: { part_name: name, price: part.rate, median, threshold },
+        });
+      }
+    }
+  }
+  return alerts;
+}
+
+function detectOdometerFromBills(bills: BillDoc[]): FraudAlert[] {
+  const alerts: FraudAlert[] = [];
+  const byVehicle = new Map<string, BillDoc[]>();
+  for (const bill of bills) {
+    if (!bill.odometer_reading || bill.odometer_reading <= 0) continue;
+    const vid = bill.vehicle_id ?? bill.registration_number ?? '';
+    if (!vid) continue;
+    const group = byVehicle.get(vid) ?? [];
+    group.push(bill);
+    byVehicle.set(vid, group);
+  }
+  for (const [vid, group] of byVehicle) {
+    group.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    for (let i = 1; i < group.length; i++) {
+      const prev = group[i - 1].odometer_reading ?? 0;
+      const curr = group[i].odometer_reading ?? 0;
+      if (curr < prev) {
+        alerts.push({
+          type: 'ODOMETER_INCONSISTENCY', severity: 'HIGH',
+          message: `Odometer went backward for ${vid}: ${prev} → ${curr} km`,
+          bill_ids: [group[i - 1].bill_id, group[i].bill_id],
+          details: { vehicle: vid, previous_reading: prev, current_reading: curr, previous_date: group[i - 1].invoice_date, current_date: group[i].invoice_date },
+        });
+      }
+    }
+  }
+  return alerts;
 }
