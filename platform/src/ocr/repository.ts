@@ -203,20 +203,13 @@ export async function countAllStatuses(): Promise<Record<string, number>> {
   const counts: Record<string, number> = { all: results[0] };
   statuses.forEach((s, i) => { counts[s] = results[i + 1]; });
 
-  // Needs-review + completed-clean from cached lean bills (mutually exclusive counts)
+  // Needs-review + completed-clean: await lean scan (cached for 5min after first call)
   try {
-    const leanKey = `lean:bills:all:${AGG_MAX_DOCS}`;
-    const lean = cacheGet<BillDoc[]>(leanKey);
-    if (lean) {
-      const needsReview = lean.filter(billNeedsReview).length;
-      counts.needs_review = needsReview;
-      const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-      counts.completed_clean = Math.max(0, completedRaw - needsReview);
-    } else {
-      counts.needs_review = 0;
-      counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-      void listAllBillsLean(); // warm for next counts / fraud / analytics
-    }
+    const lean = await listAllBillsLean({ maxDocs: AGG_MAX_DOCS });
+    const needsReview = lean.filter(billNeedsReview).length;
+    counts.needs_review = needsReview;
+    const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+    counts.completed_clean = Math.max(0, completedRaw - needsReview);
   } catch {
     counts.needs_review = 0;
     counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
