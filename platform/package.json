@@ -23,9 +23,12 @@
     "fastify-plugin": "^6.0.0",
     "firebase-admin": "^13.4.0",
     "google-auth-library": "^9.15.1",
+    "imapflow": "^1.6.5",
+    "mailparser": "^3.9.14",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^22.14.1",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.4",

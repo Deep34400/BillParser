@@ -90,6 +90,7 @@ export interface ParsedInvoiceData {
 // ─── Bill status flow ────────────────────────────────────────────────────────
 
 export type BillStatus =
+  | 'DRAFT'
   | 'UPLOADED'
   | 'PROCESSING'
   | 'OCR_COMPLETED'

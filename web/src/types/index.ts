@@ -1,4 +1,4 @@
-export type InvoiceStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type InvoiceStatus = 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 export interface SummaryColumn { label?: string | null; subtotal?: number | null; discount?: number | null; cgst?: number | null; sgst?: number | null; igst?: number | null; total?: number | null; }
 export interface PartsLineItem {
   rate?: number | null; quantity?: number | null; hsn_sac_code?: string | null; tax_percentage?: number | null;
@@ -71,6 +71,13 @@ export interface AppConfig {
   pipelineMode?: 'split' | 'single';
   singleProvider?: string;
   singleModel?: string;
+  emailIntake?: {
+    enabled: boolean;
+    address: string | null;
+    pollIntervalSec: number;
+    allowedSenders?: string[];
+    running?: boolean;
+  };
 }
 export interface SettingsData {
   pipelineMode: 'split' | 'single';

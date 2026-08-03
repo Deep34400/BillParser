@@ -66,6 +66,7 @@ export async function registerUser(opts: {
   password: string;
   role?: UserRole;
   initialBalance?: number;
+  intake_email?: string;
 }): Promise<UserDoc | { error: string; status: number }> {
   if (opts.password.length < 6) return { error: 'Password must be at least 6 characters', status: 400 };
 
@@ -86,6 +87,7 @@ export async function registerUser(opts: {
     total_tokens_used: 0,
     total_ocr_count: 0,
     total_cost_usd: 0,
+    intake_email: opts.intake_email?.toLowerCase().trim() || undefined,
     created_at: now,
     updated_at: now,
   };
@@ -187,4 +189,28 @@ export async function trackOcrCost(userId: string, costUsd: number): Promise<voi
   await updateUser(userId, {
     total_cost_usd: Math.round(((user.total_cost_usd ?? 0) + costUsd) * 10000) / 10000,
   });
+}
+
+/**
+ * Set or clear the email address this user is allowed to send invoices FROM.
+ * Empty string / null clears the whitelist entry for that user.
+ */
+export async function setUserIntakeEmail(
+  userId: string,
+  intakeEmail: string | null | undefined,
+): Promise<UserDoc | { error: string; status: number }> {
+  const user = await getUser(userId);
+  if (!user) return { error: 'User not found', status: 404 };
+
+  const cleaned = (intakeEmail ?? '').trim().toLowerCase();
+  if (cleaned && !cleaned.includes('@')) {
+    return { error: 'intake_email must be a valid email or empty', status: 400 };
+  }
+
+  await updateUser(userId, {
+    intake_email: cleaned || '',
+  });
+
+  const updated = await getUser(userId);
+  return updated!;
 }

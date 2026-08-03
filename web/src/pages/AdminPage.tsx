@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api, type UserInfo, type TokenTransaction } from '../api/client.js';
 import { T } from '../theme.js';
 import { costFmt } from '../lib/format.js';
-import { hasUnlimitedBalance, formatBalance } from '../lib/balance.js';
+import { formatBalance } from '../lib/balance.js';
 
 const card: React.CSSProperties = {
   background: T.panel, border: `1px solid ${T.border}`,
@@ -22,9 +22,17 @@ export function AdminPage() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [txs, setTxs] = useState<TokenTransaction[]>([]);
-  const [tab, setTab] = useState<'users' | 'create'>('users');
+  const [tab, setTab] = useState<'users' | 'create' | 'email-intake'>('users');
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
+
+  // Email intake service toggle
+  const [intakeEnabled, setIntakeEnabled] = useState(false);
+  const [intakeAddress, setIntakeAddress] = useState<string | null>(null);
+  const [intakeRunning, setIntakeRunning] = useState(false);
+
+  // Per-user intake email edits (userId → draft value)
+  const [intakeDrafts, setIntakeDrafts] = useState<Record<string, string>>({});
 
   // Create form
   const [cEmail, setCEmail] = useState('');
@@ -32,6 +40,7 @@ export function AdminPage() {
   const [cPass, setCPass] = useState('');
   const [cRole, setCRole] = useState<'user' | 'admin'>('user');
   const [cBalance, setCBalance] = useState('');
+  const [cIntakeEmail, setCIntakeEmail] = useState('');
 
   // Token form
   const [addAmt, setAddAmt] = useState('');
@@ -46,10 +55,24 @@ export function AdminPage() {
     try {
       const r = await api.adminUsers();
       setUsers(r.data);
+      const drafts: Record<string, string> = {};
+      for (const u of r.data) drafts[u.user_id] = u.intake_email ?? '';
+      setIntakeDrafts(drafts);
     } catch (e) { flash((e as Error).message, 'err'); }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadIntakeConfig = useCallback(async () => {
+    try {
+      const cfg = await api.config();
+      if (cfg.emailIntake) {
+        setIntakeEnabled(cfg.emailIntake.enabled);
+        setIntakeAddress(cfg.emailIntake.address ?? null);
+        setIntakeRunning(!!cfg.emailIntake.running);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { void load(); void loadIntakeConfig(); }, [load, loadIntakeConfig]);
 
   const selectUser = async (id: string) => {
     setSelected(id);
@@ -63,8 +86,8 @@ export function AdminPage() {
     if (!cEmail || !cName || !cPass) return flash('Fill all required fields', 'err');
     if (cPass.length < 6) return flash('Password must be at least 6 characters', 'err');
     try {
-      await api.adminCreateUser(cEmail, cName, cPass, cRole, cBalance ? Number(cBalance) : undefined);
-      setCEmail(''); setCName(''); setCPass(''); setCBalance('');
+      await api.adminCreateUser(cEmail, cName, cPass, cRole, cBalance ? Number(cBalance) : undefined, cIntakeEmail || undefined);
+      setCEmail(''); setCName(''); setCPass(''); setCBalance(''); setCIntakeEmail('');
       flash('User created successfully');
       setTab('users');
       void load();
@@ -93,7 +116,31 @@ export function AdminPage() {
     } catch (e) { flash((e as Error).message, 'err'); }
   };
 
+  const handleToggleIntake = async () => {
+    try {
+      const res = await api.updateEmailIntake({ enabled: !intakeEnabled });
+      setIntakeEnabled(res.emailIntake.enabled);
+      setIntakeRunning(!!res.emailIntake.running);
+      flash(
+        res.emailIntake.enabled
+          ? (res.emailIntake.running ? 'Email intake ENABLED and polling' : 'Email intake enabled (starting…)')
+          : 'Email intake DISABLED — polling stopped',
+      );
+    } catch (e) { flash((e as Error).message, 'err'); }
+  };
+
+  const handleSaveIntakeEmail = async (userId: string) => {
+    const value = (intakeDrafts[userId] ?? '').trim().toLowerCase();
+    try {
+      const res = await api.adminSetIntakeEmail(userId, value);
+      setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, ...res.data } : u)));
+      setIntakeDrafts((prev) => ({ ...prev, [userId]: res.data.intake_email ?? '' }));
+      flash(value ? `Allowed sender saved for user` : 'Allowed sender cleared');
+    } catch (e) { flash((e as Error).message, 'err'); }
+  };
+
   const selUser = users.find((u) => u.user_id === selected);
+  const usersWithSender = users.filter((u) => !!u.intake_email);
 
   return (
     <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 1100 }}>
@@ -102,6 +149,7 @@ export function AdminPage() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setTab('users')} style={{ ...btn(tab === 'users' ? T.accent : '#e5e5e5', tab === 'users' ? '#fff' : T.text) }}>Users</button>
           <button onClick={() => setTab('create')} style={{ ...btn(tab === 'create' ? T.accent : '#e5e5e5', tab === 'create' ? '#fff' : T.text) }}>+ Create User</button>
+          <button onClick={() => setTab('email-intake')} style={{ ...btn(tab === 'email-intake' ? T.accent : '#e5e5e5', tab === 'email-intake' ? '#fff' : T.text) }}>Email Intake</button>
         </div>
       </div>
 
@@ -142,9 +190,106 @@ export function AdminPage() {
               <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Initial Balance (₹)</label>
               <input type="number" step="0.01" value={cBalance} onChange={(e) => setCBalance(e.target.value)} placeholder="0.00" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
             </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Allowed Sender Email</label>
+              <input type="email" value={cIntakeEmail} onChange={(e) => setCIntakeEmail(e.target.value)} placeholder="deepak.chauhan@carrum.co.in" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
+              <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>Email this user may send invoices FROM (to system intake mailbox)</div>
+            </div>
           </div>
           <button onClick={() => void handleCreate()} style={btn()}>Create User</button>
         </div>
+      )}
+
+      {/* Email Intake Settings — enable/disable + per-user allowed senders */}
+      {tab === 'email-intake' && (
+        <>
+          <div style={card}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Email Intake Service</div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Service Status:</span>
+              <button onClick={() => void handleToggleIntake()}
+                style={{ ...btn(intakeEnabled ? T.red : T.green), padding: '6px 16px' }}>
+                {intakeEnabled ? 'Disable' : 'Enable'}
+              </button>
+              <span style={{
+                fontSize: 12, fontWeight: 700,
+                color: intakeEnabled ? T.green : T.red,
+              }}>{intakeEnabled ? (intakeRunning ? 'ACTIVE (polling)' : 'ACTIVE') : 'DISABLED'}</span>
+            </div>
+
+            {intakeAddress && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>System Intake Mailbox</div>
+                <div style={{ fontSize: 14, fontWeight: 600, fontFamily: T.mono, color: T.accent }}>{intakeAddress}</div>
+                <div style={{ fontSize: 11, color: T.faint, marginTop: 2 }}>
+                  Vendors send invoices here. Only senders assigned to users below are accepted.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={card}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Allowed Senders by User</div>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 14 }}>
+              Assign which email each user may send invoices from. {usersWithSender.length} user(s) currently whitelisted.
+            </div>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${T.border}`, textAlign: 'left' }}>
+                  <th style={{ padding: '8px 10px' }}>User</th>
+                  <th style={{ padding: '8px 10px' }}>Status</th>
+                  <th style={{ padding: '8px 10px' }}>Allowed Sender Email</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => {
+                  const draft = intakeDrafts[u.user_id] ?? '';
+                  const saved = u.intake_email ?? '';
+                  const dirty = draft.trim().toLowerCase() !== saved.trim().toLowerCase();
+                  return (
+                    <tr key={u.user_id} style={{ borderBottom: `1px solid ${T.border}` }}>
+                      <td style={{ padding: '10px' }}>
+                        <div style={{ fontWeight: 600 }}>{u.name}</div>
+                        <div style={{ fontSize: 11, color: T.faint }}>{u.email}</div>
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: u.status === 'active' ? T.green : T.red }}>
+                          {u.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        <input
+                          type="email"
+                          value={draft}
+                          onChange={(e) => setIntakeDrafts((prev) => ({ ...prev, [u.user_id]: e.target.value }))}
+                          placeholder="sender@company.com"
+                          style={{ ...inputStyle, width: '100%', maxWidth: 320, boxSizing: 'border-box' }}
+                        />
+                      </td>
+                      <td style={{ padding: '10px', textAlign: 'right' }}>
+                        <button
+                          onClick={() => void handleSaveIntakeEmail(u.user_id)}
+                          disabled={!dirty}
+                          style={{
+                            ...btn(dirty ? T.accent : '#ccc'),
+                            padding: '5px 12px', fontSize: 11,
+                            opacity: dirty ? 1 : 0.5, cursor: dirty ? 'pointer' : 'default',
+                          }}
+                        >Save</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {users.length === 0 && (
+                  <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: T.faint }}>No users yet — create a user first</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* User Table */}
@@ -159,6 +304,7 @@ export function AdminPage() {
                     <th style={{ padding: '8px 10px' }}>User</th>
                     <th style={{ padding: '8px 10px' }}>Role</th>
                     <th style={{ padding: '8px 10px' }}>Status</th>
+                    <th style={{ padding: '8px 10px' }}>Allowed Sender</th>
                     <th style={{ padding: '8px 10px', textAlign: 'right' }}>Balance (₹)</th>
                     <th style={{ padding: '8px 10px', textAlign: 'right' }}>OCRs</th>
                     <th style={{ padding: '8px 10px', textAlign: 'right' }}>Cost</th>
@@ -192,6 +338,9 @@ export function AdminPage() {
                             {u.status}
                           </span>
                         </td>
+                        <td style={{ padding: '10px 10px', fontFamily: T.mono, fontSize: 11, color: u.intake_email ? T.accent : T.faint }}>
+                          {u.intake_email || '—'}
+                        </td>
                         <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700, fontFamily: T.mono, fontSize: 12 }}>
                           {formatBalance(u.role, u.token_balance)}
                         </td>
@@ -221,10 +370,15 @@ export function AdminPage() {
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 16 }}>{selUser.name}</div>
                   <div style={{ fontSize: 12, color: T.faint }}>{selUser.email} · Joined {new Date(selUser.created_at).toLocaleDateString()}</div>
+                  <div style={{ fontSize: 12, marginTop: 4 }}>
+                    Allowed sender:{' '}
+                    <span style={{ fontFamily: T.mono, color: selUser.intake_email ? T.accent : T.faint }}>
+                      {selUser.intake_email || 'not set — edit in Email Intake tab'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* Stats row */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
                 {[
                   { label: 'Balance', value: formatBalance(selUser.role, selUser.token_balance), color: T.accent },
@@ -239,7 +393,6 @@ export function AdminPage() {
                 ))}
               </div>
 
-              {/* Add balance form */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 18, alignItems: 'flex-end' }}>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Amount (₹)</label>
@@ -252,7 +405,6 @@ export function AdminPage() {
                 <button onClick={() => void handleAddTokens()} style={btn(T.green)}>Add Balance</button>
               </div>
 
-              {/* Transaction history */}
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Transaction History</div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>

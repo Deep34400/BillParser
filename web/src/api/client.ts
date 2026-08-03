@@ -60,6 +60,8 @@ export interface UserInfo extends SessionUser {
   api_key_prefix: string;
   created_at: string;
   updated_at: string;
+  /** Email this user may send invoices FROM (whitelist for email intake) */
+  intake_email?: string;
 }
 
 // Keep backward compat alias
@@ -77,6 +79,7 @@ export const api = {
   },
   reextract: (id: string, provider?: string) => j(`/api/invoices/${id}/reextract`, { method: 'POST', body: JSON.stringify({ provider }) }),
   cancel: (id: string) => j(`/api/invoices/${id}/cancel`, { method: 'POST', body: '{}' }),
+  processOcr: (id: string) => j<{ ok: boolean }>(`/api/invoices/${id}/process-ocr`, { method: 'POST', body: '{}' }),
   bakeoff: (id: string) => j<{ runs: ExtractionRun[] }>(`/api/invoices/${id}/bakeoff`, { method: 'POST' }),
   applyRun: (id: string, runId: string) => j(`/api/invoices/${id}/apply-run`, { method: 'POST', body: JSON.stringify({ runId }) }),
   patch: (id: string, body: unknown) => j<Invoice>(`/api/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
@@ -145,9 +148,9 @@ export const api = {
 
   // ─── Admin ──────────────────────────────────────────────────────────────
   adminUsers: () => j<{ success: boolean; data: UserInfo[] }>('/api/admin/users'),
-  adminCreateUser: (email: string, name: string, password: string, role = 'user', initial_balance?: number) =>
+  adminCreateUser: (email: string, name: string, password: string, role = 'user', initial_balance?: number, intake_email?: string) =>
     j<{ success: boolean; data: UserInfo; message: string }>('/api/admin/users', {
-      method: 'POST', body: JSON.stringify({ email, name, password, role, initial_balance }),
+      method: 'POST', body: JSON.stringify({ email, name, password, role, initial_balance, intake_email }),
     }),
   adminGetUser: (id: string) => j<{ success: boolean; data: UserInfo }>(`/api/admin/users/${id}`),
   adminBlockUser: (id: string) => j(`/api/admin/users/${id}/block`, { method: 'PATCH', body: '{}' }),
@@ -157,4 +160,12 @@ export const api = {
   adminUserTransactions: (id: string) => j<{ success: boolean; data: TokenTransaction[] }>(`/api/admin/users/${id}/transactions`),
   adminResetPassword: (id: string, password: string) =>
     j(`/api/admin/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify({ password }) }),
+  adminSetIntakeEmail: (id: string, intake_email: string) =>
+    j<{ success: boolean; data: UserInfo }>(`/api/admin/users/${id}/intake-email`, {
+      method: 'PATCH', body: JSON.stringify({ intake_email }),
+    }),
+
+  // ─── Email Intake Config ─────────────────────────────────────────────────
+  updateEmailIntake: (body: { enabled?: boolean; allowedSenders?: string[] }) =>
+    j<{ ok: boolean; emailIntake: { enabled: boolean; running?: boolean; allowedSenders: string[] } }>('/api/config/email-intake', { method: 'PUT', body: JSON.stringify(body) }),
 };

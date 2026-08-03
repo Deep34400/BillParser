@@ -405,6 +405,38 @@ export async function billRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /api/invoices/:id/process-ocr — trigger OCR on a DRAFT bill.
+   * Used for email-ingested invoices that are waiting for manual OCR trigger.
+   */
+  app.post('/api/invoices/:id/process-ocr', async (req, reply) => {
+    try {
+      const { id } = req.params as { id: string };
+      const bill = await getBill(id);
+      if (!bill) return reply.code(404).send({ error: 'Invoice not found' });
+      if (bill.ocr_status !== 'DRAFT') {
+        return reply.code(400).send({ error: `Cannot process — status is ${bill.ocr_status}, expected DRAFT` });
+      }
+      if (!bill.storage_path) {
+        return reply.code(400).send({ error: 'No file stored for this bill' });
+      }
+
+      const stored = await getStoredFile(bill.storage_path);
+      if (!stored) {
+        return reply.code(400).send({ error: 'Could not retrieve stored file' });
+      }
+
+      await updateBillStatus(id, 'PROCESSING', {});
+      const userId = req.appUser?.user_id;
+      const fileName = (bill as any).original_filename ?? bill.storage_path.split('/').pop() ?? `bill-${id}`;
+      processInBackground(id, stored.buf, fileName, bill.file_url ?? '', bill.storage_path, userId);
+      return { ok: true, message: 'OCR processing started' };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      return reply.code(500).send({ error: `Process OCR failed: ${msg}` });
+    }
+  });
+
+  /**
    * POST /api/invoices/:id/bakeoff — run all providers (stub).
    */
   app.post('/api/invoices/:id/bakeoff', async (_req, reply) => {

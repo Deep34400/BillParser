@@ -186,7 +186,7 @@ export async function countBills(status?: BillStatus): Promise<number> {
  * Also estimates needs_review from a cached lean scan of completed bills.
  */
 export async function countAllStatuses(): Promise<Record<string, number>> {
-  const statuses: BillStatus[] = ['UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'VERIFIED', 'FAILED'];
+  const statuses: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'VERIFIED', 'FAILED'];
   if (env.localDev) {
     const rows = Array.from(devStore.bills.values());
     const counts: Record<string, number> = { all: rows.length };

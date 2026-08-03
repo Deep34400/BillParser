@@ -28,6 +28,8 @@ export interface UserDoc {
   total_tokens_used: number;
   total_ocr_count: number;
   total_cost_usd: number;
+  /** Email address this user sends invoices FROM (for email intake whitelist) */
+  intake_email?: string;
   created_at: string;
   updated_at: string;
 }
@@ -204,10 +206,11 @@ export async function getUserTransactions(userId: string, limit = 50): Promise<T
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
       .slice(0, limit);
   }
-  const snap = await txRef()
-    .where('user_id', '==', userId)
-    .orderBy('created_at', 'desc')
-    .limit(limit)
-    .get();
-  return snap.docs.map((d) => d.data() as TokenTransactionDoc);
+  // Filter only (no orderBy) to avoid requiring a Firestore composite index.
+  // Sort newest-first in memory.
+  const snap = await txRef().where('user_id', '==', userId).get();
+  return snap.docs
+    .map((d) => d.data() as TokenTransactionDoc)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, limit);
 }

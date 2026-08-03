@@ -18,6 +18,10 @@ export interface AppSettings {
   /** For single mode: which provider handles both extraction + structuring */
   singleProvider?: string;
   singleModel?: string;
+  /** Email intake — stored in DB so admin can toggle from UI */
+  emailIntakeEnabled?: boolean;
+  /** Allowed sender emails/domains for email intake (e.g. ["@company.com", "vendor@x.com"]) */
+  emailIntakeAllowedSenders?: string[];
 }
 
 const DEFAULTS: AppSettings = {

@@ -210,6 +210,7 @@ export interface FrontendInvoice {
 }
 
 const STATUS_MAP: Record<string, string> = {
+  DRAFT: 'DRAFT',
   UPLOADED: 'PENDING',
   PROCESSING: 'PROCESSING',
   OCR_COMPLETED: 'COMPLETED',
@@ -244,7 +245,9 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
 
   return {
     id: bill.bill_id,
-    fileName: bill.storage_path?.split('/').pop() ?? 'invoice.pdf',
+    fileName: (bill as any).original_filename
+      ?? bill.storage_path?.split('/').pop()
+      ?? 'invoice.pdf',
     status: STATUS_MAP[bill.ocr_status] ?? 'PENDING',
     provider: bill.structuring_provider ?? bill.extraction_provider ?? null,
     confidence: bill.confidence_score,

@@ -35,6 +35,7 @@ export const T = {
 };
 
 export const STATUS: Record<string, { label: string; color: string }> = {
+  DRAFT: { label: 'Email Draft', color: '#6B7280' },
   PENDING: { label: 'Pending', color: '#B45309' },
   PROCESSING: { label: 'Processing', color: '#2E5C8A' },
   COMPLETED: { label: 'Completed', color: '#1F7A54' },

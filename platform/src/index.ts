@@ -20,6 +20,7 @@ async function seedAdmin() {
 
   const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@praya.io';
   const adminPassword = process.env.ADMIN_PASSWORD ?? 'admin123';
+  const intakeEmail = process.env.IMAP_USER || 'techcarrum@gmail.com';
   const now = new Date().toISOString();
   await createUser({
     user_id: 'admin-001',
@@ -34,18 +35,51 @@ async function seedAdmin() {
     total_tokens_used: 0,
     total_ocr_count: 0,
     total_cost_usd: 0,
+    intake_email: intakeEmail,
     created_at: now,
     updated_at: now,
   });
   console.log(`[SEED] Admin account created → email: ${adminEmail} / password: ${adminPassword}`);
+  console.log(`[SEED] Invoice intake email: ${intakeEmail} (send invoices here)`);
   console.log('[SEED] Change ADMIN_EMAIL and ADMIN_PASSWORD in .env for production.');
 }
 
 async function main() {
+  // Prevent IMAP socket timeouts from killing the whole server
+  process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
+    if (err?.code === 'ETIMEOUT' || /Socket timeout/i.test(err?.message ?? '')) {
+      console.error('[email-intake] Caught IMAP socket timeout (server stays up):', err.message);
+      return;
+    }
+    console.error('Uncaught exception:', err);
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    if (/Socket timeout|ETIMEOUT/i.test(msg)) {
+      console.error('[email-intake] Caught IMAP rejection (server stays up):', msg);
+      return;
+    }
+    console.error('Unhandled rejection:', reason);
+  });
+
   await seedAdmin();
   const app = await buildApp();
   await app.listen({ port: env.port, host: '0.0.0.0' });
   console.log(`BillParser platform running on port ${env.port}${env.localDev ? ' (LOCAL_DEV mode)' : ''}`);
+
+  // Start email intake poller (non-blocking, graceful)
+  const { startEmailIntake, stopEmailIntake } = await import('./email-intake/poller.js');
+  startEmailIntake().catch((err) => console.error('[email-intake] Failed to start:', err));
+
+  const shutdown = async () => {
+    console.log('\nShutting down...');
+    await stopEmailIntake();
+    await app.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch((err) => {

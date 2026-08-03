@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { getSettings, getAllCredentials } from '../shared/settings.js';
+import { getSettings, saveSettings, getAllCredentials } from '../shared/settings.js';
+import { env } from '../config/env.js';
 
 const PROVIDERS = [
   { name: 'mistral', displayName: 'Mistral OCR', kind: 'markdown', requiredCredentials: ['apiKey'] },
@@ -36,6 +37,56 @@ export async function configRoutes(app: FastifyInstance) {
       structuringModel: settings.structuringModel,
       singleProvider: settings.singleProvider ?? 'gemini',
       singleModel: settings.singleModel ?? 'gemini-2.5-flash',
+      emailIntake: {
+        enabled: settings.emailIntakeEnabled ?? env.imapEnabled,
+        address: env.imapUser || null,
+        pollIntervalSec: env.pollIntervalSec,
+        allowedSenders: settings.emailIntakeAllowedSenders ?? [],
+        running: (await import('../email-intake/poller.js')).isEmailIntakeRunning(),
+      },
+    };
+  });
+
+  /**
+   * PUT /api/config/email-intake — toggle email intake on/off, update allowed senders.
+   * Body: { enabled?: boolean, allowedSenders?: string[] }
+   * When enabled flips, starts/stops the IMAP poller immediately (no restart needed).
+   */
+  app.put('/api/config/email-intake', async (req) => {
+    const body = req.body as { enabled?: boolean; allowedSenders?: string[] };
+    const patch: Record<string, any> = {};
+    if (typeof body.enabled === 'boolean') patch.emailIntakeEnabled = body.enabled;
+    if (Array.isArray(body.allowedSenders)) {
+      patch.emailIntakeAllowedSenders = body.allowedSenders
+        .map((s: string) => s.toLowerCase().trim())
+        .filter(Boolean);
+    }
+    const saved = await saveSettings(patch);
+
+    // Live start/stop — don't wait for server restart
+    if (typeof body.enabled === 'boolean') {
+      try {
+        const { startEmailIntake, stopEmailIntake, isEmailIntakeRunning } = await import('../email-intake/poller.js');
+        if (body.enabled) {
+          if (!isEmailIntakeRunning()) {
+            await startEmailIntake({ force: true });
+          }
+        } else {
+          await stopEmailIntake();
+        }
+      } catch (err) {
+        console.error('[email-intake] Failed to apply toggle:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    const { isEmailIntakeRunning } = await import('../email-intake/poller.js');
+    return {
+      ok: true,
+      emailIntake: {
+        enabled: saved.emailIntakeEnabled ?? false,
+        running: isEmailIntakeRunning(),
+        allowedSenders: saved.emailIntakeAllowedSenders ?? [],
+      },
     };
   });
 }

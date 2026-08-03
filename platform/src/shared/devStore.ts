@@ -19,6 +19,8 @@ let settings: AppSettings = {
   structuringModel: 'gemini-2.5-flash',
   singleProvider: 'gemini',
   singleModel: 'gemini-2.5-flash',
+  emailIntakeEnabled: false,
+  emailIntakeAllowedSenders: [],
 };
 const credentials = new Map<string, Record<string, string>>();
 

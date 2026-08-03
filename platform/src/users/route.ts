@@ -11,6 +11,7 @@ import {
   login, issueApiKey, revokeApiKey, getApiKeys,
   registerUser, blockUser, unblockUser, resetPassword,
   findUser, findAllUsers, addTokens, getTransactions,
+  setUserIntakeEmail,
 } from './service.js';
 import { clientUserView, sanitizeUser } from './dto.js';
 
@@ -99,7 +100,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/admin/users', { preHandler: requireAdmin }, async (req, reply) => {
-    const body = req.body as { email?: string; name?: string; password?: string; role?: 'admin' | 'user'; initial_balance?: number };
+    const body = req.body as { email?: string; name?: string; password?: string; role?: 'admin' | 'user'; initial_balance?: number; intake_email?: string };
     if (!body.email || !body.name || !body.password) {
       return reply.status(400).send({ success: false, message: 'email, name, and password are required' });
     }
@@ -110,6 +111,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       password: body.password,
       role: body.role,
       initialBalance: body.initial_balance,
+      intake_email: body.intake_email,
     });
 
     if ('error' in result) {
@@ -164,5 +166,19 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     const result = await resetPassword(id, body?.password ?? '');
     if (result.error) return reply.status(400).send({ success: false, message: result.error });
     return reply.send({ success: true, message: 'Password reset' });
+  });
+
+  /**
+   * PATCH /api/admin/users/:id/intake-email
+   * Body: { intake_email: string | null } — sender email allowed for this user (empty = clear)
+   */
+  app.patch('/api/admin/users/:id/intake-email', { preHandler: requireAdmin }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { intake_email?: string | null };
+    const result = await setUserIntakeEmail(id, body?.intake_email);
+    if ('error' in result) {
+      return reply.status(result.status).send({ success: false, message: result.error });
+    }
+    return reply.send({ success: true, data: sanitizeUser(result), message: 'Intake email updated' });
   });
 }

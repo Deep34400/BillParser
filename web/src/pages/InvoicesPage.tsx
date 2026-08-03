@@ -19,7 +19,7 @@ const DEFAULT_PAGE_SIZE = 10;
 
 type SortKey = 'none' | 'status' | 'vendorName' | 'invoiceDate' | 'confidence' | 'totalAmount';
 type SortDir = 'asc' | 'desc';
-type StatusFilter = 'ALL' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NEEDS_REVIEW';
+type StatusFilter = 'ALL' | 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NEEDS_REVIEW';
 
 // Accept a file as a PDF if its MIME type says so OR its name ends in .pdf.
 // Browsers frequently report an empty or non-standard MIME type for PDFs
@@ -56,6 +56,7 @@ function applyClientFilters(invoices: Invoice[], statusFilter: StatusFilter): In
 function countsByStatus(invoices: Invoice[]): Record<StatusFilter, number> {
   const counts: Record<StatusFilter, number> = {
     ALL: invoices.length,
+    DRAFT: 0,
     PENDING: 0,
     PROCESSING: 0,
     COMPLETED: 0,
@@ -63,7 +64,8 @@ function countsByStatus(invoices: Invoice[]): Record<StatusFilter, number> {
     NEEDS_REVIEW: 0,
   };
   for (const inv of invoices) {
-    if (inv.status === 'PENDING') counts.PENDING++;
+    if (inv.status === 'DRAFT') counts.DRAFT++;
+    else if (inv.status === 'PENDING') counts.PENDING++;
     else if (inv.status === 'PROCESSING') counts.PROCESSING++;
     else if (inv.status === 'COMPLETED') {
       if (needsReview(inv)) counts.NEEDS_REVIEW++;
@@ -76,6 +78,7 @@ function countsByStatus(invoices: Invoice[]): Record<StatusFilter, number> {
 
 const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'ALL', label: 'All' },
+  { key: 'DRAFT', label: 'Email Draft' },
   { key: 'PENDING', label: 'Pending' },
   { key: 'PROCESSING', label: 'Processing' },
   { key: 'COMPLETED', label: 'Completed' },
@@ -103,7 +106,7 @@ export function InvoicesPage() {
   const [totalRecords, setTotalRecords] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [globalCounts, setGlobalCounts] = useState<Record<StatusFilter, number>>({
-    ALL: 0, PENDING: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0, NEEDS_REVIEW: 0,
+    ALL: 0, DRAFT: 0, PENDING: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0, NEEDS_REVIEW: 0,
   });
 
   // Filter / sort state
@@ -140,6 +143,7 @@ export function InvoicesPage() {
 
   const statusToApiParams = (sf: StatusFilter): Record<string, string | undefined> => {
     switch (sf) {
+      case 'DRAFT': return { status: 'DRAFT' };
       case 'PENDING': return { status: 'UPLOADED' };
       case 'PROCESSING': return { status: 'PROCESSING' };
       case 'COMPLETED': return { completed: '1' }; // OCR_COMPLETED + VERIFIED
@@ -204,6 +208,7 @@ export function InvoicesPage() {
     const completedClean = c['completed_clean'] ?? completedRaw;
     setGlobalCounts({
       ALL: c['all'] ?? 0,
+      DRAFT: c['DRAFT'] ?? 0,
       PENDING: c['UPLOADED'] ?? 0,
       PROCESSING: c['PROCESSING'] ?? 0,
       COMPLETED: completedClean,
@@ -226,9 +231,15 @@ export function InvoicesPage() {
     void fetchGlobalCounts();
   }, [fetchGlobalCounts]);
 
+  const [intakeEmail, setIntakeEmail] = useState<string | null>(null);
+
   // Also call api.config on mount (as per spec / test mock)
   useEffect(() => {
-    void api.config();
+    api.config().then((cfg) => {
+      if (cfg.emailIntake?.enabled && cfg.emailIntake.address) {
+        setIntakeEmail(cfg.emailIntake.address);
+      }
+    }).catch(() => {});
   }, []);
 
   // Debounced search — reset to page 1 on new search
@@ -358,6 +369,17 @@ export function InvoicesPage() {
     try {
       await api.cancel(id);
       setToast('Cancelling extraction…');
+      await refetch();
+    } catch (e) {
+      setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
+    }
+  }
+
+  async function handleProcessOcr(id: string) {
+    try {
+      await api.processOcr(id);
+      setToast('OCR processing started…');
+      invalidateInvoiceCache();
       await refetch();
     } catch (e) {
       setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
@@ -632,6 +654,29 @@ export function InvoicesPage() {
         </div>
       )}
 
+      {/* Email intake info banner */}
+      {showUpload && intakeEmail && (
+        <div style={{
+          margin: '0 28px 8px', padding: '12px 18px',
+          background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10,
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 18 }}>📧</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#1E40AF' }}>Email invoices directly</div>
+            <div style={{ fontSize: 12, color: '#3B82F6', marginTop: 2 }}>
+              Send PDF/image attachments to <strong>{intakeEmail}</strong> — they'll be picked up automatically and processed via OCR.
+            </div>
+          </div>
+          <button
+            onClick={() => { navigator.clipboard.writeText(intakeEmail); setToast('Email copied!'); }}
+            style={{ padding: '6px 12px', fontSize: 11, fontWeight: 600, background: '#DBEAFE', border: '1px solid #93C5FD', borderRadius: 6, cursor: 'pointer', color: '#1E40AF', fontFamily: T.font }}
+          >
+            Copy
+          </button>
+        </div>
+      )}
+
       {/* Upload */}
       {showUpload && (
         <div
@@ -845,6 +890,16 @@ export function InvoicesPage() {
                         {(row.status === 'PROCESSING' || row.status === 'PENDING') && (
                           <button onClick={(e) => { e.stopPropagation(); void handleCancel(row.id); }}
                             title="Stop this extraction" style={stopBtn}>Stop</button>
+                        )}
+                        {row.status === 'DRAFT' && (
+                          <button onClick={(e) => { e.stopPropagation(); void handleProcessOcr(row.id); }}
+                            title="Start OCR for this email draft"
+                            style={{
+                              padding: '3px 10px', border: 'none', borderRadius: 5,
+                              background: T.accent, color: '#fff',
+                              fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                              fontFamily: T.font, whiteSpace: 'nowrap',
+                            }}>Process OCR</button>
                         )}
                       </div>
                     </td>
