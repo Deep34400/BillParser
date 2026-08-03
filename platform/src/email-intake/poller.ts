@@ -7,10 +7,10 @@
  */
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { env } from '../config/env.js';
-import { loadStore, isMessageSeen, markMessageSeen, hashBuffer, isFileSeen, markFileSeen } from './dedup.js';
+import { loadStore, isMessageSeen, markMessageSeen, hashBuffer, isFileSeen, markFileSeen, getStoreStats } from './dedup.js';
 import { loadWhitelist, refreshUserWhitelist, isSenderAllowed, getAllowedSendersSnapshot } from './whitelist.js';
 import { filterAttachments, type RawAttachment } from './attachmentFilter.js';
 import { ingestInvoice, type IngestRecord } from './ingest.js';
@@ -18,6 +18,8 @@ import { ingestInvoice, type IngestRecord } from './ingest.js';
 const INTAKE_DIR = resolve(process.cwd(), 'intake');
 /** Max unread messages handled per poll cycle (newest first). Prevents backlog from blocking new invoices. */
 const MAX_PER_POLL = 40;
+/** Local intake files older than this are deleted even if orphaned. */
+const INTAKE_FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
@@ -28,6 +30,38 @@ function log(msg: string): void {
 
 function ensureIntakeDir(): void {
   if (!existsSync(INTAKE_DIR)) mkdirSync(INTAKE_DIR, { recursive: true });
+}
+
+function deleteLocalFile(path: string): void {
+  try {
+    if (existsSync(path)) {
+      unlinkSync(path);
+      log(`  Deleted local intake file: ${path.split('/').pop()}`);
+    }
+  } catch (err) {
+    log(`  Could not delete local file ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Remove orphaned intake files older than 24h (failed uploads left behind). */
+function cleanupOldIntakeFiles(): void {
+  try {
+    if (!existsSync(INTAKE_DIR)) return;
+    const now = Date.now();
+    let removed = 0;
+    for (const name of readdirSync(INTAKE_DIR)) {
+      const full = resolve(INTAKE_DIR, name);
+      try {
+        const st = statSync(full);
+        if (!st.isFile()) continue;
+        if (now - st.mtimeMs > INTAKE_FILE_MAX_AGE_MS) {
+          unlinkSync(full);
+          removed++;
+        }
+      } catch { /* skip */ }
+    }
+    if (removed > 0) log(`Cleaned ${removed} old local intake file(s)`);
+  } catch { /* ignore */ }
 }
 
 function safeName(name: string): string {
@@ -90,11 +124,13 @@ async function pollMailbox(): Promise<void> {
     }
   } catch { /* proceed if settings unavailable */ }
 
+  cleanupOldIntakeFiles();
+
   try {
     const wl = await refreshUserWhitelist();
     const snap = getAllowedSendersSnapshot();
-    log(`Whitelist (from Admin UI/DB): ${snap.length ? snap.join(', ') : '(open — all senders allowed)'}` +
-      ` [db=${wl.db.length}, users=${wl.users.length}]`);
+    log(`Whitelist (from Admin UI/DB): ${snap.length ? snap.join(', ') : '(none — all senders rejected)'}` +
+      ` [users=${wl.users.length}]`);
   } catch {
     /* keep previous whitelist */
   }
@@ -246,8 +282,11 @@ async function handleMessage(client: ImapFlow, msg: any, uid: number): Promise<H
     try {
       const billId = await ingestInvoice(att.content, record);
       log(`  Ingested: ${att.filename} (${Math.round(att.content.length / 1024)} KB) → bill ${billId}`);
+      // File is already in cloud storage — remove local copy
+      deleteLocalFile(savedPath);
     } catch (err) {
       log(`  Ingest FAILED for ${att.filename}: ${err instanceof Error ? err.message : String(err)}`);
+      // Keep local file for retry/debug; cleanupOldIntakeFiles will remove after 24h
     }
   }
 
@@ -290,7 +329,9 @@ export async function startEmailIntake(opts?: { force?: boolean }): Promise<void
   loadStore();
   loadWhitelist();
   await refreshUserWhitelist();
-  log(`Starting email intake: ${env.imapUser}@${env.imapHost} (poll every ${env.pollIntervalSec}s)`);
+  cleanupOldIntakeFiles();
+  const stats = getStoreStats();
+  log(`Starting email intake: ${env.imapUser}@${env.imapHost} (poll every ${env.pollIntervalSec}s; dedup entries=${stats.entries}/${stats.max})`);
 
   await pollMailbox();
 
