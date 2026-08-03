@@ -75,8 +75,12 @@ export interface AppConfig {
     enabled: boolean;
     address: string | null;
     pollIntervalSec: number;
+    host?: string;
+    port?: number;
     allowedSenders?: string[];
     running?: boolean;
+    hasPassword?: boolean;
+    passwordHint?: string | null;
   };
 }
 export interface SettingsData {

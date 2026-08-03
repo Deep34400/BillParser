@@ -166,6 +166,23 @@ export const api = {
     }),
 
   // ─── Email Intake Config ─────────────────────────────────────────────────
-  updateEmailIntake: (body: { enabled?: boolean; allowedSenders?: string[] }) =>
-    j<{ ok: boolean; emailIntake: { enabled: boolean; running?: boolean; allowedSenders: string[] } }>('/api/config/email-intake', { method: 'PUT', body: JSON.stringify(body) }),
+  updateEmailIntake: (body: {
+    enabled?: boolean;
+    user?: string;
+    password?: string;
+    pollIntervalSec?: number;
+    allowedSenders?: string[];
+  }) =>
+    j<{
+      ok: boolean;
+      emailIntake: {
+        enabled: boolean;
+        running?: boolean;
+        address?: string | null;
+        hasPassword?: boolean;
+        passwordHint?: string | null;
+        pollIntervalSec?: number;
+        allowedSenders: string[];
+      };
+    }>('/api/config/email-intake', { method: 'PUT', body: JSON.stringify(body) }),
 };

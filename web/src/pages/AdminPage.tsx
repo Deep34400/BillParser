@@ -26,10 +26,16 @@ export function AdminPage() {
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
 
-  // Email intake service toggle
+  // Email intake service toggle + mailbox creds
   const [intakeEnabled, setIntakeEnabled] = useState(false);
   const [intakeAddress, setIntakeAddress] = useState<string | null>(null);
   const [intakeRunning, setIntakeRunning] = useState(false);
+  const [intakeHasPassword, setIntakeHasPassword] = useState(false);
+  const [intakePasswordHint, setIntakePasswordHint] = useState<string | null>(null);
+  const [mailboxUser, setMailboxUser] = useState('');
+  const [mailboxPassword, setMailboxPassword] = useState('');
+  const [pollIntervalSec, setPollIntervalSec] = useState('90');
+  const [savingMailbox, setSavingMailbox] = useState(false);
 
   // Per-user intake email edits (userId → draft value)
   const [intakeDrafts, setIntakeDrafts] = useState<Record<string, string>>({});
@@ -68,6 +74,10 @@ export function AdminPage() {
         setIntakeEnabled(cfg.emailIntake.enabled);
         setIntakeAddress(cfg.emailIntake.address ?? null);
         setIntakeRunning(!!cfg.emailIntake.running);
+        setIntakeHasPassword(!!cfg.emailIntake.hasPassword);
+        setIntakePasswordHint(cfg.emailIntake.passwordHint ?? null);
+        setMailboxUser(cfg.emailIntake.address ?? '');
+        setPollIntervalSec(String(cfg.emailIntake.pollIntervalSec ?? 90));
       }
     } catch { /* ignore */ }
   }, []);
@@ -121,12 +131,41 @@ export function AdminPage() {
       const res = await api.updateEmailIntake({ enabled: !intakeEnabled });
       setIntakeEnabled(res.emailIntake.enabled);
       setIntakeRunning(!!res.emailIntake.running);
+      if (res.emailIntake.address !== undefined) setIntakeAddress(res.emailIntake.address ?? null);
       flash(
         res.emailIntake.enabled
           ? (res.emailIntake.running ? 'Email intake ENABLED and polling' : 'Email intake enabled (starting…)')
           : 'Email intake DISABLED — polling stopped',
       );
     } catch (e) { flash((e as Error).message, 'err'); }
+  };
+
+  const handleSaveMailbox = async () => {
+    const user = mailboxUser.trim().toLowerCase();
+    if (!user || !user.includes('@')) return flash('Enter a valid mailbox email', 'err');
+    if (!mailboxPassword.trim() && !intakeHasPassword) {
+      return flash('Enter the Gmail app password', 'err');
+    }
+    const poll = Number(pollIntervalSec);
+    if (!Number.isFinite(poll) || poll < 10) return flash('Poll interval must be ≥ 10 seconds', 'err');
+    setSavingMailbox(true);
+    try {
+      const body: { user: string; password?: string; pollIntervalSec: number } = {
+        user,
+        pollIntervalSec: Math.round(poll),
+      };
+      if (mailboxPassword.trim()) body.password = mailboxPassword;
+      const res = await api.updateEmailIntake(body);
+      setIntakeAddress(res.emailIntake.address ?? user);
+      setIntakeHasPassword(!!res.emailIntake.hasPassword);
+      setIntakePasswordHint(res.emailIntake.passwordHint ?? null);
+      setIntakeRunning(!!res.emailIntake.running);
+      setIntakeEnabled(res.emailIntake.enabled);
+      if (res.emailIntake.pollIntervalSec) setPollIntervalSec(String(res.emailIntake.pollIntervalSec));
+      setMailboxPassword('');
+      flash('Mailbox credentials saved' + (res.emailIntake.running ? ' — poller restarted' : ''));
+    } catch (e) { flash((e as Error).message, 'err'); }
+    finally { setSavingMailbox(false); }
   };
 
   const handleSaveIntakeEmail = async (userId: string) => {
@@ -218,13 +257,53 @@ export function AdminPage() {
               }}>{intakeEnabled ? (intakeRunning ? 'ACTIVE (polling)' : 'ACTIVE') : 'DISABLED'}</span>
             </div>
 
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Mailbox credentials (IMAP)</div>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 12 }}>
+              All mail settings are stored in DB from this screen — nothing in .env. Host is fixed: imap.gmail.com:993.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Intake mailbox email</label>
+                <input
+                  type="email"
+                  value={mailboxUser}
+                  onChange={(e) => setMailboxUser(e.target.value)}
+                  placeholder="techcarrum@gmail.com"
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>
+                  App password {intakeHasPassword ? `(saved ${intakePasswordHint ?? '••••'})` : ''}
+                </label>
+                <input
+                  type="password"
+                  value={mailboxPassword}
+                  onChange={(e) => setMailboxPassword(e.target.value)}
+                  placeholder={intakeHasPassword ? 'Leave blank to keep current' : 'xxxx xxxx xxxx xxxx'}
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Poll interval (seconds)</label>
+                <input
+                  type="number"
+                  min={10}
+                  max={3600}
+                  value={pollIntervalSec}
+                  onChange={(e) => setPollIntervalSec(e.target.value)}
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+            <button onClick={() => void handleSaveMailbox()} disabled={savingMailbox} style={btn()}>
+              {savingMailbox ? 'Saving…' : 'Save mailbox credentials'}
+            </button>
             {intakeAddress && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 4 }}>System Intake Mailbox</div>
-                <div style={{ fontSize: 14, fontWeight: 600, fontFamily: T.mono, color: T.accent }}>{intakeAddress}</div>
-                <div style={{ fontSize: 11, color: T.faint, marginTop: 2 }}>
-                  Vendors send invoices here. Only senders assigned to users below are accepted.
-                </div>
+              <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>
+                Active mailbox: <span style={{ fontFamily: T.mono, color: T.accent }}>{intakeAddress}</span>
+                {' · '}imap.gmail.com:993 · poll every {pollIntervalSec}s
               </div>
             )}
           </div>
