@@ -108,20 +108,20 @@ function OverviewTab({
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
         <Chip active={spendView === 'workshops'} onClick={() => setSpendView('workshops')}>
-          Workshops ({countFmt(kpis.byVendor.length)})
+          Workshops ({countFmt(kpis.vendorCount)})
         </Chip>
         <Chip active={spendView === 'vehicles'} onClick={() => setSpendView('vehicles')}>
           Vehicles ({countFmt(kpis.vehicleCount)})
         </Chip>
         <Chip active={spendView === 'months'} onClick={() => setSpendView('months')}>
-          By month ({countFmt(kpis.byMonth.length)})
+          By month
         </Chip>
         <Chip active={spendView === 'costkm'} onClick={() => setSpendView('costkm')}>
           Cost / km
         </Chip>
       </div>
 
-      {spendView === 'workshops' && <WorkshopsView byVendor={kpis.byVendor} />}
+      {spendView === 'workshops' && <WorkshopsView totalSpend={kpis.totalSpend} />}
       {spendView === 'vehicles' && <VehiclesView />}
       {spendView === 'months' && <MonthsView />}
       {spendView === 'costkm' && <CostKmView />}
@@ -129,16 +129,51 @@ function OverviewTab({
   );
 }
 
-/* ─── Workshops (from KPIs, instant — with search) ────────────────────── */
-function WorkshopsView({ byVendor }: { byVendor: { name: string; amount: number }[] }) {
+const PAGE_SIZE = 20;
+
+function ShowMore({ shown, total, loading, onClick }: { shown: number; total: number; loading: boolean; onClick: () => void }) {
+  if (shown >= total) return null;
+  return (
+    <div style={{ marginTop: 12, textAlign: 'center' }}>
+      <button
+        onClick={onClick}
+        disabled={loading}
+        style={{
+          padding: '8px 20px', fontSize: 13, fontWeight: 600, color: T.accent,
+          background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8,
+          cursor: loading ? 'wait' : 'pointer', fontFamily: T.font,
+        }}
+      >
+        {loading ? 'Loading…' : `Show more (${shown} of ${total})`}
+      </button>
+    </div>
+  );
+}
+
+/* ─── Workshops (paginated, with search) ────────────────────────────── */
+function WorkshopsView({ totalSpend }: { totalSpend: number }) {
+  const [rows, setRows] = useState<{ name: string; amount: number }[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [q, setQ] = useState('');
-  const [serverResults, setServerResults] = useState<{ name: string; amount: number }[] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const doSearch = useCallback((query: string) => {
-    if (!query.trim()) { setServerResults(null); return; }
-    api.analyticsWorkshops(query).then((r) => setServerResults(r.workshops)).catch(() => {});
+  const fetchPage = useCallback(async (query: string, offset: number, append: boolean) => {
+    const r = await api.analyticsWorkshops(query || undefined, PAGE_SIZE, offset);
+    setTotal(r.total);
+    setRows((prev) => (append ? [...prev, ...r.workshops] : r.workshops));
   }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchPage('', 0, false).finally(() => setLoading(false));
+  }, [fetchPage]);
+
+  const doSearch = useCallback((query: string) => {
+    setLoading(true);
+    fetchPage(query, 0, false).finally(() => setLoading(false));
+  }, [fetchPage]);
 
   const handleSearch = (v: string) => {
     setQ(v);
@@ -146,66 +181,80 @@ function WorkshopsView({ byVendor }: { byVendor: { name: string; amount: number 
     debounceRef.current = setTimeout(() => doSearch(v), 300);
   };
 
-  const rows = serverResults ?? byVendor;
-  const total = rows.reduce((s, v) => s + v.amount, 0);
+  const showMore = () => {
+    setLoadingMore(true);
+    fetchPage(q, rows.length, true).finally(() => setLoadingMore(false));
+  };
+
+  if (loading && rows.length === 0) {
+    return <Panel title="Workshops & vendors"><div style={{ color: T.muted }}>Loading…</div></Panel>;
+  }
 
   return (
     <Panel title="Workshops & vendors" note="Spend ranked by workshop">
       <SearchInput value={q} onChange={handleSearch} placeholder="Search workshops…" />
       {rows.length === 0 ? <Empty>No workshop data</Empty> : (
-        <table style={tableStyle}>
-          <thead>
-            <tr style={{ borderBottom: `2px solid ${T.border}` }}>
-              <th style={thStyle}>#</th>
-              <th style={thStyle}>Workshop / Vendor</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Spend</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Share</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((v, i) => (
-              <tr key={v.name} style={{ borderBottom: `1px solid ${T.border}` }}>
-                <td style={{ ...tdStyle, color: T.faint, width: 36 }}>{i + 1}</td>
-                <td style={{ ...tdStyle, fontWeight: 600 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: T.accent, display: 'inline-block', flexShrink: 0 }} />
-                    {v.name}
-                  </div>
-                </td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: T.accent }} title={moneyFull(v.amount)}>
-                  {moneyCompact(v.amount)}
-                </td>
-                <td style={{ ...tdStyle, textAlign: 'right', color: T.muted, fontFamily: T.mono, fontSize: 12 }}>
-                  {total > 0 ? `${((v.amount / total) * 100).toFixed(1)}%` : '—'}
-                </td>
+        <>
+          <table style={tableStyle}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${T.border}` }}>
+                <th style={thStyle}>#</th>
+                <th style={thStyle}>Workshop / Vendor</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>Spend</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>Share</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((v, i) => (
+                <tr key={v.name} style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ ...tdStyle, color: T.faint, width: 36 }}>{i + 1}</td>
+                  <td style={{ ...tdStyle, fontWeight: 600 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: T.accent, display: 'inline-block', flexShrink: 0 }} />
+                      {v.name}
+                    </div>
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: T.accent }} title={moneyFull(v.amount)}>
+                    {moneyCompact(v.amount)}
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: 'right', color: T.muted, fontFamily: T.mono, fontSize: 12 }}>
+                    {totalSpend > 0 ? `${((v.amount / totalSpend) * 100).toFixed(1)}%` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ShowMore shown={rows.length} total={total} loading={loadingMore} onClick={showMore} />
+        </>
       )}
     </Panel>
   );
 }
 
-/* ─── Vehicles (lazy-loaded, with search) ─────────────────────────────── */
+/* ─── Vehicles (lazy-loaded, paginated, with search) ──────────────────── */
 function VehiclesView() {
-  const [data, setData] = useState<VehicleSpend[] | null>(null);
+  const [data, setData] = useState<VehicleSpend[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [q, setQ] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  useEffect(() => {
-    cachedFetch('vehicles', () => api.analyticsVehicles().then((r) => r.vehicles))
-      .then(setData).finally(() => setLoading(false));
+  const fetchPage = useCallback(async (query: string, offset: number, append: boolean) => {
+    const r = await api.analyticsVehicles(query || undefined, PAGE_SIZE, offset);
+    setTotal(r.total);
+    setData((prev) => (append ? [...prev, ...r.vehicles] : r.vehicles));
   }, []);
 
+  useEffect(() => {
+    setLoading(true);
+    fetchPage('', 0, false).finally(() => setLoading(false));
+  }, [fetchPage]);
+
   const doSearch = useCallback((query: string) => {
-    if (!query.trim()) {
-      cachedFetch('vehicles', () => api.analyticsVehicles().then((r) => r.vehicles)).then(setData);
-      return;
-    }
-    api.analyticsVehicles(query).then((r) => setData(r.vehicles)).catch(() => {});
-  }, []);
+    setLoading(true);
+    fetchPage(query, 0, false).finally(() => setLoading(false));
+  }, [fetchPage]);
 
   const handleSearch = (v: string) => {
     setQ(v);
@@ -213,8 +262,13 @@ function VehiclesView() {
     debounceRef.current = setTimeout(() => doSearch(v), 300);
   };
 
-  if (loading) return <Panel title="Vehicles"><div style={{ color: T.muted }}>Loading…</div></Panel>;
-  if (!data || data.length === 0) return <Panel title="Vehicles"><Empty>No vehicle data</Empty></Panel>;
+  const showMore = () => {
+    setLoadingMore(true);
+    fetchPage(q, data.length, true).finally(() => setLoadingMore(false));
+  };
+
+  if (loading && data.length === 0) return <Panel title="Vehicles"><div style={{ color: T.muted }}>Loading…</div></Panel>;
+  if (!loading && data.length === 0) return <Panel title="Vehicles"><Empty>No vehicle data</Empty></Panel>;
 
   return (
     <Panel title="Vehicles" note="Per-vehicle parts / labour / tax / total">
@@ -247,6 +301,7 @@ function VehiclesView() {
           ))}
         </tbody>
       </table>
+      <ShowMore shown={data.length} total={total} loading={loadingMore} onClick={showMore} />
     </Panel>
   );
 }
@@ -294,30 +349,48 @@ function MonthsView() {
   );
 }
 
-/* ─── Cost per km (lazy-loaded, with vehicle search) ──────────────────── */
+/* ─── Cost per km (lazy-loaded, paginated, with vehicle search) ─────── */
 function CostKmView() {
-  const [data, setData] = useState<CostPerKm[] | null>(null);
+  const [data, setData] = useState<CostPerKm[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [q, setQ] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  useEffect(() => {
-    cachedFetch('costkm', () => api.analyticsCostkm().then((r) => r.costPerKm))
-      .then(setData).finally(() => setLoading(false));
+  const fetchPage = useCallback(async (query: string, offset: number, append: boolean) => {
+    const r = await api.analyticsCostkm(query || undefined, PAGE_SIZE, offset);
+    setTotal(r.total);
+    setData((prev) => (append ? [...prev, ...r.costPerKm] : r.costPerKm));
   }, []);
 
-  if (loading) return <Panel title="Cost per km"><div style={{ color: T.muted }}>Loading…</div></Panel>;
-  if (!data || data.length === 0) return <Panel title="Cost per km"><Empty>Need 2+ invoices with odometer for the same vehicle</Empty></Panel>;
+  useEffect(() => {
+    setLoading(true);
+    fetchPage('', 0, false).finally(() => setLoading(false));
+  }, [fetchPage]);
 
-  const lower = q.trim().toLowerCase();
-  const rows = lower
-    ? data.filter((r) =>
-        (r.registration_number ?? '').toLowerCase().includes(lower)
-        || (r.vehicle_id ?? '').toLowerCase().includes(lower))
-    : data;
+  const doSearch = useCallback((query: string) => {
+    setLoading(true);
+    fetchPage(query, 0, false).finally(() => setLoading(false));
+  }, [fetchPage]);
+
+  const handleSearch = (v: string) => {
+    setQ(v);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doSearch(v), 300);
+  };
+
+  const showMore = () => {
+    setLoadingMore(true);
+    fetchPage(q, data.length, true).finally(() => setLoadingMore(false));
+  };
+
+  if (loading && data.length === 0) return <Panel title="Cost per km"><div style={{ color: T.muted }}>Loading…</div></Panel>;
+  if (!loading && data.length === 0) return <Panel title="Cost per km"><Empty>Need 2+ invoices with odometer for the same vehicle</Empty></Panel>;
 
   return (
     <Panel title="Cost per km" note="Needs 2+ odometer readings per vehicle">
-      <SearchInput value={q} onChange={setQ} placeholder="Search vehicle / reg no…" />
+      <SearchInput value={q} onChange={handleSearch} placeholder="Search vehicle / reg no…" />
       <div style={{
         background: '#F0F4F8', border: '1px solid #D4DEE8', borderRadius: 8,
         padding: '12px 16px', marginBottom: 14, fontSize: 12, lineHeight: 1.8,
@@ -332,7 +405,6 @@ function CostKmView() {
           <b>Requires</b> at least 2 invoices with odometer readings for the same vehicle
         </div>
       </div>
-      {rows.length === 0 ? <Empty>No vehicles match “{q}”</Empty> : (
       <table style={tableStyle}>
         <thead>
           <tr style={{ borderBottom: `2px solid ${T.border}` }}>
@@ -344,7 +416,7 @@ function CostKmView() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {data.map((r) => (
             <tr key={r.vehicle_id} style={{ borderBottom: `1px solid ${T.border}` }}>
               <td style={{ ...tdStyle, fontWeight: 600, fontFamily: T.mono, fontSize: 12 }}>
                 {r.registration_number ?? r.vehicle_id}
@@ -365,7 +437,7 @@ function CostKmView() {
           ))}
         </tbody>
       </table>
-      )}
+      <ShowMore shown={data.length} total={total} loading={loadingMore} onClick={showMore} />
     </Panel>
   );
 }

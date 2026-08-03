@@ -221,14 +221,9 @@ export function InvoicesPage() {
     void fetchPage(currentPage, pageSize, q || undefined, statusFilter);
   }, [fetchPage, currentPage, pageSize, q, statusFilter]);
 
-  // Fetch global counts on mount; re-fetch once after lean cache warms (needs_review)
+  // Fetch global counts on mount
   useEffect(() => {
     void fetchGlobalCounts();
-    const t = setTimeout(() => {
-      countsCache = null;
-      void fetchGlobalCounts();
-    }, 12_000);
-    return () => clearTimeout(t);
   }, [fetchGlobalCounts]);
 
   // Also call api.config on mount (as per spec / test mock)

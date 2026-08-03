@@ -8,6 +8,8 @@ import { DocNote, type DocItem } from '../components/DocNote.js';
 
 type CheckType = 'all' | 'duplicates' | 'gst' | 'prices' | 'odometer';
 
+const PAGE_SIZE = 20;
+
 const FRAUD_FORMULAS: DocItem[] = [
   { label: 'Duplicate Invoices', severity: 'HIGH', formula: 'GROUP BY (invoice_number + vendor_gstin) → alert if count > 1', description: 'Same invoice number from same vendor GSTIN submitted more than once.', sourceFile: 'platform/src/fraud/service.ts → detectDuplicateInvoices()' },
   { label: 'GST Anomalies', severity: 'MEDIUM', formula: 'accept if GST ≈ amount×rate% OR (amount−discount)×rate% · tolerance max(₹1, 1%)', description: 'Handles both invoice styles: (A) amount already post-discount, (B) amount is pre-discount line sum. True mismatch only when neither matches.', sourceFile: 'platform/src/fraud/service.ts → checkGstSide()' },
@@ -30,16 +32,11 @@ const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string
   LOW: { bg: '#e8f5e9', text: '#2e7d32', border: '#a5d6a7' },
 };
 
-function countForCheck(alerts: FraudAlert[], check: CheckType): number {
-  if (check === 'all') return alerts.length;
-  const def = CHECKS.find((c) => c.key === check);
-  if (!def) return 0;
-  return alerts.filter((a) => def.types.includes(a.type)).length;
-}
-
 export function FraudPage() {
   const [alerts, setAlerts] = useState<FraudAlert[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [activeCheck, setActiveCheck] = useState<CheckType>('all');
   const [error, setError] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<Date | null>(null);
@@ -47,50 +44,60 @@ export function FraudPage() {
     all: 0, duplicates: 0, gst: 0, prices: 0, odometer: 0,
   });
 
+  const fetchSummary = useCallback(async () => {
+    try {
+      const s = await api.fraudSummary();
+      setScanCounts({
+        all: s.total,
+        duplicates: s.by_type['DUPLICATE_INVOICE'] ?? 0,
+        gst: s.by_type['GST_MISMATCH'] ?? 0,
+        prices: s.by_type['PRICE_ANOMALY'] ?? 0,
+        odometer: s.by_type['ODOMETER_INCONSISTENCY'] ?? 0,
+      });
+      setLastScan(new Date());
+    } catch { /* ignore */ }
+  }, []);
+
+  const fetchAlerts = useCallback(async (type: CheckType, offset: number, append: boolean) => {
+    let result;
+    switch (type) {
+      case 'all': result = await api.fraudScan(PAGE_SIZE, offset); break;
+      case 'duplicates': result = await api.fraudDuplicates(PAGE_SIZE, offset); break;
+      case 'gst': result = await api.fraudGst(PAGE_SIZE, offset); break;
+      case 'prices': result = await api.fraudPrices(PAGE_SIZE, offset); break;
+      case 'odometer': result = await api.fraudOdometer(PAGE_SIZE, offset); break;
+    }
+    const data = result.data ?? [];
+    const t = result.metadata?.total as number ?? data.length;
+    setTotal(t);
+    setAlerts((prev) => append ? [...prev, ...data] : data);
+  }, []);
+
   const runCheck = useCallback(async (type: CheckType) => {
     setLoading(true);
     setError(null);
     setActiveCheck(type);
+    setAlerts([]);
     try {
-      let result;
-      switch (type) {
-        case 'all': result = await api.fraudScan(); break;
-        case 'duplicates': result = await api.fraudDuplicates(); break;
-        case 'gst': result = await api.fraudGst(); break;
-        case 'prices': result = await api.fraudPrices(); break;
-        case 'odometer': result = await api.fraudOdometer(); break;
-      }
-      const data = result.data ?? [];
-      setAlerts(data);
-      setLastScan(new Date());
-
-      if (type === 'all') {
-        setScanCounts({
-          all: data.length,
-          duplicates: countForCheck(data, 'duplicates'),
-          gst: countForCheck(data, 'gst'),
-          prices: countForCheck(data, 'prices'),
-          odometer: countForCheck(data, 'odometer'),
-        });
-      }
+      await fetchAlerts(type, 0, false);
+      await fetchSummary();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Scan failed');
-      setAlerts([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchAlerts, fetchSummary]);
 
-  // Auto-run full scan on page load
+  const showMore = () => {
+    setLoadingMore(true);
+    fetchAlerts(activeCheck, alerts.length, true).finally(() => setLoadingMore(false));
+  };
+
   useEffect(() => {
     runCheck('all');
   }, [runCheck]);
 
-  const displayed = activeCheck === 'all'
-    ? alerts
-    : alerts.filter((a) => CHECKS.find((c) => c.key === activeCheck)?.types.includes(a.type));
-
-  const bySeverity = displayed.reduce((acc, a) => {
+  const bySeverity = alerts.reduce((acc, a) => {
     acc[a.severity] = (acc[a.severity] ?? 0) + 1;
     return acc;
   }, {} as Record<string, number>);
@@ -101,7 +108,7 @@ export function FraudPage() {
         <div>
           <h1 style={{ fontSize: 21, fontWeight: 700, margin: '0 0 4px' }}>Fraud Detection</h1>
           <p style={{ color: T.muted, margin: 0, fontSize: 14 }}>
-            Auto-scans on load · click a check to filter results
+            Auto-scans on load · click a check to filter · paginated (top {PAGE_SIZE})
           </p>
         </div>
         <button
@@ -136,7 +143,7 @@ export function FraudPage() {
         )}
       </div>
 
-      <DocNote title="Formulas & backend logic" subtitle="Edit platform/src/services/fraud/fraudDetectionService.ts to change rules" items={FRAUD_FORMULAS} />
+      <DocNote title="Formulas & backend logic" subtitle="Edit platform/src/fraud/service.ts to change rules" items={FRAUD_FORMULAS} />
 
       {/* Check filter tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -147,7 +154,7 @@ export function FraudPage() {
             <button
               key={c.key}
               type="button"
-              onClick={() => setActiveCheck(c.key)}
+              onClick={() => runCheck(c.key)}
               disabled={loading}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
@@ -174,7 +181,7 @@ export function FraudPage() {
 
       {loading && (
         <div style={{ textAlign: 'center', padding: 32, color: T.muted, fontSize: 14 }}>
-          Scanning all invoices…
+          Scanning invoices…
         </div>
       )}
 
@@ -186,18 +193,8 @@ export function FraudPage() {
 
       {!loading && !error && (
         <>
-          {activeCheck !== 'all' && (
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 12 }}>
-              Showing {countFmt(displayed.length)} alert{displayed.length !== 1 ? 's' : ''} for <strong>{CHECKS.find((c) => c.key === activeCheck)?.label}</strong>
-              {' · '}
-              <button type="button" onClick={() => setActiveCheck('all')} style={{ background: 'none', border: 'none', color: T.accent, cursor: 'pointer', fontSize: 12, padding: 0 }}>
-                Show all
-              </button>
-            </div>
-          )}
-
-          {displayed.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {alerts.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
               {Object.entries(bySeverity).map(([sev, n]) => (
                 <span key={sev} style={{
                   fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6,
@@ -207,10 +204,13 @@ export function FraudPage() {
                   {sev}: {n}
                 </span>
               ))}
+              <span style={{ fontSize: 12, color: T.muted, marginLeft: 8 }}>
+                Showing {alerts.length} of {total}
+              </span>
             </div>
           )}
 
-          {displayed.length === 0 ? (
+          {alerts.length === 0 ? (
             <div style={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: 10, padding: '24px', textAlign: 'center' }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>✓</div>
               <div style={{ fontSize: 15, fontWeight: 600, color: '#2e7d32' }}>No issues found</div>
@@ -219,11 +219,28 @@ export function FraudPage() {
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {displayed.map((alert, i) => (
-                <AlertCard key={`${alert.type}-${i}`} alert={alert} />
-              ))}
-            </div>
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {alerts.map((alert, i) => (
+                  <AlertCard key={`${alert.type}-${i}`} alert={alert} />
+                ))}
+              </div>
+              {alerts.length < total && (
+                <div style={{ marginTop: 16, textAlign: 'center' }}>
+                  <button
+                    onClick={showMore}
+                    disabled={loadingMore}
+                    style={{
+                      padding: '10px 24px', fontSize: 13, fontWeight: 600, color: T.accent,
+                      background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8,
+                      cursor: loadingMore ? 'wait' : 'pointer', fontFamily: T.font,
+                    }}
+                  >
+                    {loadingMore ? 'Loading…' : `Show more (${alerts.length} of ${total})`}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

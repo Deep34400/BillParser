@@ -96,7 +96,7 @@ export interface OcrCostSummary {
   avg_tokens_per_ocr: number;
   by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
 }
-export interface AnalyticsKpis { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; byVendor: { name: string; amount: number }[]; byMonth: { label: string; amount: number }[]; }
+export interface AnalyticsKpis { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; }
 export interface Analytics { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; byVendor: { name: string; amount: number }[]; byMonth: { label: string; amount: number }[]; vehicleSpend: VehicleSpend[]; costPerKm: CostPerKm[]; ocrCosts?: OcrCostSummary; }
 export interface FraudAlert { type: string; severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; message: string; bill_ids: string[]; details: Record<string, unknown>; }
 export interface FraudScanResult { success: boolean; message: string; data: FraudAlert[]; metadata?: { total: number; by_type?: Record<string, number>; by_severity?: Record<string, number> }; }
