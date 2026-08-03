@@ -20,7 +20,11 @@ export interface AppSettings {
   singleModel?: string;
   /** Email intake — stored in DB so admin can toggle from UI */
   emailIntakeEnabled?: boolean;
-  /** Allowed sender emails/domains for email intake (e.g. ["@company.com", "vendor@x.com"]) */
+  /** Mailbox address to poll (IMAP user) — set from Admin UI */
+  emailIntakeUser?: string;
+  /** Poll interval in seconds (Admin UI) */
+  emailIntakePollIntervalSec?: number;
+  /** Allowed sender emails/domains for email intake (legacy; prefer user intake_email) */
   emailIntakeAllowedSenders?: string[];
 }
 

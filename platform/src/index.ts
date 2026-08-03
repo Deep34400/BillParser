@@ -20,7 +20,6 @@ async function seedAdmin() {
 
   const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@praya.io';
   const adminPassword = process.env.ADMIN_PASSWORD ?? 'admin123';
-  const intakeEmail = process.env.IMAP_USER || 'techcarrum@gmail.com';
   const now = new Date().toISOString();
   await createUser({
     user_id: 'admin-001',
@@ -35,12 +34,11 @@ async function seedAdmin() {
     total_tokens_used: 0,
     total_ocr_count: 0,
     total_cost_usd: 0,
-    intake_email: intakeEmail,
     created_at: now,
     updated_at: now,
   });
   console.log(`[SEED] Admin account created → email: ${adminEmail} / password: ${adminPassword}`);
-  console.log(`[SEED] Invoice intake email: ${intakeEmail} (send invoices here)`);
+  console.log('[SEED] Set mailbox + allowed senders in Admin → Email Intake');
   console.log('[SEED] Change ADMIN_EMAIL and ADMIN_PASSWORD in .env for production.');
 }
 

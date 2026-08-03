@@ -9,7 +9,6 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { env } from '../config/env.js';
 import { loadStore, isMessageSeen, markMessageSeen, hashBuffer, isFileSeen, markFileSeen, getStoreStats } from './dedup.js';
 import { loadWhitelist, refreshUserWhitelist, isSenderAllowed, getAllowedSendersSnapshot } from './whitelist.js';
 import { filterAttachments, type RawAttachment } from './attachmentFilter.js';
@@ -69,18 +68,14 @@ function safeName(name: string): string {
 }
 
 /** Gmail app passwords work with or without spaces — normalize. */
-function imapPassword(): string {
-  return env.imapPassword.replace(/\s+/g, '');
-}
-
-function createClient(): ImapFlow {
+function createClient(user: string, password: string, host: string, port: number): ImapFlow {
   const client = new ImapFlow({
-    host: env.imapHost,
-    port: env.imapPort,
+    host,
+    port,
     secure: true,
     auth: {
-      user: env.imapUser,
-      pass: imapPassword(),
+      user,
+      pass: password.replace(/\s+/g, ''),
     },
     logger: false,
     // Long enough for ~1–15 MB attachment download
@@ -135,12 +130,20 @@ async function pollMailbox(): Promise<void> {
     /* keep previous whitelist */
   }
 
+  const { getImapRuntimeConfig } = await import('./imapConfig.js');
+  const imap = await getImapRuntimeConfig();
+  if (!imap.user || !imap.password) {
+    log('IMAP user/password not set (Admin → Email Intake). Skipping poll.');
+    running = false;
+    return;
+  }
+
   let client: ImapFlow | null = null;
 
   try {
-    client = createClient();
+    client = createClient(imap.user, imap.password, imap.host, imap.port);
     await client.connect();
-    log(`Connected — polling UNSEEN in INBOX…`);
+    log(`Connected as ${imap.user} — polling UNSEEN in INBOX…`);
 
     const lock = await client.getMailboxLock('INBOX');
     try {
@@ -304,8 +307,11 @@ async function markSeen(client: ImapFlow, uid: number): Promise<void> {
 }
 
 export async function startEmailIntake(opts?: { force?: boolean }): Promise<void> {
-  if (!env.imapUser || !env.imapPassword) {
-    log('IMAP_USER or IMAP_PASSWORD not set. Skipping email intake.');
+  const { getImapRuntimeConfig } = await import('./imapConfig.js');
+  const imap = await getImapRuntimeConfig();
+
+  if (!imap.user || !imap.password) {
+    log('IMAP user/password not set. Configure in Admin → Email Intake (or .env fallback). Skipping.');
     return;
   }
 
@@ -317,10 +323,7 @@ export async function startEmailIntake(opts?: { force?: boolean }): Promise<void
 
   // Check DB setting first (admin toggle), fallback to env — skip check if force (called after enable)
   if (!opts?.force) {
-    const { getSettings } = await import('../shared/settings.js');
-    const settings = await getSettings();
-    const enabled = settings.emailIntakeEnabled ?? env.imapEnabled;
-    if (!enabled) {
+    if (!imap.enabled) {
       log('Email intake disabled (toggle off in admin settings). Skipping.');
       return;
     }
@@ -331,13 +334,13 @@ export async function startEmailIntake(opts?: { force?: boolean }): Promise<void
   await refreshUserWhitelist();
   cleanupOldIntakeFiles();
   const stats = getStoreStats();
-  log(`Starting email intake: ${env.imapUser}@${env.imapHost} (poll every ${env.pollIntervalSec}s; dedup entries=${stats.entries}/${stats.max})`);
+  log(`Starting email intake: ${imap.user}@${imap.host} (poll every ${imap.pollIntervalSec}s; dedup entries=${stats.entries}/${stats.max})`);
 
   await pollMailbox();
 
   pollTimer = setInterval(() => {
     pollMailbox().catch((err) => log(`Scheduled poll error: ${err instanceof Error ? err.message : String(err)}`));
-  }, env.pollIntervalSec * 1000);
+  }, imap.pollIntervalSec * 1000);
 }
 
 export async function stopEmailIntake(): Promise<void> {

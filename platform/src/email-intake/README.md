@@ -44,19 +44,18 @@ OCR is NOT triggered automatically — admin triggers it manually from the UI.
 4. Select "Mail" + "Other (Custom name)" → name it "Invoice Bot"
 5. Copy the 16-character app password (e.g. `hfqi amsf sctt gpaa`)
 
-### 2. Fill .env
+### 2. Configure mailbox from Admin UI (not .env)
 
-```env
-IMAP_HOST=imap.gmail.com
-IMAP_PORT=993
-IMAP_USER=techcarrum@gmail.com
-IMAP_PASSWORD=hfqi amsf sctt gpaa
-POLL_INTERVAL_SEC=90
-```
+Go to **Admin → Email Intake** and set:
+- Intake mailbox email (e.g. `techcarrum@gmail.com`)
+- Gmail App Password
+- Poll interval (seconds)
+- Enable / Disable
 
-Note: `IMAP_ENABLED` in .env is a fallback. The primary toggle is in Admin Panel → Email Intake tab (stored in DB).
+Host/port are fixed in code: `imap.gmail.com:993`.
+**No mail settings belong in `.env`.**
 
-### 3. Admin Panel Configuration
+### 3. Admin Panel — allowed senders
 
 Go to **Admin Panel → Email Intake** tab:
 
@@ -80,7 +79,7 @@ cd platform
 npm run build && npm start
 ```
 
-The poller starts automatically on boot if enabled in admin settings (or `IMAP_ENABLED=true` in .env).
+The poller starts automatically on boot if enabled in Admin → Email Intake (and mailbox credentials are saved).
 
 ## Bill Lifecycle (email)
 

@@ -60,12 +60,4 @@ export const env = {
     .split(',')
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean),
-
-  /** Email intake — IMAP polling for invoice attachments */
-  imapHost: opt('IMAP_HOST', 'imap.gmail.com'),
-  imapPort: Number(opt('IMAP_PORT', '993')),
-  imapUser: opt('IMAP_USER', ''),
-  imapPassword: opt('IMAP_PASSWORD', ''),
-  imapEnabled: opt('IMAP_ENABLED', 'false') === 'true',
-  pollIntervalSec: Number(opt('POLL_INTERVAL_SEC', '90')),
 } as const;
