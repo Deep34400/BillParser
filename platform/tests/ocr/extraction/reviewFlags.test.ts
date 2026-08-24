@@ -49,14 +49,15 @@ describe('computeReviewReasons', () => {
     expect(reasons.some((r) => /PAN format|PAN is missing|handwritten/i.test(r))).toBe(false);
   });
 
-  it('warns when GSTIN is missing even if PAN is present', () => {
+  it('does NOT warn when GSTIN is missing if PAN is present (GSTIN-only checks disabled)', () => {
     const reasons = computeReviewReasons(parsed({ gstin: null }));
-    expect(reasons.some((r) => /GSTIN is missing/i.test(r))).toBe(true);
+    expect(reasons.some((r) => /gstin is missing|gstin format/i.test(r))).toBe(false);
+    expect(reasons.some((r) => /handwritten/i.test(r))).toBe(false);
   });
 
-  it('warns when a present GSTIN is malformed', () => {
+  it('does NOT warn when GSTIN is malformed (GST format checks disabled for Needs review)', () => {
     const reasons = computeReviewReasons(parsed({ gstin: 'NOTAGSTIN' }));
-    expect(reasons.some((r) => /GSTIN/i.test(r))).toBe(true);
+    expect(reasons.some((r) => /gstin format|gstin looks invalid/i.test(r))).toBe(false);
   });
 
   it('flags missing vendor name', () => {
@@ -97,11 +98,11 @@ describe('computeReviewReasons', () => {
     expect(reasons.some((r) => /registration/i.test(r))).toBe(true);
   });
 
-  it('surfaces invalid GST rate on the banner', () => {
+  it('does NOT surface invalid GST rate on the banner (GST checks disabled)', () => {
     const reasons = computeReviewReasons(parsed({
       parts_line_items: [{ quantity: 1, rate: 100, taxable_amount: 100, tax_percentage: 9, hsn_sac_code: '87089900' }],
     }));
-    expect(reasons.some((r) => /valid Indian GST rates/i.test(r))).toBe(true);
+    expect(reasons.some((r) => /gst|tax percentage/i.test(r))).toBe(false);
   });
 
   it('surfaces totals mismatch on the banner', () => {
@@ -121,7 +122,7 @@ describe('computeReviewReasons', () => {
     expect(reasons.some((r) => /parts_total/i.test(r))).toBe(true);
   });
 
-  it('surfaces GST amount mismatch on the banner', () => {
+  it('does NOT surface GST amount mismatch on the banner (GST checks disabled)', () => {
     const reasons = computeReviewReasons(parsed({
       totals_and_tax_summary: {
         parts_total: 100,
@@ -134,6 +135,6 @@ describe('computeReviewReasons', () => {
         sub_total_calculated: 159,
       },
     }));
-    expect(reasons.some((r) => /GST amount|CGST == SGST/i.test(r))).toBe(true);
+    expect(reasons.some((r) => /GST amount|CGST|SGST|IGST/i.test(r))).toBe(false);
   });
 });

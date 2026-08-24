@@ -2,8 +2,9 @@
  * Human-review flag generation — advisory warnings for the UI.
  * These never mutate parsed_data or block storage.
  *
- * Merges ALL validation failures into reviewReasons so the frontend
- * "Needs review" banner shows every problem (GST, totals, rates, etc.).
+ * Merges validation failures into reviewReasons for the frontend
+ * "Needs review" banner. GST / GSTIN / CGST-SGST-IGST checks are
+ * intentionally excluded from Needs review for now.
  */
 import type { ParsedInvoiceData } from '../types/invoice.js';
 import { looksLikeTableHeader } from './normalize/vendor.js';
@@ -19,16 +20,21 @@ function sumLineItems(parsed: ParsedInvoiceData): number {
   return roundMoney(parts + labour);
 }
 
-const GSTIN_RE = /^\d{2}[A-Z0-9]{13}$/;
 const PAN_RE = /^[A-Z]{5}\d{4}[A-Z]$/;
 
+/** GST / GSTIN / tax-rate messages — do not surface on Needs review. */
+function isGstRelatedReviewMessage(message: string): boolean {
+  return /gstin|\bcgst\b|\bsgst\b|\bigst\b|indian gst|gst amount|gst rate|gst regime|tax percentage|tax_percentage/i
+    .test(message);
+}
+
 function pushUnique(reasons: string[], message: string): void {
+  if (isGstRelatedReviewMessage(message)) return;
+
   const norm = message.toLowerCase().replace(/\s+/g, ' ').trim();
   if (reasons.some((r) => r.toLowerCase().replace(/\s+/g, ' ').trim() === norm)) return;
 
   // Skip near-duplicates for the same field topic already covered
-  if (/gstin/i.test(message) && /format|invalid/i.test(message)
-    && reasons.some((r) => /gstin/i.test(r) && /invalid|format/i.test(r))) return;
   if (/\bpan\b/i.test(message) && /format|invalid/i.test(message)
     && reasons.some((r) => /\bpan\b/i.test(r) && /invalid|format/i.test(r))) return;
   if (/line item/i.test(message)
@@ -48,14 +54,11 @@ export function computeReviewReasons(parsed: ParsedInvoiceData): string[] {
   const pan = parsed.pan?.replace(/\s/g, '') ?? '';
   const name = parsed.company_name?.trim() ?? '';
 
-  const hasGstin = !!gstin;
-  const hasPan = !!pan;
-
-  if (!hasGstin && !hasPan) {
+  // Keep handwritten/informal bill flag; other GSTIN/GST amount checks stay off Needs review.
+  if (!gstin && !pan) {
     reasons.push('No GSTIN or PAN detected — likely a handwritten/informal bill. Verify vendor details manually.');
-  } else {
-    if (hasGstin && !GSTIN_RE.test(gstin.toUpperCase())) reasons.push('GSTIN format looks invalid — verify.');
-    if (hasPan && !PAN_RE.test(pan.toUpperCase())) reasons.push('PAN format looks invalid — verify.');
+  } else if (pan && !PAN_RE.test(pan.toUpperCase())) {
+    reasons.push('PAN format looks invalid — verify.');
   }
 
   if (!name || looksLikeTableHeader(name)) {
@@ -85,7 +88,7 @@ export function computeReviewReasons(parsed: ParsedInvoiceData): string[] {
     }
   }
 
-  // Surface EVERY validation failure on the UI banner (read-only).
+  // Surface validation failures on the UI banner — except GST-related ones.
   for (const issue of validateParsedInvoice(parsed)) {
     pushUnique(reasons, issue.message);
   }
