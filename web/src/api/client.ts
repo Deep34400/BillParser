@@ -185,4 +185,16 @@ export const api = {
         allowedSenders: string[];
       };
     }>('/api/config/email-intake', { method: 'PUT', body: JSON.stringify(body) }),
+
+  // ─── Odometer OCR ──────────────────────────────────────────────────────
+  odometerExtract: (imageUrl: string, crossVerify?: boolean) =>
+    j<{ success: boolean; data: { odometer_km: number | null; source: string; pipelineMode: string; providers: { extraction: string; structuring: string }; needsReview: boolean; reviewReason: string; primary: any; secondary: any | null } }>(
+      '/api/odometer/extract',
+      { method: 'POST', body: JSON.stringify({ imageUrl, crossVerify: crossVerify ?? false }) },
+    ),
+  odometerBatch: (images: Array<{ url: string; id?: string }>, crossVerify?: boolean) =>
+    j<{ success: boolean; data: Array<{ id: string; url: string; odometer_km: number | null; confidence?: number; success: boolean; error?: string }> }>(
+      '/api/odometer/batch',
+      { method: 'POST', body: JSON.stringify({ images, crossVerify: crossVerify ?? false }) },
+    ),
 };

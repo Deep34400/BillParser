@@ -9,6 +9,7 @@ const PRIMARY_NAV = [
   { label: 'Invoices', to: '/invoices' },
   { label: 'Analytics', to: '/analytics' },
   { label: 'Fraud', to: '/fraud' },
+  { label: 'Odometer', to: '/odometer' },
 ];
 
 const SECONDARY_NAV = [
