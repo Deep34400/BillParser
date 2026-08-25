@@ -52,17 +52,24 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPrice> = {
 
 /**
  * Resolve pricing for a model — user overrides take priority over defaults.
- * Returns per-1K-token prices (for backward compat with existing cost calc).
+ * Returns per-1K-token prices (for cost calc: tokens/1000 × rate).
+ *
+ * Alias: gemini-flash-latest → gemini-3.5-flash rates.
  */
+const MODEL_ALIASES: Record<string, string> = {
+  'gemini-flash-latest': 'gemini-3.5-flash',
+};
+
 export function resolveModelPricing(
   model: string,
   userOverrides?: Record<string, ModelPrice> | null,
 ): { input: number; output: number } {
-  const override = userOverrides?.[model];
+  const key = MODEL_ALIASES[model] ?? model;
+  const override = userOverrides?.[model] ?? userOverrides?.[key];
   if (override) {
     return { input: override.inputPer1M / 1000, output: override.outputPer1M / 1000 };
   }
-  const def = DEFAULT_MODEL_PRICING[model];
+  const def = DEFAULT_MODEL_PRICING[key] ?? DEFAULT_MODEL_PRICING[model];
   if (def) {
     return { input: def.inputPer1M / 1000, output: def.outputPer1M / 1000 };
   }

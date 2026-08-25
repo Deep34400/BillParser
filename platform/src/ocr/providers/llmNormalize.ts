@@ -9,6 +9,8 @@ import type { ParsedInvoiceData } from '../types/invoice.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { resolveProviderKey } from './resolveKey.js';
 import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
+import { getSettings } from '../../shared/settings.js';
+import { resolveModelPricing } from '../../shared/modelPricing.js';
 
 const TIMEOUT_MS = 120_000;
 
@@ -26,7 +28,6 @@ interface ModelDef {
   buildHeaders: (apiKey: string) => Record<string, string>;
   extractText: (json: any) => string;
   extractUsage: (json: any) => LlmUsage;
-  pricing: { input: number; output: number };
 }
 
 const PROVIDERS: Record<string, ModelDef> = {
@@ -45,7 +46,6 @@ const PROVIDERS: Record<string, ModelDef> = {
       completion_tokens: j.usageMetadata?.candidatesTokenCount ?? 0,
       total_tokens: j.usageMetadata?.totalTokenCount ?? 0,
     }),
-    pricing: { input: 0.00015, output: 0.0006 },
   },
   mistral: {
     provider: 'mistral',
@@ -62,7 +62,6 @@ const PROVIDERS: Record<string, ModelDef> = {
       completion_tokens: j.usage?.completion_tokens ?? 0,
       total_tokens: j.usage?.total_tokens ?? 0,
     }),
-    pricing: { input: 0.001, output: 0.003 },
   },
   claude: {
     provider: 'claude',
@@ -87,7 +86,6 @@ const PROVIDERS: Record<string, ModelDef> = {
       completion_tokens: j.usage?.output_tokens ?? 0,
       total_tokens: (j.usage?.input_tokens ?? 0) + (j.usage?.output_tokens ?? 0),
     }),
-    pricing: { input: 0.003, output: 0.015 },
   },
   openai: {
     provider: 'openai',
@@ -104,7 +102,6 @@ const PROVIDERS: Record<string, ModelDef> = {
       completion_tokens: j.usage?.completion_tokens ?? 0,
       total_tokens: j.usage?.total_tokens ?? 0,
     }),
-    pricing: { input: 0.0025, output: 0.01 },
   },
 };
 
@@ -131,7 +128,7 @@ export async function llmNormalize(rawOcr: string, providerName: string, modelOv
       apiKey: apiKey || undefined,
       parts: [{ text: `${STRUCTURING_PROMPT}\n\n${rawOcr}` }],
     });
-    const cost = toGeminiStepCost(r);
+    const cost = await toGeminiStepCost(r);
     const structured = structureFromLlmResponse(r.text, rawOcr);
     if (!structured.parsedData) throw new Error('gemini returned no parsed_data');
     return { parsed: structured.parsedData, cost };
@@ -160,7 +157,8 @@ export async function llmNormalize(rawOcr: string, providerName: string, modelOv
   if (!text) throw new Error(`${providerName} returned empty response`);
 
   const usage = def.extractUsage(json);
-  const breakdown = estimateCost(usage, def.pricing);
+  const settings = await getSettings();
+  const breakdown = estimateCost(usage, resolveModelPricing(model, settings.modelPricing));
   const cost: OcrStepCost = {
     provider: providerName,
     model,

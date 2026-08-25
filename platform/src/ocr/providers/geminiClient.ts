@@ -5,33 +5,9 @@
  */
 import { GoogleAuth } from 'google-auth-library';
 import { env } from '../../config/env.js';
+import { getSettings } from '../../shared/settings.js';
+import { resolveModelPricing, type ModelPrice } from '../../shared/modelPricing.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
-
-/**
- * Per-model $/1K token pricing (from DEFAULT_MODEL_PRICING in modelPricing.ts,
- * source: ai.google.dev/gemini-api/docs/pricing, checked Aug 2026).
- * Values = $/1M ÷ 1000. Pro models charge more above 200k context — not tracked here.
- */
-const GEMINI_MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gemini-3.7-flash':       { input: 0.00075, output: 0.00375 },
-  'gemini-3.6-flash':       { input: 0.00075, output: 0.00375 },
-  'gemini-3.5-flash':       { input: 0.0015,  output: 0.009   },
-  'gemini-3.5-flash-lite':  { input: 0.0003,  output: 0.0025  },
-  'gemini-3.1-flash-lite':  { input: 0.00025, output: 0.0015  },
-  'gemini-3.1-pro-preview': { input: 0.002,   output: 0.012   },
-  'gemini-3-flash-preview': { input: 0.0005,  output: 0.003   },
-  'gemini-2.5-pro':         { input: 0.00125, output: 0.01    },
-  'gemini-2.5-flash':       { input: 0.0003,  output: 0.0025  },
-  'gemini-2.5-flash-lite':  { input: 0.0001,  output: 0.0004  },
-};
-
-/**
- * "-latest" aliases get hot-swapped by Google without notice.
- * Map to the newest stable model in each tier (update when Google promotes a new release).
- */
-const GEMINI_ALIAS_PRICING: Record<string, string> = {
-  'gemini-flash-latest': 'gemini-3.5-flash',
-};
 
 const TIMEOUT_MS = 120_000;
 
@@ -39,12 +15,12 @@ const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],
 });
 
-export function geminiPricing(model: string): { input: number; output: number } {
-  const resolved = GEMINI_MODEL_PRICING[model] ?? GEMINI_MODEL_PRICING[GEMINI_ALIAS_PRICING[model]];
-  if (!resolved) {
-    console.warn(`[gemini] no pricing entry for model "${model}" — falling back to gemini-2.5-pro rate (conservative overestimate)`);
-  }
-  return resolved ?? GEMINI_MODEL_PRICING['gemini-2.5-pro'];
+/** $/1K rates — Settings UI overrides win, else DEFAULT_MODEL_PRICING. */
+export function geminiPricing(
+  model: string,
+  overrides?: Record<string, ModelPrice> | null,
+): { input: number; output: number } {
+  return resolveModelPricing(model, overrides);
 }
 
 export interface CostBreakdown {
@@ -53,8 +29,12 @@ export interface CostBreakdown {
   output_cost_usd: number;
 }
 
-export function estimateGeminiCostUsd(usage: LlmUsage, model: string): CostBreakdown {
-  const p = geminiPricing(model);
+export function estimateGeminiCostUsd(
+  usage: LlmUsage,
+  model: string,
+  overrides?: Record<string, ModelPrice> | null,
+): CostBreakdown {
+  const p = geminiPricing(model, overrides);
   const input_cost_usd = (usage.prompt_tokens / 1000) * p.input;
   const output_cost_usd = (usage.completion_tokens / 1000) * p.output;
   return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
@@ -206,8 +186,10 @@ export async function geminiGenerateContent(opts: {
   return { text, usage, latency_ms, model: opts.model, authMode };
 }
 
-export function toGeminiStepCost(r: GeminiGenerateResult): OcrStepCost {
-  const breakdown = estimateGeminiCostUsd(r.usage, r.model);
+/** Loads Settings overrides (if any), then estimates cost from usage. */
+export async function toGeminiStepCost(r: GeminiGenerateResult): Promise<OcrStepCost> {
+  const settings = await getSettings();
+  const breakdown = estimateGeminiCostUsd(r.usage, r.model, settings.modelPricing);
   return {
     provider: 'gemini',
     model: r.model,

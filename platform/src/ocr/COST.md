@@ -8,28 +8,38 @@ How every OCR call's cost is calculated, stored, and displayed in the frontend.
 
 **File:** `shared/modelPricing.ts`
 
-Every supported model has a default price in USD per 1 million tokens:
+Prices are always in **USD per 1 million tokens** (`inputPer1M` / `outputPer1M`).
 
-| Model | Input $/1M | Output $/1M | Source |
-|-------|-----------|------------|--------|
-| gemini-2.5-flash | 0.30 | 2.50 | Google AI pricing (Aug 2026) |
-| gemini-2.5-pro | 1.25 | 10.00 | Google AI pricing |
-| gemini-3.5-flash | 1.50 | 9.00 | Google AI pricing |
-| gemini-2.5-flash-lite | 0.10 | 0.40 | Google AI pricing |
-| claude-sonnet-4 | 3.00 | 15.00 | Anthropic pricing |
-| claude-3-haiku | 0.25 | 1.25 | Anthropic pricing |
-| gpt-4o | 2.50 | 10.00 | OpenAI pricing |
-| gpt-4o-mini | 0.15 | 0.60 | OpenAI pricing |
-| mistral-small | 1.00 | 3.00 | Mistral pricing |
-| mistral-ocr-latest | 2.00 | 0.00 | Page-based ($0.002/page) |
+Example (matches your Settings screenshot for Gemini):
 
-Full table with 20+ models in `DEFAULT_MODEL_PRICING` object.
+| Model | Input $/1M | Output $/1M |
+|-------|-----------|------------|
+| gemini-2.5-flash | **0.30** | **2.50** |
+| gemini-2.5-pro | 1.25 | 10.00 |
+| gemini-3.5-flash | 1.50 | 9.00 |
 
-### User Overrides
+Source: [Google Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) (Aug 2026).
 
-Users can override any model's pricing from the **Settings UI → Model Pricing** section.
-Overrides are saved to Firestore in `AppSettings.modelPricing`.
-If a user override exists, it takes priority over the default.
+### How Frontend Settings ↔ Code works
+
+```
+1. GET /api/settings
+   → merges DEFAULT_MODEL_PRICING + AppSettings.modelPricing (UI overrides)
+   → Settings page shows $/1M in the table
+
+2. User edits Input/Output → clicks Save Pricing
+   → PUT /api/settings { modelPricing: { only changed models } }
+   → saved in Firestore AppSettings.modelPricing
+
+3. Next OCR run
+   → getSettings() → resolveModelPricing(model, overrides)
+   → if UI override exists → use it
+   → else → use DEFAULT_MODEL_PRICING from code
+   → cost = (tokens / 1_000_000) × $/1M
+```
+
+**Display in UI is INR** (`USD × 83` via `costFmt`), but **pricing rates are always USD**.
+
 
 ---
 

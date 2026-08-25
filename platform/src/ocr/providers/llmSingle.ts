@@ -10,6 +10,8 @@ import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { resolveProviderKey } from './resolveKey.js';
 import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
 import { isPdf } from '../../shared/storage.js';
+import { getSettings } from '../../shared/settings.js';
+import { resolveModelPricing } from '../../shared/modelPricing.js';
 
 const TIMEOUT_MS = 120_000;
 
@@ -35,6 +37,12 @@ function estimateCost(usage: LlmUsage, pricing: { input: number; output: number 
   return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
 }
 
+/** Load Settings UI overrides → $/1K for this model (else code defaults). */
+async function pricingForModel(model: string): Promise<{ input: number; output: number }> {
+  const settings = await getSettings();
+  return resolveModelPricing(model, settings.modelPricing);
+}
+
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -55,7 +63,7 @@ async function geminiSingle(buf: Buffer, modelOverride?: string): Promise<Single
       { text: USER_TEXT },
     ],
   });
-  const cost = toGeminiStepCost(r);
+  const cost = await toGeminiStepCost(r);
   const structured = structureFromLlmResponse(r.text, '');
   if (!structured.parsedData) {
     throw new Error(
@@ -109,7 +117,7 @@ async function claudeSingle(buf: Buffer, modelOverride?: string): Promise<Single
     completion_tokens: json.usage?.output_tokens ?? 0,
     total_tokens: (json.usage?.input_tokens ?? 0) + (json.usage?.output_tokens ?? 0),
   };
-  const breakdown = estimateCost(usage, { input: 0.003, output: 0.015 });
+  const breakdown = estimateCost(usage, await pricingForModel(model));
   const cost: OcrStepCost = {
     provider: 'claude',
     model,
@@ -172,7 +180,7 @@ async function openaiSingle(buf: Buffer, modelOverride?: string): Promise<Single
     completion_tokens: json.usage?.completion_tokens ?? 0,
     total_tokens: json.usage?.total_tokens ?? 0,
   };
-  const breakdown = estimateCost(usage, { input: 0.0025, output: 0.01 });
+  const breakdown = estimateCost(usage, await pricingForModel(model));
   const cost: OcrStepCost = {
     provider: 'openai',
     model,
@@ -265,7 +273,7 @@ async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<Singl
     completion_tokens: json.usage?.completion_tokens ?? 0,
     total_tokens: json.usage?.total_tokens ?? 0,
   };
-  const mistralBreakdown = estimateCost(usage, { input: 0.001, output: 0.003 });
+  const mistralBreakdown = estimateCost(usage, await pricingForModel(visionModel));
   const cost: OcrStepCost = {
     provider: 'mistral',
     model: visionModel,
