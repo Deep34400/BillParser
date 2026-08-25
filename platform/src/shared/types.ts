@@ -208,6 +208,12 @@ export interface BillDoc {
   /** Linked vendor from Vendor Registry (set after OCR completion). */
   vendor_id?: string | null;
 
+  /**
+   * USD→INR rate in force when this bill was processed. Frozen per bill so a
+   * later change to the configured rate never rewrites historical rupee figures.
+   */
+  fx_rate_usd_inr?: number | null;
+
   schema_version: number;
 
   created_at: string;

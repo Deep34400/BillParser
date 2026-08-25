@@ -53,6 +53,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       providers,
       modelPricing: mergedPricing,
       defaultModelPricing: DEFAULT_MODEL_PRICING,
+      usdToInr: settings.usdToInr ?? 96,
     };
   });
 
@@ -74,6 +75,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     if (body.modelPricing && typeof body.modelPricing === 'object') {
       patch.modelPricing = body.modelPricing;
     }
+    // Reject junk outright: a zero/NaN rate would silently zero every rupee figure.
+    if (body.usdToInr !== undefined) {
+      const rate = Number(body.usdToInr);
+      if (!Number.isFinite(rate) || rate <= 0) {
+        throw new Error('usdToInr must be a positive number');
+      }
+      patch.usdToInr = rate;
+    }
     const saved = await saveSettings(patch);
     return {
       ok: true,
@@ -82,6 +91,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       structuringModel: saved.structuringModel,
       singleProvider: saved.singleProvider,
       singleModel: saved.singleModel,
+      usdToInr: saved.usdToInr,
     };
   });
 

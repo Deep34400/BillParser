@@ -117,6 +117,10 @@ export const bills = pgTable('bills', {
   structuringLatencyMs: integer('structuring_latency_ms'),
   totalLatencyMs: integer('total_latency_ms'),
 
+  /** USD→INR rate in force when this bill was processed, so historical
+      rupee figures never shift when the configured rate changes. */
+  fxRateUsdInr: numeric('fx_rate_usd_inr', { mode: 'number', precision: 10, scale: 4 }),
+
   schemaVersion: integer('schema_version').notNull(),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
@@ -240,6 +244,7 @@ export const appSettings = pgTable('app_settings', {
   emailIntakePollIntervalSec: integer('email_intake_poll_interval_sec'),
   emailIntakeAllowedSenders: text('email_intake_allowed_senders').array(),
   modelPricing: jsonb('model_pricing'),
+  usdToInr: numeric('usd_to_inr', { mode: 'number', precision: 10, scale: 4 }),
 }, (t) => [
   check('app_settings_singleton_check', sql`${t.id} = 1`),
 ]);

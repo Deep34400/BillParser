@@ -10,7 +10,8 @@ import { OdometerPage } from './pages/OdometerPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AccountPage } from './pages/AccountPage.js';
-import type { SessionUser } from './api/client.js';
+import { api, type SessionUser } from './api/client.js';
+import { setUsdToInr } from './lib/format.js';
 
 export default function App() {
   const [user, setUser] = useState<SessionUser | null>(() => {
@@ -37,6 +38,15 @@ export default function App() {
     window.addEventListener('auth-logout', handleLogout);
     return () => window.removeEventListener('auth-logout', handleLogout);
   }, [handleLogout]);
+
+  // Load the configured USD→INR rate once signed in; until then rupee figures use
+  // the built-in fallback. Failure is non-fatal — the fallback still renders.
+  useEffect(() => {
+    if (!user) return;
+    api.settings()
+      .then((s) => setUsdToInr((s as { usdToInr?: number }).usdToInr))
+      .catch(() => { /* keep fallback */ });
+  }, [user]);
 
   if (!user) {
     return <LoginPage onLogin={handleLogin} />;

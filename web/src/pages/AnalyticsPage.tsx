@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import type { AnalyticsKpis, VehicleSpend, CostPerKm, OcrCostSummary } from '../types/index.js';
 import { api } from '../api/client.js';
 import { T } from '../theme.js';
-import { moneyCompact, moneyFull, countFmt, USD_TO_INR } from '../lib/format.js';
+import { moneyCompact, moneyFull, countFmt, usdToInrRate } from '../lib/format.js';
 import { DocNote, type DocItem } from '../components/DocNote.js';
 
 const KPI_DOCS: DocItem[] = [
@@ -451,7 +451,11 @@ function CostsTab() {
     cachedFetch('costs', api.analyticsCosts).then(setCosts).finally(() => setLoading(false));
   }, []);
 
-  const inr = (usd: number) => `₹${(usd * USD_TO_INR).toFixed(2)}`;
+  // Server-computed rupee totals: each bill converted at the rate frozen when it
+  // was processed, so these stay stable when the configured rate changes. Only
+  // fall back to a live conversion for older payloads that lack the field.
+  const rupees = (v: number | undefined, usdFallback: number) =>
+    `₹${(v ?? usdFallback * usdToInrRate()).toFixed(2)}`;
   const usd = (v: number) => `$${v.toFixed(4)}`;
 
   if (loading) return <div style={{ color: T.muted, padding: 8 }}>Loading costs…</div>;
@@ -463,10 +467,24 @@ function CostsTab() {
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
         <CostKpiCard label="TOTAL OCR RUNS" value={countFmt(costs.total_ocr_count)} sub="" accent={T.accent} />
-        <CostKpiCard label="TOTAL COST" value={inr(costs.total_cost_usd)} sub={usd(costs.total_cost_usd)} accent={T.accent} />
-        <CostKpiCard label="EXTRACTION" value={inr(costs.total_extraction_cost_usd)} sub={`${costs.total_extraction_tokens.toLocaleString()} tokens`} accent="#3b82f6" />
-        <CostKpiCard label="STRUCTURING" value={inr(costs.total_structuring_cost_usd)} sub={`${costs.total_structuring_tokens.toLocaleString()} tokens`} accent="#8b5cf6" />
-        <CostKpiCard label="AVG / OCR" value={inr(costs.avg_cost_per_ocr_usd)} sub={`${costs.avg_tokens_per_ocr.toLocaleString()} tokens`} accent={T.amber} />
+        <CostKpiCard label="TOTAL COST" value={rupees(costs.total_cost_inr, costs.total_cost_usd)} sub={usd(costs.total_cost_usd)} accent={T.accent} />
+        {/* In single mode one call does extraction + structuring, so the whole cost
+            lands on "extraction" and a STRUCTURING card would read ₹0.00 / 0 tokens
+            as if a step were missing. Collapse to one card when that's the case. */}
+        {costs.total_structuring_tokens === 0 && costs.total_structuring_cost_usd === 0 ? (
+          <CostKpiCard
+            label="EXTRACTION + STRUCTURING"
+            value={rupees(undefined, costs.total_extraction_cost_usd)}
+            sub={`${costs.total_extraction_tokens.toLocaleString()} tokens · single call`}
+            accent="#3b82f6"
+          />
+        ) : (
+          <>
+            <CostKpiCard label="EXTRACTION" value={rupees(undefined, costs.total_extraction_cost_usd)} sub={`${costs.total_extraction_tokens.toLocaleString()} tokens`} accent="#3b82f6" />
+            <CostKpiCard label="STRUCTURING" value={rupees(undefined, costs.total_structuring_cost_usd)} sub={`${costs.total_structuring_tokens.toLocaleString()} tokens`} accent="#8b5cf6" />
+          </>
+        )}
+        <CostKpiCard label="AVG / OCR" value={rupees(costs.avg_cost_per_ocr_inr, costs.avg_cost_per_ocr_usd)} sub={`${costs.avg_tokens_per_ocr.toLocaleString()} tokens`} accent={T.amber} />
         <CostKpiCard label="TOTAL TOKENS" value={costs.total_tokens.toLocaleString()} sub="Input + Output" accent={T.muted} />
       </div>
 
@@ -495,7 +513,7 @@ function CostsTab() {
                       {p.provider}
                     </div>
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{inr(p.cost_usd)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{rupees(costs.by_provider_inr?.[p.provider], p.cost_usd)}</td>
                   <td style={{ ...tdStyle, textAlign: 'right', fontFamily: T.mono, fontSize: 12 }}>{usd(p.cost_usd)}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>{p.tokens.toLocaleString()}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>{p.count}</td>

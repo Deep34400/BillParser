@@ -99,6 +99,8 @@ export interface SettingsData {
   providers: ProviderInfo[];
   modelPricing?: Record<string, ModelPrice>;
   defaultModelPricing?: Record<string, ModelPrice>;
+  /** USD→INR rate used for rupee display. */
+  usdToInr?: number;
 }
 export interface VehicleSpend { vehicle_id: string; registration_number: string | null; total_bills: number; total_amount: number; parts_amount: number; labour_amount: number; total_tax: number; }
 export interface CostPerKm { vehicle_id: string; registration_number: string | null; total_spend: number; km_range: number | null; cost_per_km: number | null; }
@@ -113,6 +115,11 @@ export interface OcrCostSummary {
   avg_cost_per_ocr_usd: number;
   avg_tokens_per_ocr: number;
   by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
+  /** Rupee totals summed per bill at the rate frozen when each was processed.
+   *  Optional so older cached payloads still typecheck. */
+  total_cost_inr?: number;
+  avg_cost_per_ocr_inr?: number;
+  by_provider_inr?: Record<string, number>;
 }
 export interface AnalyticsKpis { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; }
 export interface Analytics { totalSpend: number; completedCount: number; avgConfidence: number; needsReview: number; totalParts: number; totalLabour: number; totalTax: number; vendorCount: number; vehicleCount: number; byVendor: { name: string; amount: number }[]; byMonth: { label: string; amount: number }[]; vehicleSpend: VehicleSpend[]; costPerKm: CostPerKm[]; ocrCosts?: OcrCostSummary; }

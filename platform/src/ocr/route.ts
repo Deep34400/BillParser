@@ -67,6 +67,7 @@ function processInBackground(
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
         costInfo,
         pipelineMode: providers.mode,
+        fxRateUsdInr: (await getSettings()).usdToInr,
       });
       bill.ocr_status = 'OCR_COMPLETED';
       if (result.fallbackReason) {
@@ -639,6 +640,7 @@ export async function billRoutes(app: FastifyInstance) {
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
         costInfo,
         pipelineMode: providers.mode,
+        fxRateUsdInr: (await getSettings()).usdToInr,
       });
       bill.ocr_status = 'OCR_COMPLETED';
       if (result.fallbackReason) {
@@ -676,7 +678,7 @@ export async function billRoutes(app: FastifyInstance) {
             structuring_provider: providers.structuring,
             fallback_reason: result.fallbackReason ?? null,
             total_usd: costInfo.total_cost_usd,
-            total_inr: Math.round(costInfo.total_cost_usd * 83 * 100) / 100,
+            total_inr: Math.round(costInfo.total_cost_usd * (bill.fx_rate_usd_inr ?? 96) * 100) / 100,
             input_tokens: costInfo.total_input_tokens ?? 0,
             output_tokens: costInfo.total_output_tokens ?? 0,
             input_cost_usd: costInfo.total_input_cost_usd ?? 0,

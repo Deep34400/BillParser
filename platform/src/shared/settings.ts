@@ -26,6 +26,15 @@ export interface AppSettings {
   emailIntakeAllowedSenders?: string[];
   /** Per-model pricing overrides ($/1M tokens). When set, overrides default pricing. */
   modelPricing?: Record<string, ModelPrice> | null;
+  /**
+   * USD→INR rate used to display costs in rupees. Stored here rather than
+   * hardcoded so it can be corrected without a deploy — it was pinned at 83 for
+   * long enough to understate every rupee figure by ~13%.
+   *
+   * The rate in force at processing time is copied onto each bill
+   * (`fx_rate_usd_inr`), so changing it never rewrites historical figures.
+   */
+  usdToInr?: number;
 }
 
 const DEFAULTS: AppSettings = {
@@ -35,6 +44,8 @@ const DEFAULTS: AppSettings = {
   structuringModel: 'gemini-2.5-flash',
   singleProvider: 'gemini',
   singleModel: 'gemini-2.5-flash',
+  // ~95.7 as of Aug 2026; override in Settings when it drifts.
+  usdToInr: 96,
 };
 
 const SETTINGS_ID = 1;
@@ -53,6 +64,7 @@ function rowToSettings(row: typeof appSettings.$inferSelect): AppSettings {
     emailIntakePollIntervalSec: row.emailIntakePollIntervalSec ?? undefined,
     emailIntakeAllowedSenders: row.emailIntakeAllowedSenders ?? undefined,
     modelPricing: (row.modelPricing as Record<string, ModelPrice> | null) ?? undefined,
+    usdToInr: row.usdToInr ?? undefined,
   };
 }
 

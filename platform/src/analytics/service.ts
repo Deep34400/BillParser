@@ -3,6 +3,7 @@
  * All data comes through repository.ts. No direct Postgres access.
  */
 import { fetchAllBills, type BillDoc } from './repository.js';
+import { getSettings } from '../shared/settings.js';
 import { isJunkVendorName } from '../ocr/transformer/normalize/vendor.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -50,6 +51,14 @@ export interface OcrCostSummary {
   avg_cost_per_ocr_usd: number;
   avg_tokens_per_ocr: number;
   by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
+  /**
+   * Rupee totals summed per bill at the rate frozen when each was processed,
+   * so changing the configured rate never restates history. The client must not
+   * re-derive these from the USD figures with a single global rate.
+   */
+  total_cost_inr: number;
+  avg_cost_per_ocr_inr: number;
+  by_provider_inr: Record<string, number>;
 }
 
 // ─── KPI Aggregation ────────────────────────────────────────────────────────
@@ -170,10 +179,15 @@ export async function getOcrCostSummary(): Promise<OcrCostSummary> {
   const bills = await fetchAllBills();
   const completed = bills.filter((b) => b.ocr_status === 'OCR_COMPLETED' || b.ocr_status === 'VERIFIED');
 
-  let extCost = 0, strCost = 0, totCost = 0;
+  let extCost = 0, strCost = 0, totCost = 0, totInr = 0;
   let extTokens = 0, strTokens = 0, totTokens = 0;
   let ocrCount = 0;
   const byProvider = new Map<string, { cost_usd: number; tokens: number; count: number }>();
+  const byProviderInr = new Map<string, number>();
+  // Bills processed before the rate was frozen per-bill carry no rate; fall back
+  // to the current default rather than dropping them from the rupee total.
+  const settings = await getSettings();
+  const fallbackFx = settings.usdToInr ?? 96;
 
   for (const b of completed) {
     if (b.total_cost_usd == null) continue;
@@ -181,6 +195,8 @@ export async function getOcrCostSummary(): Promise<OcrCostSummary> {
     extCost += b.extraction_cost_usd ?? 0;
     strCost += b.structuring_cost_usd ?? 0;
     totCost += b.total_cost_usd ?? 0;
+    const fx = b.fx_rate_usd_inr ?? fallbackFx;
+    totInr += (b.total_cost_usd ?? 0) * fx;
     extTokens += b.extraction_tokens ?? 0;
     strTokens += b.structuring_tokens ?? 0;
     totTokens += b.total_tokens ?? 0;
@@ -195,11 +211,15 @@ export async function getOcrCostSummary(): Promise<OcrCostSummary> {
       const e = byProvider.get(b.extraction_provider)!;
       e.cost_usd += b.extraction_cost_usd ?? 0;
       e.tokens += b.extraction_tokens ?? 0;
+      byProviderInr.set(b.extraction_provider,
+        (byProviderInr.get(b.extraction_provider) ?? 0) + (b.extraction_cost_usd ?? 0) * fx);
     }
     if (b.structuring_provider) {
       const e = byProvider.get(b.structuring_provider)!;
       e.cost_usd += b.structuring_cost_usd ?? 0;
       e.tokens += b.structuring_tokens ?? 0;
+      byProviderInr.set(b.structuring_provider,
+        (byProviderInr.get(b.structuring_provider) ?? 0) + (b.structuring_cost_usd ?? 0) * fx);
     }
   }
 
@@ -211,6 +231,11 @@ export async function getOcrCostSummary(): Promise<OcrCostSummary> {
     total_extraction_tokens: extTokens,
     total_structuring_tokens: strTokens,
     total_tokens: totTokens,
+    total_cost_inr: Math.round(totInr * 100) / 100,
+    avg_cost_per_ocr_inr: ocrCount > 0 ? Math.round((totInr / ocrCount) * 100) / 100 : 0,
+    by_provider_inr: Object.fromEntries(
+      Array.from(byProviderInr.entries()).map(([k, v]) => [k, Math.round(v * 100) / 100]),
+    ),
     avg_cost_per_ocr_usd: ocrCount > 0 ? Math.round((totCost / ocrCount) * 10000) / 10000 : 0,
     avg_tokens_per_ocr: ocrCount > 0 ? Math.round(totTokens / ocrCount) : 0,
     by_provider: Array.from(byProvider.entries()).map(([provider, v]) => ({

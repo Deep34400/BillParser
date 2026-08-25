@@ -1,3 +1,4 @@
+import { usdToInrRate } from './format.js';
 /** Admin / unlimited accounts — Infinity is lost when JSON-serialized. */
 export function hasUnlimitedBalance(role: string, balance: number | null | undefined): boolean {
   if (role === 'admin') return true;
@@ -5,13 +6,12 @@ export function hasUnlimitedBalance(role: string, balance: number | null | undef
   return balance > 999_999_999;
 }
 
-const USD_TO_INR = 83;
 
 /** Format balance in ₹ (backend stores in USD, convert for display). */
 export function formatBalance(role: string, balance: number | null | undefined): string {
   if (hasUnlimitedBalance(role, balance)) return '∞';
   const n = typeof balance === 'number' && Number.isFinite(balance) ? balance : 0;
-  const inr = n * USD_TO_INR;
+  const inr = n * usdToInrRate();
   return `₹${inr.toFixed(2)}`;
 }
 

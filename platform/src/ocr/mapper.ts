@@ -38,6 +38,8 @@ export function mapParsedToBill(
     vehicleId?: string;
     costInfo?: OcrCostInfo;
     pipelineMode?: 'split' | 'single';
+    /** USD→INR rate in force now; frozen onto the bill for stable history. */
+    fxRateUsdInr?: number;
   } = {},
 ): BillDoc {
   const t = parsed.totals_and_tax_summary;
@@ -113,6 +115,7 @@ export function mapParsedToBill(
     extraction_cost_usd: opts.costInfo?.extraction?.cost_usd ?? null,
     structuring_cost_usd: opts.costInfo?.structuring?.cost_usd ?? null,
     total_cost_usd: opts.costInfo?.total_cost_usd ?? null,
+    fx_rate_usd_inr: opts.fxRateUsdInr ?? null,
     extraction_tokens: opts.costInfo?.extraction?.usage.total_tokens ?? null,
     extraction_input_tokens: opts.costInfo?.extraction?.usage.prompt_tokens ?? null,
     extraction_output_tokens: opts.costInfo?.extraction?.usage.completion_tokens ?? null,

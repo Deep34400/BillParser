@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../api/client.js';
+import { setUsdToInr } from '../lib/format.js';
 import { T } from '../theme.js';
 import { Toast } from '../components/Toast.js';
 import type { ModelPrice } from '../types/index.js';
@@ -90,6 +91,9 @@ export function SettingsPage() {
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
 
+  const [fxRate, setFxRate] = useState<string>('');
+  const [savedFxRate, setSavedFxRate] = useState<number | null>(null);
+
   const load = useCallback(async () => {
     try {
       const s = await api.settings();
@@ -106,6 +110,7 @@ export function SettingsPage() {
       setSavedSingleProv(snp); setSavedSingleModel(snm);
       if (s.modelPricing) setModelPricing(s.modelPricing);
       if (s.defaultModelPricing) setDefaultPricing(s.defaultModelPricing);
+      if (typeof s.usdToInr === 'number') { setFxRate(String(s.usdToInr)); setSavedFxRate(s.usdToInr); }
       try {
         const { credentials } = await api.revealCreds();
         const cv: Record<string, string> = {};
@@ -120,6 +125,7 @@ export function SettingsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -130,7 +136,9 @@ export function SettingsPage() {
         structuringModel: structModel,
         singleProvider: singleProv,
         singleModel: singleModel,
+        ...(Number(fxRate) > 0 ? { usdToInr: Number(fxRate) } : {}),
       });
+      if (Number(fxRate) > 0) { setSavedFxRate(Number(fxRate)); setUsdToInr(Number(fxRate)); }
       setSavedMode(mode);
       setSavedStructProv(structProv); setSavedStructModel(structModel);
       setSavedSingleProv(singleProv); setSavedSingleModel(singleModel);
@@ -331,6 +339,31 @@ export function SettingsPage() {
         <button style={btnP} disabled={saving} onClick={() => void handleSave()}>
           {saving ? 'Saving...' : `Save as ${mode.toUpperCase()} mode`}
         </button>
+      </div>
+
+      {/* ─── Currency ─── */}
+      <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Currency
+      </h2>
+      <div style={card}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={lbl}>USD → INR rate</div>
+            <input
+              type="number" step="0.01" min="0" value={fxRate}
+              onChange={(e) => setFxRate(e.target.value)}
+              placeholder="96"
+              style={{ ...inp, width: 140 }}
+            />
+          </div>
+          <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, flex: 1, minWidth: 260 }}>
+            Model prices are quoted in USD; this converts them for display.
+            {savedFxRate != null && <> Currently <strong>₹{savedFxRate}</strong> per $1.</>}
+            <br />
+            Saved with the button above. Each invoice stores the rate in force when it was
+            processed, so changing this affects new invoices only — historical figures stay put.
+          </div>
+        </div>
       </div>
 
       {/* ─── Model Pricing ─── */}

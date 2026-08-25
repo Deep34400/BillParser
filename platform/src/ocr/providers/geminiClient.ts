@@ -19,8 +19,9 @@ const auth = new GoogleAuth({
 export function geminiPricing(
   model: string,
   overrides?: Record<string, ModelPrice> | null,
+  promptTokens?: number,
 ): { input: number; output: number } {
-  return resolveModelPricing(model, overrides);
+  return resolveModelPricing(model, overrides, promptTokens);
 }
 
 export interface CostBreakdown {
@@ -35,7 +36,8 @@ export function estimateGeminiCostUsd(
   overrides?: Record<string, ModelPrice> | null,
 ): CostBreakdown {
   // Rates come from Settings UI override for this model, else DEFAULT_MODEL_PRICING
-  const p = geminiPricing(model, overrides);
+  // promptTokens selects the >200k long-context tier where the model has one.
+  const p = geminiPricing(model, overrides, usage.prompt_tokens);
   const input_cost_usd = (usage.prompt_tokens / 1000) * p.input;
   // Google bills thinking tokens at the output price
   const billedOutput = usage.completion_tokens + (usage.thinking_tokens ?? 0);

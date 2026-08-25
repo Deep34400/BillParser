@@ -85,6 +85,7 @@ function billRowToDoc(row: typeof bills.$inferSelect): BillDoc {
     structuring_latency_ms: row.structuringLatencyMs,
     total_latency_ms: row.totalLatencyMs,
     vendor_id: row.vendorId,
+    fx_rate_usd_inr: row.fxRateUsdInr,
     schema_version: row.schemaVersion,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
@@ -161,6 +162,7 @@ function billDocToRow(b: BillDoc) {
     structuringLatencyMs: b.structuring_latency_ms ?? null,
     totalLatencyMs: b.total_latency_ms ?? null,
     vendorId: b.vendor_id ?? null,
+    fxRateUsdInr: b.fx_rate_usd_inr ?? null,
     schemaVersion: b.schema_version,
     createdAt: new Date(b.created_at),
     updatedAt: new Date(b.updated_at),
@@ -247,7 +249,7 @@ const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, keyof typeof bills.$inferIns
   structuring_provider: 'structuringProvider', extraction_model: 'extractionModel',
   structuring_model: 'structuringModel', extraction_latency_ms: 'extractionLatencyMs',
   structuring_latency_ms: 'structuringLatencyMs', total_latency_ms: 'totalLatencyMs',
-  vendor_id: 'vendorId', schema_version: 'schemaVersion',
+  vendor_id: 'vendorId', fx_rate_usd_inr: 'fxRateUsdInr', schema_version: 'schemaVersion',
 };
 
 export async function updateBill(billId: string, updates: Partial<BillDoc>): Promise<void> {

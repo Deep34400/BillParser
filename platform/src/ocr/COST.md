@@ -210,13 +210,24 @@ pipeline_mode                     →  pipelineMode
 
 ### 5b: Currency Conversion
 
-The frontend displays costs in INR using a fixed rate:
+Costs are computed in USD and displayed in INR. The rate is **configured in
+Settings → Currency**, not hardcoded — it sat at 83 long enough to understate
+every rupee figure by ~13% once the rupee moved (~95.7 in Aug 2026).
+
+Two distinct paths, and mixing them up restates history:
 
 ```typescript
-// lib/format.ts
-const USD_TO_INR = 83;
-costFmt(usd) → ₹{usd × 83}   // e.g. $0.0024 → ₹0.20
+// Live values (current balance, a single invoice) — current configured rate.
+// lib/format.ts, loaded once at app start from GET /api/settings
+costFmt(usd) → ₹{usd × usdToInrRate()}
+
+// Historical aggregates — NEVER multiply a USD total by the current rate.
+// Each bill stores fx_rate_usd_inr, the rate in force when it was processed;
+// the analytics API sums per bill and returns total_cost_inr / by_provider_inr.
 ```
+
+Changing the rate therefore affects new invoices only. Bills predating the
+frozen-rate column have a null rate and fall back to the current setting.
 
 ---
 
