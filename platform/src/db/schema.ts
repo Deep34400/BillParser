@@ -200,7 +200,6 @@ export const apiKeys = pgTable('api_keys', {
   userId: text('user_id').notNull().references(() => users.userId, { onDelete: 'cascade' }),
   keyHash: text('key_hash').notNull(),
   keyPrefix: text('key_prefix').notNull(),
-  apiKey: text('api_key').notNull(),
   label: text('label').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),

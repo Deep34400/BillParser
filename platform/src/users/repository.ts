@@ -38,7 +38,6 @@ export interface ApiKeyDoc {
   user_id: string;
   key_hash: string;
   key_prefix: string;
-  api_key: string;
   label: string;
   created_at: string;
   last_used_at?: string | null;
@@ -83,7 +82,6 @@ function keyRowToDoc(row: typeof apiKeys.$inferSelect): ApiKeyDoc {
     user_id: row.userId,
     key_hash: row.keyHash,
     key_prefix: row.keyPrefix,
-    api_key: row.apiKey,
     label: row.label,
     created_at: row.createdAt.toISOString(),
     last_used_at: row.lastUsedAt?.toISOString() ?? null,
@@ -204,7 +202,6 @@ export async function createApiKeyDoc(doc: ApiKeyDoc): Promise<ApiKeyDoc> {
     userId: doc.user_id,
     keyHash: doc.key_hash,
     keyPrefix: doc.key_prefix,
-    apiKey: doc.api_key,
     label: doc.label,
     createdAt: new Date(doc.created_at),
     lastUsedAt: doc.last_used_at ? new Date(doc.last_used_at) : null,

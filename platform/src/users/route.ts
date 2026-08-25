@@ -44,11 +44,12 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.status(401).send({ success: false, message: 'Not authenticated' });
 
     const body = req.body as { label?: string } | undefined;
-    const doc = await issueApiKey(user.user_id, body?.label);
+    const { doc, apiKey } = await issueApiKey(user.user_id, body?.label);
+    // Only place the raw key is ever returned — it is not stored, only its hash.
     return reply.status(201).send({
       success: true,
-      data: { key_id: doc.key_id, api_key: doc.api_key, label: doc.label, prefix: doc.key_prefix, created_at: doc.created_at },
-      message: 'API key created — you can copy it anytime from Account.',
+      data: { key_id: doc.key_id, api_key: apiKey, label: doc.label, prefix: doc.key_prefix, created_at: doc.created_at },
+      message: 'API key created — copy it now, it cannot be shown again.',
     });
   });
 
@@ -59,8 +60,9 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     const keys = await getApiKeys(user.user_id);
     return reply.send({
       success: true,
+      // No raw key here: only the hash is stored, so it cannot be re-shown.
       data: keys.map((k) => ({
-        key_id: k.key_id, prefix: k.key_prefix, api_key: k.api_key ?? null,
+        key_id: k.key_id, prefix: k.key_prefix,
         label: k.label, created_at: k.created_at, last_used_at: k.last_used_at ?? null,
       })),
     });

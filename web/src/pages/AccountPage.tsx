@@ -154,29 +154,25 @@ export function AccountPage() {
               </tr>
             </thead>
             <tbody>
-              {keys.map((k) => {
-                const full = k.api_key ?? null;
-                return (
-                  <tr key={k.key_id} style={{ borderBottom: `1px solid ${T.border}` }}>
-                    <td style={{ padding: '8px 8px', fontWeight: 600, verticalAlign: 'top' }}>{k.label}</td>
-                    <td style={{ padding: '8px 8px', fontFamily: T.mono, fontSize: 11, maxWidth: 360 }}>
-                      <div style={{ wordBreak: 'break-all', marginBottom: 6 }}>
-                        {full ?? `${k.prefix}... (old key — revoke & generate new to copy full key)`}
-                      </div>
-                      {full && (
-                        <button
-                          onClick={() => { void navigator.clipboard.writeText(full); flash('Full API key copied!'); }}
-                          style={{ ...btn(T.green), padding: '3px 10px', fontSize: 11 }}
-                        >Copy</button>
-                      )}
-                    </td>
-                    <td style={{ padding: '8px 8px', fontSize: 12, color: T.muted, verticalAlign: 'top' }}>{new Date(k.created_at).toLocaleDateString()}</td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', verticalAlign: 'top' }}>
-                      <button onClick={() => void handleDelete(k.key_id)} style={{ ...btn(T.red), padding: '4px 10px', fontSize: 11 }}>Revoke</button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {/* Only the hash is stored server-side, so the full key can never be
+                  re-displayed — it is shown once, at creation, in the banner above. */}
+              {keys.map((k) => (
+                <tr key={k.key_id} style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: '8px 8px', fontWeight: 600, verticalAlign: 'top' }}>{k.label}</td>
+                  <td style={{ padding: '8px 8px', fontFamily: T.mono, fontSize: 11, maxWidth: 360 }}>
+                    <div style={{ wordBreak: 'break-all', color: T.muted }}>
+                      {k.prefix}<span style={{ letterSpacing: 1 }}>••••••••••••••••</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: T.faint, marginTop: 4 }}>
+                      Shown once at creation. Lost it? Revoke and generate a new one.
+                    </div>
+                  </td>
+                  <td style={{ padding: '8px 8px', fontSize: 12, color: T.muted, verticalAlign: 'top' }}>{new Date(k.created_at).toLocaleDateString()}</td>
+                  <td style={{ padding: '8px 8px', textAlign: 'right', verticalAlign: 'top' }}>
+                    <button onClick={() => void handleDelete(k.key_id)} style={{ ...btn(T.red), padding: '4px 10px', fontSize: 11 }}>Revoke</button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         ) : (

@@ -32,19 +32,26 @@ export async function login(
 
 // ─── API Key Management ─────────────────────────────────────────────────────
 
-export async function issueApiKey(userId: string, label = 'Default'): Promise<ApiKeyDoc> {
+/**
+ * Mint an API key. Only the SHA-256 hash is persisted, so `apiKey` is the one
+ * and only time the raw value exists outside the caller's hands — surface it
+ * immediately or it is gone.
+ */
+export async function issueApiKey(
+  userId: string,
+  label = 'Default',
+): Promise<{ doc: ApiKeyDoc; apiKey: string }> {
   const rawKey = generateApiKey();
   const doc: ApiKeyDoc = {
     key_id: randomBytes(16).toString('hex'),
     user_id: userId,
     key_hash: hashApiKey(rawKey),
     key_prefix: apiKeyPrefix(rawKey),
-    api_key: rawKey,
     label,
     created_at: new Date().toISOString(),
   };
   await createApiKeyDoc(doc);
-  return doc;
+  return { doc, apiKey: rawKey };
 }
 
 export async function revokeApiKey(userId: string, keyId: string): Promise<boolean> {

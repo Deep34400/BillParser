@@ -39,7 +39,7 @@ export interface SessionUser {
 export interface ApiKeyInfo {
   key_id: string;
   prefix: string;
-  api_key?: string | null;
+  /** No raw key: the server stores only a hash, so it is returned once at creation. */
   label: string;
   created_at: string;
   last_used_at?: string | null;

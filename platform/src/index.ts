@@ -13,13 +13,23 @@ async function seedAdmin() {
   if (users.some((u) => u.role === 'admin')) return;
 
   const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@praya.io';
-  const adminPassword = process.env.ADMIN_PASSWORD ?? 'admin123';
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  // 'admin123' is documented in the repo README. Seeding it into a production
+  // database — behind an --allow-unauthenticated Cloud Run service — hands over
+  // an admin account to anyone who reads the docs.
+  if (!adminPassword && env.nodeEnv === 'production') {
+    throw new Error(
+      'ADMIN_PASSWORD is not set. Refusing to seed the default admin password in '
+      + 'production — it is published in this repository. Inject it from Secret Manager.',
+    );
+  }
   const now = new Date().toISOString();
   await createUser({
     user_id: 'admin-001',
     email: adminEmail,
     name: 'Admin',
-    password_hash: hashPassword(adminPassword),
+    password_hash: hashPassword(adminPassword ?? 'admin123'),
     role: 'admin',
     status: 'active',
     api_key_hash: '',
@@ -33,7 +43,10 @@ async function seedAdmin() {
     created_at: now,
     updated_at: now,
   });
-  console.log(`[SEED] Admin account created → email: ${adminEmail} / password: ${adminPassword}`);
+  console.log(
+    `[SEED] Admin account created → email: ${adminEmail} / password: `
+    + (adminPassword ? '(from ADMIN_PASSWORD)' : 'admin123'),
+  );
   console.log('[SEED] Set mailbox + allowed senders in Admin → Email Intake');
   console.log('[SEED] Change ADMIN_EMAIL and ADMIN_PASSWORD in .env for production.');
 }

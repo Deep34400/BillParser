@@ -66,7 +66,7 @@ steps:
       - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
       - '--max-instances=8'
       - '--set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,STORAGE_BUCKET=${_STORAGE_BUCKET},VERTEX_LOCATION=${_VERTEX_LOCATION},NODE_ENV=production'
-      - '--set-secrets=DATABASE_URL=${_DB_SECRET}:latest'
+      - '--set-secrets=DATABASE_URL=${_DB_SECRET}:latest,JWT_SECRET=${_JWT_SECRET}:latest,ADMIN_PASSWORD=${_ADMIN_PW_SECRET}:latest'
     waitFor: ['migrate']
 
   # 5. Capture the deployed platform URL for the web build to proxy to
@@ -134,6 +134,8 @@ substitutions:
   _STORAGE_BUCKET: carrum-doc-ai-uploads-dev
   _CLOUDSQL_INSTANCE: carrum-doc-ai:asia-southeast1:billparser-pg
   _DB_SECRET: billparser-db-url-dev
+  _JWT_SECRET: billparser-jwt-secret-dev
+  _ADMIN_PW_SECRET: billparser-admin-password-dev
   _VERTEX_LOCATION: global
 
 options:
