@@ -18,9 +18,15 @@ steps:
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/platform:$COMMIT_SHA'
     waitFor: ['build-platform']
 
-  # 3. Apply Postgres migrations via a Cloud SQL Auth Proxy tunnel, before the new
-  # revision serves traffic. Requires the Cloud Build service account to hold
-  # roles/cloudsql.client and roles/secretmanager.secretAccessor on this project.
+  # 3. Apply Postgres migrations before the new revision serves traffic.
+  #
+  # The proxy listens on a Unix socket at /cloudsql/<INSTANCE>, matching the path
+  # Cloud Run mounts via --add-cloudsql-instances. That way the DATABASE_URL secret
+  # (…?host=/cloudsql/<INSTANCE>) is byte-identical here and at runtime — no URL
+  # rewriting, and no second secret to keep in sync.
+  #
+  # Requires the build service account to hold roles/cloudsql.client and
+  # secretAccessor on billparser-db-url-dev.
   - name: 'node:20-slim'
     id: migrate
     entrypoint: bash
@@ -32,8 +38,11 @@ steps:
         curl -sLo /usr/local/bin/cloud-sql-proxy \
           https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.0/cloud-sql-proxy.linux.amd64
         chmod +x /usr/local/bin/cloud-sql-proxy
-        /usr/local/bin/cloud-sql-proxy --port 5432 "${_CLOUDSQL_INSTANCE}" &
-        for i in $(seq 1 15); do (echo > /dev/tcp/127.0.0.1/5432) 2>/dev/null && break; sleep 1; done
+        mkdir -p "/cloudsql/${_CLOUDSQL_INSTANCE}"
+        /usr/local/bin/cloud-sql-proxy --unix-socket /cloudsql "${_CLOUDSQL_INSTANCE}" &
+        SOCK="/cloudsql/${_CLOUDSQL_INSTANCE}/.s.PGSQL.5432"
+        for i in $(seq 1 30); do [ -S "$$SOCK" ] && break; sleep 1; done
+        [ -S "$$SOCK" ] || { echo "Cloud SQL proxy socket never appeared at $$SOCK"; exit 1; }
         cd platform
         npm ci
         DATABASE_URL="$$DATABASE_URL" npm run db:migrate
