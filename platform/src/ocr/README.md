@@ -32,7 +32,7 @@ ocr/
 │   ├── validate.ts               # Structural validation rules (amounts, formats)
 │   └── review.ts                 # Human-review flag generation
 ├── mapper.ts                     # Data transformations: ParsedData ↔ BillDoc ↔ FrontendInvoice
-├── repository.ts                 # Firestore CRUD for bills and bill_parts
+├── repository.ts                 # Postgres CRUD for bills and bill_parts
 ├── types/
 │   ├── invoice.ts                # Re-exports ParsedInvoiceData, BillDoc, etc. from shared
 │   ├── parser.ts                 # ValidationIssue, ParseResult
@@ -99,15 +99,15 @@ Buffer → pipeline/split.ts
 
 ### 6. Mapping & Storage
 
-- `mapper.ts → mapParsedToBill()` — converts to `BillDoc` for Firestore
+- `mapper.ts → mapParsedToBill()` — converts to `BillDoc` for Postgres
 - `mapper.ts → toApiParsed()` — stable API response contract (IMMUTABLE)
 - `mapper.ts → billToInvoice()` — frontend-ready shape
-- `repository.ts` — Firestore CRUD for bills and bill_parts
+- `repository.ts` — Postgres CRUD for bills and bill_parts
 
 ## How to Change the OCR Model
 
 1. Settings UI → change model under Single or Split mode
-2. Saved to Firestore (or devStore in LOCAL_DEV)
+2. Saved to Postgres
 3. Next upload reads the setting and uses that model
 4. Bill is stamped with which model was used
 
@@ -126,4 +126,4 @@ Critical suites:
 - `normalize.test.ts` — field enrichment correctness
 - `vendorExtract.test.ts` — seller vs buyer detection
 - `footerExtract.test.ts` — GST footer parsing
-- `billMapper.test.ts` — Firestore mapping
+- `billMapper.test.ts` — bill mapping

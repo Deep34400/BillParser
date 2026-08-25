@@ -6,7 +6,7 @@
  * when needed (÷1000). UI shows per-1M for readability.
  *
  * Users can override any model's pricing via Settings UI; overrides are
- * persisted in Firestore. Defaults here are used when no override exists.
+ * persisted in Postgres. Defaults here are used when no override exists.
  */
 
 export interface ModelPrice {

@@ -1,10 +1,25 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: billparser_dev
+      POSTGRES_USER: billparser_app_dev
+      POSTGRES_PASSWORD: local_dev_password
+    volumes:
+      - billparser_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U billparser_app_dev -d billparser_dev" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   api:
     build: { context: platform, dockerfile: Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
     environment:
-      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-billparser-dev}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-billparser-uploads}
-      FIRESTORE_PREFIX: ${FIRESTORE_PREFIX:-}
+      DATABASE_URL: postgresql://billparser_app_dev:local_dev_password@postgres:5432/billparser_dev
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-carrum-doc-ai}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-carrum-doc-ai-uploads-dev}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       PORT: 4000
@@ -17,3 +32,6 @@ services:
       PORT: 8080
       API_BASE_URL: http://api:4000
     ports: [ "8081:8080" ]
+
+volumes:
+  billparser_pg_data:

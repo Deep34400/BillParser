@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { upsertVendorFromInvoice } from '../../src/vendor/vendorService.js';
-import { devStore } from '../../src/shared/devStore.js';
+import { getVendor } from '../../src/vendor/vendorRepository.js';
+import { db } from '../../src/config/db.js';
+import { vendors } from '../../src/db/schema.js';
 import type { ParsedInvoiceData } from '../../src/shared/types.js';
 
-beforeEach(() => {
-  devStore.vendors.clear();
+beforeEach(async () => {
+  await db().delete(vendors);
 });
 
 describe('upsertVendorFromInvoice', () => {
@@ -19,7 +21,7 @@ describe('upsertVendorFromInvoice', () => {
     const vendorId = await upsertVendorFromInvoice('bill-001', parsed);
     expect(vendorId).toBeTruthy();
 
-    const vendor = devStore.vendors.get(vendorId!);
+    const vendor = await getVendor(vendorId!);
     expect(vendor).toBeTruthy();
     expect(vendor!.legal_name).toBe('VIPUL MOTORS PVT. LTD.');
     expect(vendor!.gstin).toBe('09AABCV0931B1ZS');
@@ -37,7 +39,7 @@ describe('upsertVendorFromInvoice', () => {
     const id2 = await upsertVendorFromInvoice('bill-002', parsed);
 
     expect(id1).toBe(id2);
-    const vendor = devStore.vendors.get(id1!);
+    const vendor = await getVendor(id1!);
     expect(vendor!.invoice_count).toBe(2);
   });
 
@@ -66,7 +68,7 @@ describe('upsertVendorFromInvoice', () => {
     const id2 = await upsertVendorFromInvoice('bill-002', second);
 
     expect(id1).toBe(id2);
-    expect(devStore.vendors.get(id1!)!.invoice_count).toBe(2);
+    expect((await getVendor(id1!))!.invoice_count).toBe(2);
   });
 
   it('returns null when parsed data has no vendor info', async () => {
@@ -80,15 +82,15 @@ describe('upsertVendorFromInvoice', () => {
       gstin: '07AABCK1234L1ZX',
     };
 
-    await upsertVendorFromInvoice('bill-001', parsed);
-    const v1 = devStore.vendors.values().next().value!;
-    const firstSeen = v1.last_seen;
+    const id1 = await upsertVendorFromInvoice('bill-001', parsed);
+    const v1 = await getVendor(id1!);
+    const firstSeen = v1!.last_seen;
 
     await new Promise((r) => setTimeout(r, 10));
-    await upsertVendorFromInvoice('bill-002', parsed);
-    const v2 = devStore.vendors.values().next().value!;
+    const id2 = await upsertVendorFromInvoice('bill-002', parsed);
+    const v2 = await getVendor(id2!);
 
-    expect(v2.last_seen >= firstSeen).toBe(true);
-    expect(v2.first_seen).toBe(v1.first_seen);
+    expect(v2!.last_seen >= firstSeen).toBe(true);
+    expect(v2!.first_seen).toBe(v1!.first_seen);
   });
 });

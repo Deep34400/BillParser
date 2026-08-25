@@ -9,7 +9,8 @@ import {
   getUser, getUserByEmail, createUser, updateUser, listUsers,
   generateApiKey, hashApiKey, apiKeyPrefix,
   createApiKeyDoc, listApiKeysForUser, deleteApiKey,
-  hashPassword, verifyPassword, getUserTransactions, createTransaction,
+  hashPassword, verifyPassword, getUserTransactions,
+  applyTokenTransaction, incrementTotalCost,
   type UserDoc, type UserRole, type ApiKeyDoc, type TokenTransactionDoc,
 } from './repository.js';
 
@@ -125,23 +126,9 @@ export async function addTokens(
   amount: number,
   description: string,
 ): Promise<TokenTransactionDoc> {
-  const user = await getUser(userId);
-  if (!user) throw new Error(`User ${userId} not found`);
-
-  const newBalance = user.token_balance + amount;
-  await updateUser(userId, { token_balance: newBalance });
-
-  const tx: TokenTransactionDoc = {
-    tx_id: randomBytes(16).toString('hex'),
-    user_id: userId,
-    type: 'credit',
-    amount,
-    balance_after: newBalance,
-    description,
-    created_at: new Date().toISOString(),
-  };
-  await createTransaction(tx);
-  return tx;
+  const result = await applyTokenTransaction({ userId, type: 'credit', amount, description });
+  if (!result.ok) throw new Error(`User ${userId} not found`);
+  return result.tx;
 }
 
 export async function deductTokens(
@@ -150,29 +137,13 @@ export async function deductTokens(
   description: string,
   referenceId?: string,
 ): Promise<TokenTransactionDoc> {
-  const user = await getUser(userId);
-  if (!user) throw new Error(`User ${userId} not found`);
-  if (user.token_balance < amount) throw new Error('Insufficient balance');
-
-  const newBalance = Math.round((user.token_balance - amount) * 10000) / 10000;
-  await updateUser(userId, {
-    token_balance: newBalance,
-    total_tokens_used: Math.round((user.total_tokens_used + amount) * 10000) / 10000,
-    total_ocr_count: user.total_ocr_count + 1,
+  const result = await applyTokenTransaction({
+    userId, type: 'debit', amount, description, referenceId: referenceId ?? null,
   });
-
-  const tx: TokenTransactionDoc = {
-    tx_id: randomBytes(16).toString('hex'),
-    user_id: userId,
-    type: 'debit',
-    amount,
-    balance_after: newBalance,
-    description,
-    reference_id: referenceId ?? null,
-    created_at: new Date().toISOString(),
-  };
-  await createTransaction(tx);
-  return tx;
+  if (!result.ok) {
+    throw new Error(result.reason === 'not_found' ? `User ${userId} not found` : 'Insufficient balance');
+  }
+  return result.tx;
 }
 
 export async function getTransactions(userId: string, limit = 50): Promise<TokenTransactionDoc[]> {
@@ -184,11 +155,7 @@ export async function getTransactions(userId: string, limit = 50): Promise<Token
  * against the user's lifetime spend. Separate from deductTokens (token billing).
  */
 export async function trackOcrCost(userId: string, costUsd: number): Promise<void> {
-  const user = await getUser(userId);
-  if (!user) return;
-  await updateUser(userId, {
-    total_cost_usd: Math.round(((user.total_cost_usd ?? 0) + costUsd) * 10000) / 10000,
-  });
+  await incrementTotalCost(userId, costUsd);
 }
 
 /**

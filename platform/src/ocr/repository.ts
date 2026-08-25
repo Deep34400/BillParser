@@ -1,43 +1,263 @@
 /**
  * OCR Repository — data access layer for bills and bill parts.
- * Contains the actual Firestore CRUD. No re-exports — all DB code lives here.
+ * Contains the actual Postgres CRUD. No re-exports — all DB code lives here.
  */
 import { v4 as uuid } from 'uuid';
-import { env } from '../config/env.js';
-import { db, col } from '../config/firebase.js';
-import { devStore } from '../shared/devStore.js';
+import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { db } from '../config/db.js';
+import { bills, billParts } from '../db/schema.js';
 import { getSettings } from '../shared/settings.js';
-import { cacheGet, cacheSet } from '../shared/cache.js';
 import type { BillDoc, BillPartDoc, BillType, BillStatus, ParsedInvoiceData, LineType } from '../shared/types.js';
 import type { AppSettings } from '../shared/settings.js';
 
 export type { BillDoc, BillPartDoc, BillType, BillStatus, ParsedInvoiceData, AppSettings };
 export { getSettings };
 
+// ─── Row <-> Doc mapping ─────────────────────────────────────────────────────
+
+function billRowToDoc(row: typeof bills.$inferSelect): BillDoc {
+  return {
+    bill_id: row.billId,
+    fleet_id: row.fleetId,
+    vehicle_id: row.vehicleId,
+    bill_type: row.billType as BillType,
+    bill_category: row.billCategory,
+    vendor_name: row.vendorName,
+    vendor_gstin: row.vendorGstin,
+    company_name: row.companyName,
+    gstin: row.gstin,
+    pan: row.pan,
+    irn: row.irn,
+    invoice_number: row.invoiceNumber,
+    invoice_date: row.invoiceDate,
+    invoice_time: row.invoiceTime,
+    subtotal_amount: row.subtotalAmount,
+    parts_amount: row.partsAmount,
+    labour_amount: row.labourAmount,
+    parts_cgst_amount: row.partsCgstAmount,
+    parts_sgst_amount: row.partsSgstAmount,
+    parts_igst_amount: row.partsIgstAmount,
+    parts_cgst_rate: row.partsCgstRate,
+    parts_sgst_rate: row.partsSgstRate,
+    parts_igst_rate: row.partsIgstRate,
+    labour_cgst_amount: row.labourCgstAmount,
+    labour_sgst_amount: row.labourSgstAmount,
+    labour_igst_amount: row.labourIgstAmount,
+    labour_cgst_rate: row.labourCgstRate,
+    labour_sgst_rate: row.labourSgstRate,
+    labour_igst_rate: row.labourIgstRate,
+    total_tax_amount: row.totalTaxAmount,
+    grand_total_amount: row.grandTotalAmount,
+    deductibles: row.deductibles,
+    salvage: row.salvage,
+    odometer_reading: row.odometerReading,
+    registration_number: row.registrationNumber,
+    chassis_number: row.chassisNumber,
+    ocr_status: row.ocrStatus as BillStatus,
+    processing_status: row.processingStatus,
+    confidence_score: row.confidenceScore,
+    review_reasons: row.reviewReasons,
+    file_url: row.fileUrl,
+    storage_path: row.storagePath,
+    raw_ocr_reference: row.rawOcrReference,
+    parsed_data: row.parsedData as ParsedInvoiceData | null,
+    pipeline_mode: row.pipelineMode as 'split' | 'single' | null,
+    extraction_cost_usd: row.extractionCostUsd,
+    structuring_cost_usd: row.structuringCostUsd,
+    total_cost_usd: row.totalCostUsd,
+    extraction_tokens: row.extractionTokens,
+    extraction_input_tokens: row.extractionInputTokens,
+    extraction_output_tokens: row.extractionOutputTokens,
+    structuring_tokens: row.structuringTokens,
+    structuring_input_tokens: row.structuringInputTokens,
+    structuring_output_tokens: row.structuringOutputTokens,
+    total_tokens: row.totalTokens,
+    total_input_tokens: row.totalInputTokens,
+    total_output_tokens: row.totalOutputTokens,
+    total_thinking_tokens: row.totalThinkingTokens,
+    total_input_cost_usd: row.totalInputCostUsd,
+    total_output_cost_usd: row.totalOutputCostUsd,
+    extraction_provider: row.extractionProvider,
+    structuring_provider: row.structuringProvider,
+    extraction_model: row.extractionModel,
+    structuring_model: row.structuringModel,
+    extraction_latency_ms: row.extractionLatencyMs,
+    structuring_latency_ms: row.structuringLatencyMs,
+    total_latency_ms: row.totalLatencyMs,
+    vendor_id: row.vendorId,
+    schema_version: row.schemaVersion,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+function billDocToRow(b: BillDoc) {
+  return {
+    billId: b.bill_id,
+    fleetId: b.fleet_id ?? null,
+    vehicleId: b.vehicle_id ?? null,
+    billType: b.bill_type,
+    billCategory: b.bill_category ?? null,
+    vendorName: b.vendor_name ?? null,
+    vendorGstin: b.vendor_gstin ?? null,
+    companyName: b.company_name ?? null,
+    gstin: b.gstin ?? null,
+    pan: b.pan ?? null,
+    irn: b.irn ?? null,
+    invoiceNumber: b.invoice_number ?? null,
+    invoiceDate: b.invoice_date ?? null,
+    invoiceTime: b.invoice_time ?? null,
+    subtotalAmount: b.subtotal_amount ?? null,
+    partsAmount: b.parts_amount ?? null,
+    labourAmount: b.labour_amount ?? null,
+    partsCgstAmount: b.parts_cgst_amount ?? null,
+    partsSgstAmount: b.parts_sgst_amount ?? null,
+    partsIgstAmount: b.parts_igst_amount ?? null,
+    partsCgstRate: b.parts_cgst_rate ?? null,
+    partsSgstRate: b.parts_sgst_rate ?? null,
+    partsIgstRate: b.parts_igst_rate ?? null,
+    labourCgstAmount: b.labour_cgst_amount ?? null,
+    labourSgstAmount: b.labour_sgst_amount ?? null,
+    labourIgstAmount: b.labour_igst_amount ?? null,
+    labourCgstRate: b.labour_cgst_rate ?? null,
+    labourSgstRate: b.labour_sgst_rate ?? null,
+    labourIgstRate: b.labour_igst_rate ?? null,
+    totalTaxAmount: b.total_tax_amount ?? null,
+    grandTotalAmount: b.grand_total_amount ?? null,
+    deductibles: b.deductibles ?? null,
+    salvage: b.salvage ?? null,
+    odometerReading: b.odometer_reading ?? null,
+    registrationNumber: b.registration_number ?? null,
+    chassisNumber: b.chassis_number ?? null,
+    ocrStatus: b.ocr_status,
+    processingStatus: b.processing_status ?? null,
+    confidenceScore: b.confidence_score ?? null,
+    reviewReasons: b.review_reasons ?? null,
+    fileUrl: b.file_url ?? null,
+    storagePath: b.storage_path ?? null,
+    rawOcrReference: b.raw_ocr_reference ?? null,
+    parsedData: b.parsed_data ?? null,
+    pipelineMode: b.pipeline_mode ?? null,
+    extractionCostUsd: b.extraction_cost_usd ?? null,
+    structuringCostUsd: b.structuring_cost_usd ?? null,
+    totalCostUsd: b.total_cost_usd ?? null,
+    extractionTokens: b.extraction_tokens ?? null,
+    extractionInputTokens: b.extraction_input_tokens ?? null,
+    extractionOutputTokens: b.extraction_output_tokens ?? null,
+    structuringTokens: b.structuring_tokens ?? null,
+    structuringInputTokens: b.structuring_input_tokens ?? null,
+    structuringOutputTokens: b.structuring_output_tokens ?? null,
+    totalTokens: b.total_tokens ?? null,
+    totalInputTokens: b.total_input_tokens ?? null,
+    totalOutputTokens: b.total_output_tokens ?? null,
+    totalThinkingTokens: b.total_thinking_tokens ?? null,
+    totalInputCostUsd: b.total_input_cost_usd ?? null,
+    totalOutputCostUsd: b.total_output_cost_usd ?? null,
+    extractionProvider: b.extraction_provider ?? null,
+    structuringProvider: b.structuring_provider ?? null,
+    extractionModel: b.extraction_model ?? null,
+    structuringModel: b.structuring_model ?? null,
+    extractionLatencyMs: b.extraction_latency_ms ?? null,
+    structuringLatencyMs: b.structuring_latency_ms ?? null,
+    totalLatencyMs: b.total_latency_ms ?? null,
+    vendorId: b.vendor_id ?? null,
+    schemaVersion: b.schema_version,
+    createdAt: new Date(b.created_at),
+    updatedAt: new Date(b.updated_at),
+  };
+}
+
+function partRowToDoc(row: typeof billParts.$inferSelect): BillPartDoc {
+  return {
+    part_id: row.partId,
+    bill_id: row.billId,
+    line_type: row.lineType as LineType,
+    name: row.name,
+    description: row.description,
+    quantity: row.quantity,
+    rate: row.rate,
+    amount: row.amount,
+    tax_percentage: row.taxPercentage,
+    tax_amount: row.taxAmount,
+    part_number: row.partNumber,
+    hsn_sac_code: row.hsnSacCode,
+    manufacturer: row.manufacturer,
+    normalized_name: row.normalizedName,
+    confidence_score: row.confidenceScore,
+    created_at: row.createdAt.toISOString(),
+  };
+}
+
+function partDocToRow(p: BillPartDoc) {
+  return {
+    partId: p.part_id,
+    billId: p.bill_id,
+    lineType: p.line_type,
+    name: p.name ?? null,
+    description: p.description ?? null,
+    quantity: p.quantity ?? null,
+    rate: p.rate ?? null,
+    amount: p.amount ?? null,
+    taxPercentage: p.tax_percentage ?? null,
+    taxAmount: p.tax_amount ?? null,
+    partNumber: p.part_number ?? null,
+    hsnSacCode: p.hsn_sac_code ?? null,
+    manufacturer: p.manufacturer ?? null,
+    normalizedName: p.normalized_name ?? null,
+    confidenceScore: p.confidence_score ?? null,
+    createdAt: new Date(p.created_at),
+  };
+}
+
 // ─── Bill CRUD ──────────────────────────────────────────────────────────────
 
-const BILLS = 'bills';
-function billsRef() { return db().collection(col(BILLS)); }
-
 export async function createBill(bill: BillDoc): Promise<BillDoc> {
-  if (env.localDev) { devStore.bills.set(bill.bill_id, bill); return bill; }
-  await billsRef().doc(bill.bill_id).set(bill);
+  await db().insert(bills).values(billDocToRow(bill));
   return bill;
 }
 
 export async function getBill(billId: string): Promise<BillDoc | null> {
-  if (env.localDev) return devStore.bills.get(billId) ?? null;
-  const snap = await billsRef().doc(billId).get();
-  return snap.exists ? (snap.data() as BillDoc) : null;
+  const [row] = await db().select().from(bills).where(eq(bills.billId, billId)).limit(1);
+  return row ? billRowToDoc(row) : null;
 }
 
+/** BillDoc (snake_case) key -> bills table (camelCase) column key. Excludes bill_id/created_at/updated_at. */
+const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, keyof typeof bills.$inferInsert>> = {
+  fleet_id: 'fleetId', vehicle_id: 'vehicleId', bill_type: 'billType', bill_category: 'billCategory',
+  vendor_name: 'vendorName', vendor_gstin: 'vendorGstin', company_name: 'companyName', gstin: 'gstin',
+  pan: 'pan', irn: 'irn', invoice_number: 'invoiceNumber', invoice_date: 'invoiceDate',
+  invoice_time: 'invoiceTime', subtotal_amount: 'subtotalAmount', parts_amount: 'partsAmount',
+  labour_amount: 'labourAmount', parts_cgst_amount: 'partsCgstAmount', parts_sgst_amount: 'partsSgstAmount',
+  parts_igst_amount: 'partsIgstAmount', parts_cgst_rate: 'partsCgstRate', parts_sgst_rate: 'partsSgstRate',
+  parts_igst_rate: 'partsIgstRate', labour_cgst_amount: 'labourCgstAmount', labour_sgst_amount: 'labourSgstAmount',
+  labour_igst_amount: 'labourIgstAmount', labour_cgst_rate: 'labourCgstRate', labour_sgst_rate: 'labourSgstRate',
+  labour_igst_rate: 'labourIgstRate', total_tax_amount: 'totalTaxAmount', grand_total_amount: 'grandTotalAmount',
+  deductibles: 'deductibles', salvage: 'salvage', odometer_reading: 'odometerReading',
+  registration_number: 'registrationNumber', chassis_number: 'chassisNumber', ocr_status: 'ocrStatus',
+  processing_status: 'processingStatus', confidence_score: 'confidenceScore', review_reasons: 'reviewReasons',
+  file_url: 'fileUrl', storage_path: 'storagePath', raw_ocr_reference: 'rawOcrReference',
+  parsed_data: 'parsedData', pipeline_mode: 'pipelineMode', extraction_cost_usd: 'extractionCostUsd',
+  structuring_cost_usd: 'structuringCostUsd', total_cost_usd: 'totalCostUsd', extraction_tokens: 'extractionTokens',
+  extraction_input_tokens: 'extractionInputTokens', extraction_output_tokens: 'extractionOutputTokens',
+  structuring_tokens: 'structuringTokens', structuring_input_tokens: 'structuringInputTokens',
+  structuring_output_tokens: 'structuringOutputTokens', total_tokens: 'totalTokens',
+  total_input_tokens: 'totalInputTokens', total_output_tokens: 'totalOutputTokens',
+  total_thinking_tokens: 'totalThinkingTokens', total_input_cost_usd: 'totalInputCostUsd',
+  total_output_cost_usd: 'totalOutputCostUsd', extraction_provider: 'extractionProvider',
+  structuring_provider: 'structuringProvider', extraction_model: 'extractionModel',
+  structuring_model: 'structuringModel', extraction_latency_ms: 'extractionLatencyMs',
+  structuring_latency_ms: 'structuringLatencyMs', total_latency_ms: 'totalLatencyMs',
+  vendor_id: 'vendorId', schema_version: 'schemaVersion',
+};
+
 export async function updateBill(billId: string, updates: Partial<BillDoc>): Promise<void> {
-  if (env.localDev) {
-    const existing = devStore.bills.get(billId);
-    if (existing) devStore.bills.set(billId, { ...existing, ...updates, updated_at: new Date().toISOString() });
-    return;
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  for (const key of Object.keys(updates) as (keyof BillDoc)[]) {
+    const column = BILL_FIELD_MAP[key];
+    if (!column) continue;
+    patch[column] = (updates as Record<string, unknown>)[key];
   }
-  await billsRef().doc(billId).update({ ...updates, updated_at: new Date().toISOString() });
+  await db().update(bills).set(patch).where(eq(bills.billId, billId));
 }
 
 export async function updateBillStatus(billId: string, status: BillStatus, extra?: Partial<BillDoc>): Promise<void> {
@@ -50,104 +270,27 @@ export async function listBills(opts: {
   limit?: number;
   offset?: number;
 } = {}): Promise<BillDoc[]> {
-  if (env.localDev) {
-    let rows = Array.from(devStore.bills.values());
-    if (opts.status) rows = rows.filter((b) => b.ocr_status === opts.status);
-    if (opts.vehicleId) rows = rows.filter((b) => b.vehicle_id === opts.vehicleId);
-    rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
-    if (opts.offset) rows = rows.slice(opts.offset);
-    return rows.slice(0, opts.limit ?? 50);
-  }
-  let q: FirebaseFirestore.Query = billsRef();
-  if (opts.status) q = q.where('ocr_status', '==', opts.status);
-  if (opts.vehicleId) q = q.where('vehicle_id', '==', opts.vehicleId);
-  q = q.orderBy('created_at', 'desc');
-  if (opts.offset) q = q.offset(opts.offset);
-  q = q.limit(opts.limit ?? 50);
-  const snap = await q.get();
-  return snap.docs.map((d) => d.data() as BillDoc);
+  const conditions = [];
+  if (opts.status) conditions.push(eq(bills.ocrStatus, opts.status));
+  if (opts.vehicleId) conditions.push(eq(bills.vehicleId, opts.vehicleId));
+
+  const rows = await db().select().from(bills)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(bills.createdAt))
+    .limit(opts.limit ?? 50)
+    .offset(opts.offset ?? 0);
+  return rows.map(billRowToDoc);
 }
 
-const LEAN_BILL_FIELDS = [
-  'bill_id', 'fleet_id', 'vehicle_id', 'bill_type', 'vendor_name', 'vendor_gstin',
-  'company_name', 'gstin', 'pan', 'invoice_number', 'invoice_date', 'invoice_time',
-  'subtotal_amount', 'parts_amount', 'labour_amount',
-  'parts_cgst_amount', 'parts_sgst_amount', 'parts_igst_amount',
-  'parts_cgst_rate', 'parts_sgst_rate', 'parts_igst_rate',
-  'labour_cgst_amount', 'labour_sgst_amount', 'labour_igst_amount',
-  'labour_cgst_rate', 'labour_sgst_rate', 'labour_igst_rate',
-  'total_tax_amount', 'grand_total_amount', 'deductibles', 'salvage',
-  'odometer_reading', 'registration_number', 'ocr_status', 'confidence_score',
-  'review_reasons', 'pipeline_mode',
-  'extraction_cost_usd', 'structuring_cost_usd', 'total_cost_usd',
-  'extraction_tokens', 'structuring_tokens', 'total_tokens',
-  'extraction_provider', 'structuring_provider',
-  'schema_version', 'created_at', 'updated_at',
-] as const;
-
-/** Cap aggregation scans so analytics/fraud stay fast at 100k+ scale. */
-const AGG_MAX_DOCS = 25_000;
-const AGG_BATCH = 2_500;
-
 /**
- * Cursor-based lean scan for aggregation (analytics, fraud).
- * Excludes parsed_data/raw_ocr. Caps at maxDocs (default 25k newest).
- * Dedupes concurrent callers via shared in-flight promise + TTL cache.
+ * Fetch every bill (optionally filtered by status) for aggregation — analytics, fraud.
+ * No document cap: the Firestore-era 25k-doc scan limit doesn't apply to a real query engine.
  */
-let leanBillsInflight: Promise<BillDoc[]> | null = null;
-
-export async function listAllBillsLean(opts: {
-  status?: BillStatus;
-  maxDocs?: number;
-  cacheKey?: string;
-  cacheTtlMs?: number;
-} = {}): Promise<BillDoc[]> {
-  const maxDocs = opts.maxDocs ?? AGG_MAX_DOCS;
-  const cacheKey = opts.cacheKey ?? `lean:bills:${opts.status ?? 'all'}:${maxDocs}`;
-  const ttl = opts.cacheTtlMs ?? 300_000; // 5 min
-
-  const cached = cacheGet<BillDoc[]>(cacheKey);
-  if (cached) return cached;
-
-  if (!opts.status && leanBillsInflight) return leanBillsInflight;
-
-  const run = async (): Promise<BillDoc[]> => {
-    if (env.localDev) {
-      let rows = Array.from(devStore.bills.values());
-      if (opts.status) rows = rows.filter((b) => b.ocr_status === opts.status);
-      rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
-      return rows.slice(0, maxDocs);
-    }
-
-    const all: BillDoc[] = [];
-    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-
-    while (all.length < maxDocs) {
-      const batchSize = Math.min(AGG_BATCH, maxDocs - all.length);
-      let q: FirebaseFirestore.Query = billsRef();
-      if (opts.status) q = q.where('ocr_status', '==', opts.status);
-      q = q.select(...LEAN_BILL_FIELDS).orderBy('created_at', 'desc');
-      if (lastDoc) q = q.startAfter(lastDoc);
-      q = q.limit(batchSize);
-      const snap = await q.get();
-      for (const doc of snap.docs) all.push(doc.data() as BillDoc);
-      if (snap.docs.length < batchSize) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-    }
-    return all;
-  };
-
-  const promise = run().then((bills) => {
-    cacheSet(cacheKey, bills, ttl);
-    if (!opts.status) leanBillsInflight = null;
-    return bills;
-  }).catch((err) => {
-    if (!opts.status) leanBillsInflight = null;
-    throw err;
-  });
-
-  if (!opts.status) leanBillsInflight = promise;
-  return promise;
+export async function fetchAllBills(opts: { status?: BillStatus } = {}): Promise<BillDoc[]> {
+  const rows = await db().select().from(bills)
+    .where(opts.status ? eq(bills.ocrStatus, opts.status) : undefined)
+    .orderBy(desc(bills.createdAt));
+  return rows.map(billRowToDoc);
 }
 
 export function billNeedsReview(b: BillDoc): boolean {
@@ -165,65 +308,37 @@ export interface PaginatedBills {
   totalPages: number;
 }
 
-/**
- * Count bills matching optional status filter.
- * Uses Firestore count() aggregation in production (no document reads).
- */
+const ALL_STATUSES: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'VERIFIED', 'FAILED'];
+
+/** Count bills matching an optional status filter — real COUNT(*), no document reads. */
 export async function countBills(status?: BillStatus): Promise<number> {
-  if (env.localDev) {
-    let rows = Array.from(devStore.bills.values());
-    if (status) rows = rows.filter((b) => b.ocr_status === status);
-    return rows.length;
-  }
-  let q: FirebaseFirestore.Query = billsRef();
-  if (status) q = q.where('ocr_status', '==', status);
-  const snap = await q.count().get();
-  return snap.data().count;
+  const [row] = await db().select({ n: count() }).from(bills)
+    .where(status ? eq(bills.ocrStatus, status) : undefined);
+  return row?.n ?? 0;
 }
 
-/**
- * Count bills per status using Firestore count() aggregation (no doc reads).
- * Also estimates needs_review from a cached lean scan of completed bills.
- */
+/** Count bills per status, plus needs-review / completed-clean, in a single GROUP BY. */
 export async function countAllStatuses(): Promise<Record<string, number>> {
-  const statuses: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'VERIFIED', 'FAILED'];
-  if (env.localDev) {
-    const rows = Array.from(devStore.bills.values());
-    const counts: Record<string, number> = { all: rows.length };
-    for (const s of statuses) counts[s] = rows.filter((b) => b.ocr_status === s).length;
-    counts.needs_review = rows.filter(billNeedsReview).length;
-    const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-    counts.completed_clean = Math.max(0, completedRaw - counts.needs_review);
-    return counts;
+  const rows = await db().select({ status: bills.ocrStatus, n: count() }).from(bills).groupBy(bills.ocrStatus);
+  const counts: Record<string, number> = { all: 0 };
+  for (const s of ALL_STATUSES) counts[s] = 0;
+  for (const row of rows) {
+    counts[row.status] = row.n;
+    counts.all += row.n;
   }
-  const results = await Promise.all([
-    countBills(),
-    ...statuses.map((s) => countBills(s)),
-  ]);
-  const counts: Record<string, number> = { all: results[0] };
-  statuses.forEach((s, i) => { counts[s] = results[i + 1]; });
 
-  // Needs-review + completed-clean: await lean scan (cached for 5min after first call)
-  try {
-    const lean = await listAllBillsLean({ maxDocs: AGG_MAX_DOCS });
-    const needsReview = lean.filter(billNeedsReview).length;
-    counts.needs_review = needsReview;
-    const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-    counts.completed_clean = Math.max(0, completedRaw - needsReview);
-  } catch {
-    counts.needs_review = 0;
-    counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-  }
+  // needs_review requires the confidence/review_reasons predicate — cheap in Postgres, no cap needed.
+  const reviewCandidates = await db().select().from(bills).where(eq(bills.ocrStatus, 'OCR_COMPLETED'));
+  const needsReview = reviewCandidates.map(billRowToDoc).filter(billNeedsReview).length;
+  counts.needs_review = needsReview;
+  const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+  counts.completed_clean = Math.max(0, completedRaw - needsReview);
   return counts;
 }
 
 /**
  * Page-based pagination ordered by updated_at DESC.
  * Supports status, multi-status (statuses), needsReview, and text search (q).
- *
- * Status / completed / needsReview filters use the lean in-memory scan so we
- * never depend on a Firestore composite index (ocr_status + updated_at) —
- * missing indexes were returning HTTP 500 and the UI kept showing stale rows.
  */
 export async function listBillsPaginated(opts: {
   page?: number;
@@ -240,102 +355,51 @@ export async function listBillsPaginated(opts: {
   const pageSize = Math.min(Math.max(opts.pageSize ?? 10, 1), 100);
   const page = Math.max(opts.page ?? 1, 1);
   const skip = (page - 1) * pageSize;
-  const searchTerm = opts.q?.trim().toLowerCase();
+  const searchTerm = opts.q?.trim();
 
-  const filterRows = (rows: BillDoc[]): BillDoc[] => {
-    let out = rows;
-    if (opts.needsReview) out = out.filter(billNeedsReview);
-    else if (opts.statuses?.length) {
-      out = out.filter((b) => opts.statuses!.includes(b.ocr_status));
-      if (opts.excludeNeedsReview) out = out.filter((b) => !billNeedsReview(b));
-    } else if (opts.status) {
-      out = out.filter((b) => b.ocr_status === opts.status);
-    }
-    if (searchTerm) out = out.filter((b) => billMatchesSearch(b, searchTerm));
-    out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    return out;
-  };
-
-  if (env.localDev) {
-    const rows = filterRows(Array.from(devStore.bills.values()));
-    const total = rows.length;
-    return { bills: rows.slice(skip, skip + pageSize), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+  const conditions = [];
+  if (opts.statuses?.length) {
+    conditions.push(inArray(bills.ocrStatus, opts.statuses));
+  } else if (opts.status) {
+    conditions.push(eq(bills.ocrStatus, opts.status));
   }
-
-  // Any status / review filter → lean scan (no composite index required)
-  if (opts.needsReview || opts.statuses?.length || opts.status) {
-    const lean = await listAllBillsLean({ maxDocs: AGG_MAX_DOCS });
-    const rows = filterRows(lean);
-    const total = rows.length;
-    return { bills: rows.slice(skip, skip + pageSize), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
-  }
-
   if (searchTerm) {
-    return searchBillsPaginated(searchTerm, undefined, page, pageSize);
+    const pattern = `%${searchTerm}%`;
+    conditions.push(or(
+      ilike(bills.vendorName, pattern),
+      ilike(bills.companyName, pattern),
+      ilike(bills.invoiceNumber, pattern),
+      ilike(bills.registrationNumber, pattern),
+    )!);
   }
 
-  // Unfiltered "All" list — single-field orderBy works without composite index
-  const [total, snap] = await Promise.all([
-    countBills(),
-    billsRef().orderBy('updated_at', 'desc').offset(skip).limit(pageSize).get(),
+  // needsReview / excludeNeedsReview depend on billNeedsReview(), which isn't a simple
+  // column predicate (it combines status + confidence + review_reasons length) — evaluate
+  // it in JS against the already status/search-filtered rows rather than trying to express
+  // it as SQL. Cheap: this only runs when a review filter is actually requested.
+  if (opts.needsReview || opts.excludeNeedsReview) {
+    const candidateConditions = [...conditions];
+    if (!opts.statuses?.length && !opts.status) candidateConditions.push(eq(bills.ocrStatus, 'OCR_COMPLETED'));
+    const rows = await db().select().from(bills)
+      .where(candidateConditions.length ? and(...candidateConditions) : undefined)
+      .orderBy(desc(bills.updatedAt));
+    let docs = rows.map(billRowToDoc);
+    if (opts.needsReview) docs = docs.filter(billNeedsReview);
+    else if (opts.excludeNeedsReview) docs = docs.filter((b) => !billNeedsReview(b));
+    const total = docs.length;
+    return {
+      bills: docs.slice(skip, skip + pageSize), total, page, pageSize,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
+  }
+
+  const where = conditions.length ? and(...conditions) : undefined;
+  const [rows, [{ n: total }]] = await Promise.all([
+    db().select().from(bills).where(where).orderBy(desc(bills.updatedAt)).limit(pageSize).offset(skip),
+    db().select({ n: count() }).from(bills).where(where),
   ]);
 
-  const bills = snap.docs.map((d) => d.data() as BillDoc);
-  return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
-}
-
-function billMatchesSearch(b: BillDoc, term: string): boolean {
-  return (b.vendor_name ?? '').toLowerCase().includes(term)
-    || (b.company_name ?? '').toLowerCase().includes(term)
-    || (b.invoice_number ?? '').toLowerCase().includes(term)
-    || (b.registration_number ?? '').toLowerCase().includes(term);
-}
-
-/**
- * Server-side search: parallel prefix queries on vendor_name and invoice_number,
- * merge + dedupe, then paginate in memory. Caps at 500 results per field.
- */
-async function searchBillsPaginated(
-  term: string, status: BillStatus | undefined, page: number, pageSize: number,
-): Promise<PaginatedBills> {
-  const SEARCH_LIMIT = 500;
-  const upperTerm = term.charAt(0).toUpperCase() + term.slice(1);
-  const endChar = '\uf8ff';
-
-  const buildQuery = (field: string, prefix: string) => {
-    let q: FirebaseFirestore.Query = billsRef()
-      .where(field, '>=', prefix)
-      .where(field, '<=', prefix + endChar);
-    if (status) q = q.where('ocr_status', '==', status);
-    return q.limit(SEARCH_LIMIT).get();
-  };
-
-  const [vendorLower, vendorUpper, invoiceRes, regRes] = await Promise.all([
-    buildQuery('vendor_name', term),
-    term !== upperTerm ? buildQuery('vendor_name', upperTerm) : Promise.resolve(null),
-    buildQuery('invoice_number', term),
-    buildQuery('registration_number', term.toUpperCase()),
-  ]);
-
-  const seen = new Set<string>();
-  const merged: BillDoc[] = [];
-  const addDocs = (snap: FirebaseFirestore.QuerySnapshot | null) => {
-    if (!snap) return;
-    for (const doc of snap.docs) {
-      const b = doc.data() as BillDoc;
-      if (!seen.has(b.bill_id)) { seen.add(b.bill_id); merged.push(b); }
-    }
-  };
-  addDocs(vendorLower);
-  addDocs(vendorUpper);
-  addDocs(invoiceRes);
-  addDocs(regRes);
-
-  merged.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  const total = merged.length;
-  const skip = (page - 1) * pageSize;
-  const bills = merged.slice(skip, skip + pageSize);
-  return { bills, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+  return { bills: rows.map(billRowToDoc), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
 }
 
 /**
@@ -350,59 +414,28 @@ export async function findDuplicateBills(
 ): Promise<BillDoc[]> {
   if (!invoiceNumber) return [];
 
-  if (env.localDev) {
-    return Array.from(devStore.bills.values()).filter((b) =>
-      b.bill_id !== excludeId &&
-      b.invoice_number === invoiceNumber &&
-      (!vendorGstin || !b.vendor_gstin || b.vendor_gstin === vendorGstin),
-    );
-  }
+  const conditions = [eq(bills.invoiceNumber, invoiceNumber)];
+  if (vendorGstin) conditions.push(eq(bills.vendorGstin, vendorGstin));
 
-  let q: FirebaseFirestore.Query = billsRef().where('invoice_number', '==', invoiceNumber);
-  if (vendorGstin) q = q.where('vendor_gstin', '==', vendorGstin);
-  q = q.limit(5);
-  const snap = await q.get();
-  return snap.docs
-    .map((d) => d.data() as BillDoc)
-    .filter((b) => b.bill_id !== excludeId);
+  const rows = await db().select().from(bills).where(and(...conditions)).limit(5);
+  return rows.map(billRowToDoc).filter((b) => b.bill_id !== excludeId);
 }
 
+/** Cascade FK on bill_parts.bill_id removes parts automatically — no separate cleanup needed. */
 export async function deleteBill(billId: string): Promise<void> {
-  if (env.localDev) {
-    const bill = devStore.bills.get(billId);
-    if (bill?.storage_path) devStore.files.delete(bill.storage_path);
-    devStore.bills.delete(billId);
-    return;
-  }
-  await billsRef().doc(billId).delete();
+  await db().delete(bills).where(eq(bills.billId, billId));
 }
 
 // ─── Bill Parts CRUD ────────────────────────────────────────────────────────
 
-const PARTS = 'bill_parts';
-function partsRef() { return db().collection(col(PARTS)); }
-
 export async function getPartsForBill(billId: string): Promise<BillPartDoc[]> {
-  if (env.localDev) {
-    return Array.from(devStore.parts.values()).filter((p) => p.bill_id === billId);
-  }
-  const snap = await partsRef().where('bill_id', '==', billId).get();
-  return snap.docs.map((d) => d.data() as BillPartDoc);
+  const rows = await db().select().from(billParts).where(eq(billParts.billId, billId));
+  return rows.map(partRowToDoc);
 }
 
 export async function deletePartsForBill(billId: string): Promise<number> {
-  if (env.localDev) {
-    let count = 0;
-    for (const [id, p] of devStore.parts) {
-      if (p.bill_id === billId) { devStore.parts.delete(id); count++; }
-    }
-    return count;
-  }
-  const snap = await partsRef().where('bill_id', '==', billId).get();
-  const batch = db().batch();
-  snap.docs.forEach((d) => batch.delete(d.ref));
-  await batch.commit();
-  return snap.size;
+  const deleted = await db().delete(billParts).where(eq(billParts.billId, billId)).returning({ id: billParts.partId });
+  return deleted.length;
 }
 
 export function extractPartsFromParsed(billId: string, parsed: ParsedInvoiceData): BillPartDoc[] {
@@ -438,11 +471,5 @@ export function extractPartsFromParsed(billId: string, parsed: ParsedInvoiceData
 
 export async function saveBillParts(parts: BillPartDoc[]): Promise<void> {
   if (!parts.length) return;
-  if (env.localDev) {
-    for (const p of parts) devStore.parts.set(p.part_id, p);
-    return;
-  }
-  const batch = db().batch();
-  for (const p of parts) batch.set(partsRef().doc(p.part_id), p);
-  await batch.commit();
+  await db().insert(billParts).values(parts.map(partDocToRow));
 }

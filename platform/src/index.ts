@@ -6,12 +6,6 @@ loadEnv({ path: resolve(process.cwd(), '../.env') });
 
 const { buildApp } = await import('./app.js');
 const { env } = await import('./config/env.js');
-const { devStore } = await import('./shared/devStore.js');
-
-if (env.localDev) {
-  if (env.mistralApiKey) devStore.saveCreds('mistral', { apiKey: env.mistralApiKey });
-  // Gemini uses Vertex + ADC only — do not seed API keys into Settings.
-}
 
 async function seedAdmin() {
   const { listUsers, createUser, hashPassword } = await import('./users/repository.js');
@@ -30,7 +24,9 @@ async function seedAdmin() {
     status: 'active',
     api_key_hash: '',
     api_key_prefix: '',
-    token_balance: Infinity,
+    // Postgres NUMERIC can't store Infinity (Firestore could). Admin's balance check
+    // in dto.ts/route.ts is role-gated anyway, so this sentinel is display-only.
+    token_balance: 99_999_999,
     total_tokens_used: 0,
     total_ocr_count: 0,
     total_cost_usd: 0,
@@ -64,7 +60,7 @@ async function main() {
   await seedAdmin();
   const app = await buildApp();
   await app.listen({ port: env.port, host: '0.0.0.0' });
-  console.log(`BillParser platform running on port ${env.port}${env.localDev ? ' (LOCAL_DEV mode)' : ''}`);
+  console.log(`BillParser platform running on port ${env.port} (${env.nodeEnv})`);
 
   // Start email intake poller (non-blocking, graceful)
   const { startEmailIntake, stopEmailIntake } = await import('./email-intake/poller.js');

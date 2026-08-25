@@ -1,10 +1,8 @@
 /**
- * File storage — LOCAL_DEV in-memory, or private GCS with signed URLs.
- * Bucket objects are NEVER made public.
+ * File storage — private GCS with signed URLs. Bucket objects are NEVER made public.
  */
-import { storage } from '../config/firebase.js';
+import { bucket } from '../config/gcs.js';
 import { env } from '../config/env.js';
-import { devStore } from './devStore.js';
 import { v4 as uuid } from 'uuid';
 
 /**
@@ -20,19 +18,7 @@ export async function uploadFile(
   const datePath = new Date().toISOString().slice(0, 10);
   const storagePath = `bills/${datePath}/${uuid()}.${ext}`;
 
-  if (env.localDev) {
-    devStore.files.set(storagePath, {
-      buf,
-      contentType: opts.contentType ?? 'application/pdf',
-    });
-    return {
-      storagePath,
-      publicUrl: `local://${storagePath}`,
-    };
-  }
-
-  const bucket = storage().bucket(env.storageBucket);
-  const file = bucket.file(storagePath);
+  const file = bucket().file(storagePath);
   // Do NOT set predefinedAcl — buckets with Uniform Bucket-Level Access reject legacy ACLs.
   // Objects are private by default when the bucket is not public.
   await file.save(buf, {
@@ -58,10 +44,8 @@ export async function getSignedReadUrl(
   storagePath: string,
   ttlMinutes = env.signedUrlTtlMinutes,
 ): Promise<string | null> {
-  if (env.localDev) return null;
   try {
-    const bucket = storage().bucket(env.storageBucket);
-    const file = bucket.file(storagePath);
+    const file = bucket().file(storagePath);
     const [url] = await file.getSignedUrl({
       version: 'v4',
       action: 'read',
@@ -86,8 +70,7 @@ export async function downloadFile(source: string): Promise<Buffer> {
     const path = source.startsWith('gs://')
       ? source.replace(`gs://${env.storageBucket}/`, '')
       : source.replace(`https://storage.googleapis.com/${env.storageBucket}/`, '');
-    const bucket = storage().bucket(env.storageBucket);
-    const [buf] = await bucket.file(path).download();
+    const [buf] = await bucket().file(path).download();
     return buf;
   }
 
@@ -108,17 +91,11 @@ export function isImage(buf: Buffer): boolean {
 }
 
 /**
- * Read an uploaded file by storage path (LOCAL_DEV or private GCS).
+ * Read an uploaded file by storage path (private GCS).
  */
 export async function getStoredFile(storagePath: string): Promise<{ buf: Buffer; contentType: string } | null> {
-  if (env.localDev) {
-    return devStore.files.get(storagePath) ?? null;
-  }
-  const path = storagePath
-    .replace(/^gs:\/\/[^/]+\//, '')
-    .replace(/^local:\/\//, '');
-  const bucket = storage().bucket(env.storageBucket);
-  const file = bucket.file(path);
+  const path = storagePath.replace(/^gs:\/\/[^/]+\//, '');
+  const file = bucket().file(path);
   const [exists] = await file.exists();
   if (!exists) return null;
   const [buf] = await file.download();

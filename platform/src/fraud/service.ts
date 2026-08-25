@@ -1,6 +1,6 @@
 /**
  * Fraud Detection Service — business logic only.
- * All data comes through repository.ts. No direct Firestore access.
+ * All data comes through repository.ts. No direct Postgres access.
  */
 import { fetchCompletedBills, fetchAllParts, type BillDoc, type BillPartDoc } from './repository.js';
 

@@ -6,7 +6,7 @@ Aggregates completed invoice data into dashboards — spend by vendor, vehicle, 
 
 ### What Triggers Analytics
 
-Analytics are read-only — they never modify data. Every endpoint reads from the same `bills` Firestore collection that the OCR module writes to. When a user opens the Analytics page in the UI, the frontend fetches data from multiple smaller endpoints instead of one heavy endpoint.
+Analytics are read-only — they never modify data. Every endpoint reads from the same `bills` Postgres `bills` table that the OCR module writes to. When a user opens the Analytics page in the UI, the frontend fetches data from multiple smaller endpoints instead of one heavy endpoint.
 
 ### Data Flow
 
@@ -21,7 +21,7 @@ User opens Analytics page
 
 ### How Each Endpoint Works
 
-**`GET /api/analytics/kpis`** — The main aggregation. `route.ts` calls `listBills()` to get all bills from Firestore, then loops through them to compute:
+**`GET /api/analytics/kpis`** — The main aggregation. `route.ts` calls `listBills()` to get all bills from Postgres, then loops through them to compute:
 - Total spend, parts total, labour total, tax total
 - Completed bill count and average confidence score
 - Bills needing review (have `review_reasons`)
@@ -70,4 +70,4 @@ With growing data (lakhs of records), one monolithic `/api/analytics` endpoint w
 
 ## Data Source
 
-All analytics read from the `bills` collection via `listBills()`. No separate analytics tables or materialized views. Works identically in LOCAL_DEV (in-memory devStore) and production (Firestore).
+All analytics read from the `bills` table. No separate analytics tables or materialized views — aggregation is done with SQL `GROUP BY` in the repository layer. Local dev and production both run Postgres (Docker locally, Cloud SQL deployed), so behaviour is identical.

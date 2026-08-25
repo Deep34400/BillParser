@@ -1,4 +1,4 @@
-/** Firestore document shape for the `vendors` collection. */
+/** Postgres row shape for the `vendors` table. */
 export interface VendorDoc {
   vendor_id: string;
   legal_name: string | null;

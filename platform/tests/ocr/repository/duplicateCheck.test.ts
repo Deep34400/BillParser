@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { devStore } from '../../../src/shared/devStore.js';
-import { findDuplicateBills } from '../../../src/ocr/repository.js';
+import { db } from '../../../src/config/db.js';
+import { bills } from '../../../src/db/schema.js';
+import { createBill, findDuplicateBills } from '../../../src/ocr/repository.js';
 import type { BillDoc } from '../../../src/shared/types.js';
 
 function makeBill(id: string, invoiceNumber: string | null, gstin: string | null = null): BillDoc {
@@ -17,43 +18,43 @@ function makeBill(id: string, invoiceNumber: string | null, gstin: string | null
 }
 
 describe('findDuplicateBills', () => {
-  beforeEach(() => {
-    devStore.bills.clear();
+  beforeEach(async () => {
+    await db().delete(bills);
   });
 
   it('returns empty when no duplicates exist', async () => {
-    devStore.bills.set('b1', makeBill('b1', 'INV-001', '07AABCC4459P1Z7'));
+    await createBill(makeBill('b1', 'INV-001', '07AABCC4459P1Z7'));
     const dupes = await findDuplicateBills('INV-002', null, 'b2');
     expect(dupes).toEqual([]);
   });
 
   it('finds duplicate by invoice number', async () => {
-    devStore.bills.set('b1', makeBill('b1', 'INV-001', '07AABCC4459P1Z7'));
+    await createBill(makeBill('b1', 'INV-001', '07AABCC4459P1Z7'));
     const dupes = await findDuplicateBills('INV-001', '07AABCC4459P1Z7', 'b2');
     expect(dupes).toHaveLength(1);
     expect(dupes[0].bill_id).toBe('b1');
   });
 
   it('excludes the current bill from results', async () => {
-    devStore.bills.set('b1', makeBill('b1', 'INV-001', '07AAB'));
+    await createBill(makeBill('b1', 'INV-001', '07AAB'));
     const dupes = await findDuplicateBills('INV-001', '07AAB', 'b1');
     expect(dupes).toEqual([]);
   });
 
   it('matches by invoice_number alone when gstin is null', async () => {
-    devStore.bills.set('b1', makeBill('b1', 'INV-001', null));
+    await createBill(makeBill('b1', 'INV-001', null));
     const dupes = await findDuplicateBills('INV-001', null, 'b2');
     expect(dupes).toHaveLength(1);
   });
 
   it('does not match different invoice numbers', async () => {
-    devStore.bills.set('b1', makeBill('b1', 'INV-001'));
+    await createBill(makeBill('b1', 'INV-001'));
     const dupes = await findDuplicateBills('INV-999', null, 'b2');
     expect(dupes).toEqual([]);
   });
 
   it('returns null invoice_number as no duplicates', async () => {
-    devStore.bills.set('b1', makeBill('b1', null));
+    await createBill(makeBill('b1', null));
     const dupes = await findDuplicateBills(null, null, 'b2');
     expect(dupes).toEqual([]);
   });

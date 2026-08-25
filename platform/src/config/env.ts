@@ -12,17 +12,18 @@ function req(name: string): string {
 }
 
 export const env = {
+  /** Postgres connection string (postgresql://user:pass@host:port/db) */
+  databaseUrl: opt('DATABASE_URL', 'postgresql://billparser_app_dev:local_dev_password@localhost:5432/billparser_dev'),
+
   /** GCP project ID */
-  projectId: opt('GCP_PROJECT_ID', 'billparser-dev'),
+  // No default: a fallback here once pointed at the live project, so any process
+  // that missed dotenv would silently read/write production. Empty → gcs.ts throws
+  // on first use rather than quietly targeting the wrong project.
+  projectId: opt('GCP_PROJECT_ID', ''),
 
   /** Cloud Storage bucket for uploaded bills (private — served via signed URL or API proxy) */
-  storageBucket: opt('STORAGE_BUCKET', 'billparser-uploads'),
-
-  /** Firestore collection prefix (enables multi-tenant or staging isolation) */
-  firestorePrefix: opt('FIRESTORE_PREFIX', ''),
-
-  /** Firestore database ID (named database). Use "(default)" for the default DB. */
-  firestoreDatabaseId: opt('FIRESTORE_DATABASE_ID', '(default)'),
+  // No default — see projectId above. There is no safe default for a bucket.
+  storageBucket: opt('STORAGE_BUCKET', ''),
 
   /** Mistral API key for OCR extraction + normalization */
   mistralApiKey: opt('MISTRAL_API_KEY', ''),
@@ -51,9 +52,6 @@ export const env = {
 
   /** Node environment */
   nodeEnv: opt('NODE_ENV', 'development'),
-
-  /** Local in-memory mode — no GCP/Firestore needed */
-  localDev: opt('LOCAL_DEV', 'false') === 'true',
 
   /** Known buyer GSTINs — never use as vendor (comma-separated, e.g. fleet operator) */
   buyerGstinBlocklist: opt('BUYER_GSTIN_BLOCKLIST', '')

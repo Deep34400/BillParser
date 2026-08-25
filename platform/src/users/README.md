@@ -11,7 +11,7 @@ User submits email + password on the login page
   → Frontend calls POST /api/auth/login
   → route.ts validates that email and password are present
   → service.ts → login() is called:
-    1. Looks up the user by email in Firestore (repository.ts → getUserByEmail)
+    1. Looks up the user by email in Postgres (repository.ts → getUserByEmail)
     2. Verifies password against stored scrypt hash (repository.ts → verifyPassword)
     3. Checks user status is not 'blocked'
     4. Returns the user object (or an error with HTTP status code)
@@ -30,14 +30,14 @@ Any API request arrives at the server
   → If token starts with "eyJ" → it's a JWT:
     - Verify signature with JWT_SECRET
     - Decode { user_id, role }
-    - Look up user from Firestore
+    - Look up user from Postgres
     - Attach user to req.appUser
   → If token starts with "inv_" → it's an API key:
     - SHA-256 hash the key
-    - Look up the matching api_keys document
+    - Look up the matching api_keys row
     - Find the user who owns that key
     - Attach user to req.appUser
-  → If neither → 401 Unauthorized (unless LOCAL_DEV mode or public path)
+  → If neither → 401 Unauthorized (unless a public path)
 ```
 
 ### API Key Management
@@ -48,7 +48,7 @@ User clicks "Generate API Key" in the Account page
   → service.ts → issueApiKey():
     1. Generates a random 32-byte key prefixed with "inv_"
     2. SHA-256 hashes it for storage
-    3. Saves the full key, hash, and prefix to Firestore api_keys collection
+    3. Saves the full key, hash, and prefix to the Postgres api_keys table
     4. Returns the full key to the user (they can copy it from the UI anytime)
   → User can authenticate with: Authorization: Bearer inv_xxxx...
 
@@ -56,7 +56,7 @@ User clicks "Revoke" on an API key
   → DELETE /api/auth/api-keys/:keyId
   → service.ts → revokeApiKey():
     1. Lists the user's keys to verify ownership
-    2. Deletes the key document from Firestore
+    2. Deletes the key row from Postgres
     3. The key immediately stops working
 ```
 
@@ -91,7 +91,7 @@ Admin creates a new user
     1. Validates password length >= 6
     2. Checks for duplicate email
     3. Hashes password with scrypt + random salt
-    4. Creates UserDoc in Firestore with initial balance
+    4. Creates UserDoc in Postgres with initial balance
   → Returns the sanitized user (no password_hash in response)
 ```
 
@@ -104,7 +104,7 @@ Admin creates a new user
 │  - Input validation (required fields, types)    │
 │  - Calls service functions                      │
 │  - Formats JSON response                        │
-│  - Never accesses Firestore directly            │
+│  - Never accesses the database directly            │
 ├─────────────────────────────────────────────────┤
 │  service.ts (Service)                           │
 │  - Business logic and domain rules              │
@@ -114,11 +114,11 @@ Admin creates a new user
 │  - No HTTP or Fastify concerns                  │
 ├─────────────────────────────────────────────────┤
 │  repository.ts (Repository)                     │
-│  - Pure Firestore CRUD operations               │
+│  - Pure Postgres CRUD operations                │
 │  - createUser, getUser, updateUser, listUsers   │
 │  - Password hashing (scrypt)                    │
 │  - API key hashing (SHA-256)                    │
-│  - Works with devStore in LOCAL_DEV mode        │
+│  - Atomic balance debits (applyTokenTransaction)│
 ├─────────────────────────────────────────────────┤
 │  dto.ts (Data Transfer Objects)                 │
 │  - clientUserView() → safe shape for logged-in  │
@@ -130,7 +130,7 @@ Admin creates a new user
 
 **Why this pattern:** Route.ts never imports from repository.ts directly. Service.ts is the single entry point for all business logic. This means:
 - You can unit test service.ts without HTTP
-- You can swap Firestore for another DB by only changing repository.ts
+- You can swap Postgres for another DB by only changing repository.ts
 - Route handlers stay thin and predictable
 
 ## File Reference
@@ -139,7 +139,7 @@ Admin creates a new user
 |------|-------|-------------|
 | `route.ts` | Controller | All HTTP endpoints (auth + account + admin) |
 | `service.ts` | Service | login, issueApiKey, revokeApiKey, registerUser, blockUser, deductTokens, addTokens, trackOcrCost |
-| `repository.ts` | Repository | Firestore CRUD for users, api_keys, token_transactions collections |
+| `repository.ts` | Repository | Postgres CRUD for users, api_keys, token_transactions tables |
 | `dto.ts` | DTO | clientUserView (hide sensitive data), sanitizeUser (admin view) |
 
 ## Security

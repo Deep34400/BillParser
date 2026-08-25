@@ -1,6 +1,6 @@
 /**
  * Analytics Service — aggregation and business logic.
- * All data comes through repository.ts. No direct Firestore access.
+ * All data comes through repository.ts. No direct Postgres access.
  */
 import { fetchAllBills, type BillDoc } from './repository.js';
 import { isJunkVendorName } from '../ocr/transformer/normalize/vendor.js';

@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: billparser_dev
+      POSTGRES_USER: billparser_app_dev
+      POSTGRES_PASSWORD: local_dev_password
+    ports: [ "5432:5432" ]
+    volumes:
+      - billparser_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U billparser_app_dev -d billparser_dev" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  billparser_pg_data:

@@ -232,7 +232,7 @@ export async function billRoutes(app: FastifyInstance) {
       if (!storagePath) return reply.code(404).send({ error: 'File not found' });
 
       // Prefer private signed URL when credentials can sign (SA key / Cloud Run SA)
-      if (!env.localDev && bill.storage_path) {
+      if (bill.storage_path) {
         const { getSignedReadUrl } = await import('../shared/storage.js');
         const signed = await getSignedReadUrl(bill.storage_path);
         if (signed) return reply.redirect(signed);
@@ -268,7 +268,7 @@ export async function billRoutes(app: FastifyInstance) {
       if (req.appUser && req.appUser.role !== 'admin' && req.appUser.token_balance <= 0) {
         return reply.status(402).send({ success: false, message: 'Insufficient balance — contact admin to add balance' });
       }
-      if (!req.appUser && !env.localDev) {
+      if (!req.appUser) {
         return reply.status(401).send({ success: false, message: 'Authentication required' });
       }
 

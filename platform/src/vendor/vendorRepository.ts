@@ -1,98 +1,105 @@
 /**
- * Vendor Repository — Firestore CRUD for the `vendors` collection.
+ * Vendor Repository — Postgres CRUD for the `vendors` table.
  * Pure data-access layer. No business logic.
  */
-import { env } from '../config/env.js';
-import { db, col } from '../config/firebase.js';
-import { devStore } from '../shared/devStore.js';
+import { desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { db } from '../config/db.js';
+import { vendors } from '../db/schema.js';
 import type { VendorDoc } from './vendorTypes.js';
 
-const COLLECTION = 'vendors';
+function rowToDoc(row: typeof vendors.$inferSelect): VendorDoc {
+  return {
+    vendor_id: row.vendorId,
+    legal_name: row.legalName,
+    display_name: row.displayName,
+    gstin: row.gstin,
+    pan: row.pan,
+    invoice_count: row.invoiceCount,
+    first_seen: row.firstSeen.toISOString(),
+    last_seen: row.lastSeen.toISOString(),
+    parser_name: row.parserName,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
 
-function ref() { return db().collection(col(COLLECTION)); }
+function docToRow(v: VendorDoc) {
+  return {
+    vendorId: v.vendor_id,
+    legalName: v.legal_name,
+    displayName: v.display_name,
+    gstin: v.gstin,
+    pan: v.pan,
+    invoiceCount: v.invoice_count,
+    firstSeen: new Date(v.first_seen),
+    lastSeen: new Date(v.last_seen),
+    parserName: v.parser_name,
+    createdAt: new Date(v.created_at),
+    updatedAt: new Date(v.updated_at),
+  };
+}
 
 // ─── CRUD ───────────────────────────────────────────────────────────────────
 
 export async function createVendor(vendor: VendorDoc): Promise<VendorDoc> {
-  if (env.localDev) { devStore.vendors.set(vendor.vendor_id, vendor); return vendor; }
-  await ref().doc(vendor.vendor_id).set(vendor);
+  await db().insert(vendors).values(docToRow(vendor));
   return vendor;
 }
 
 export async function getVendor(vendorId: string): Promise<VendorDoc | null> {
-  if (env.localDev) return devStore.vendors.get(vendorId) ?? null;
-  const snap = await ref().doc(vendorId).get();
-  return snap.exists ? (snap.data() as VendorDoc) : null;
+  const [row] = await db().select().from(vendors).where(eq(vendors.vendorId, vendorId)).limit(1);
+  return row ? rowToDoc(row) : null;
 }
 
 export async function updateVendor(vendorId: string, updates: Partial<VendorDoc>): Promise<void> {
-  if (env.localDev) {
-    const existing = devStore.vendors.get(vendorId);
-    if (existing) devStore.vendors.set(vendorId, { ...existing, ...updates, updated_at: new Date().toISOString() });
-    return;
-  }
-  await ref().doc(vendorId).update({ ...updates, updated_at: new Date().toISOString() });
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (updates.legal_name !== undefined) patch.legalName = updates.legal_name;
+  if (updates.display_name !== undefined) patch.displayName = updates.display_name;
+  if (updates.gstin !== undefined) patch.gstin = updates.gstin;
+  if (updates.pan !== undefined) patch.pan = updates.pan;
+  if (updates.invoice_count !== undefined) patch.invoiceCount = updates.invoice_count;
+  if (updates.first_seen !== undefined) patch.firstSeen = new Date(updates.first_seen);
+  if (updates.last_seen !== undefined) patch.lastSeen = new Date(updates.last_seen);
+  if (updates.parser_name !== undefined) patch.parserName = updates.parser_name;
+
+  await db().update(vendors).set(patch).where(eq(vendors.vendorId, vendorId));
 }
 
 export async function listVendors(opts: { limit?: number; offset?: number } = {}): Promise<VendorDoc[]> {
-  if (env.localDev) {
-    let rows = Array.from(devStore.vendors.values());
-    rows.sort((a, b) => (b.invoice_count ?? 0) - (a.invoice_count ?? 0));
-    if (opts.offset) rows = rows.slice(opts.offset);
-    return rows.slice(0, opts.limit ?? 100);
-  }
-  let q: FirebaseFirestore.Query = ref().orderBy('invoice_count', 'desc');
-  if (opts.offset) q = q.offset(opts.offset);
-  q = q.limit(opts.limit ?? 100);
-  const snap = await q.get();
-  return snap.docs.map((d) => d.data() as VendorDoc);
+  const rows = await db().select().from(vendors)
+    .orderBy(desc(vendors.invoiceCount))
+    .limit(opts.limit ?? 100)
+    .offset(opts.offset ?? 0);
+  return rows.map(rowToDoc);
 }
 
 // ─── Lookup helpers (for matching) ──────────────────────────────────────────
 
 export async function findByGstin(gstin: string): Promise<VendorDoc | null> {
-  if (env.localDev) {
-    for (const v of devStore.vendors.values()) {
-      if (v.gstin === gstin) return v;
-    }
-    return null;
-  }
-  const snap = await ref().where('gstin', '==', gstin).limit(1).get();
-  return snap.empty ? null : (snap.docs[0].data() as VendorDoc);
+  const [row] = await db().select().from(vendors).where(eq(vendors.gstin, gstin)).limit(1);
+  return row ? rowToDoc(row) : null;
 }
 
 export async function findByPan(pan: string): Promise<VendorDoc | null> {
-  if (env.localDev) {
-    for (const v of devStore.vendors.values()) {
-      if (v.pan === pan) return v;
-    }
-    return null;
-  }
-  const snap = await ref().where('pan', '==', pan).limit(1).get();
-  return snap.empty ? null : (snap.docs[0].data() as VendorDoc);
+  const [row] = await db().select().from(vendors).where(eq(vendors.pan, pan)).limit(1);
+  return row ? rowToDoc(row) : null;
 }
 
 export async function findByLegalName(name: string): Promise<VendorDoc | null> {
-  if (env.localDev) {
-    const lower = name.toLowerCase();
-    for (const v of devStore.vendors.values()) {
-      if (v.legal_name?.toLowerCase() === lower) return v;
-    }
-    return null;
-  }
-  const snap = await ref().where('legal_name', '==', name).limit(1).get();
-  return snap.empty ? null : (snap.docs[0].data() as VendorDoc);
+  const [row] = await db().select().from(vendors)
+    .where(sql`lower(${vendors.legalName}) = lower(${name})`).limit(1);
+  return row ? rowToDoc(row) : null;
 }
 
 export async function searchVendors(q: string, limit = 20): Promise<VendorDoc[]> {
-  const all = await listVendors({ limit: 1000 });
-  const lower = q.toLowerCase();
-  return all
-    .filter((v) =>
-      (v.legal_name?.toLowerCase().includes(lower)) ||
-      (v.display_name?.toLowerCase().includes(lower)) ||
-      (v.gstin?.toLowerCase().includes(lower)) ||
-      (v.pan?.toLowerCase().includes(lower))
-    )
-    .slice(0, limit);
+  const pattern = `%${q}%`;
+  const rows = await db().select().from(vendors)
+    .where(or(
+      ilike(vendors.legalName, pattern),
+      ilike(vendors.displayName, pattern),
+      ilike(vendors.gstin, pattern),
+      ilike(vendors.pan, pattern),
+    ))
+    .limit(limit);
+  return rows.map(rowToDoc);
 }

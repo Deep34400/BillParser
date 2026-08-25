@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { devStore } from '../../../src/shared/devStore.js';
-import { listBillsPaginated, countBills } from '../../../src/ocr/repository.js';
+import { db } from '../../../src/config/db.js';
+import { bills } from '../../../src/db/schema.js';
+import { createBill, listBillsPaginated, countBills } from '../../../src/ocr/repository.js';
 import type { BillDoc } from '../../../src/shared/types.js';
 
 function makeBill(id: string, updatedAt: string, status: BillDoc['ocr_status'] = 'OCR_COMPLETED'): BillDoc {
@@ -14,10 +15,12 @@ function makeBill(id: string, updatedAt: string, status: BillDoc['ocr_status'] =
   } as BillDoc;
 }
 
+async function clearBills() {
+  await db().delete(bills);
+}
+
 describe('listBillsPaginated', () => {
-  beforeEach(() => {
-    devStore.bills.clear();
-  });
+  beforeEach(clearBills);
 
   it('returns empty result when no bills exist', async () => {
     const result = await listBillsPaginated({});
@@ -28,18 +31,18 @@ describe('listBillsPaginated', () => {
   });
 
   it('returns bills ordered by updated_at desc (latest first)', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-03T00:00:00Z'));
-    devStore.bills.set('b3', makeBill('b3', '2026-07-02T00:00:00Z'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z'));
+    await createBill(makeBill('b2', '2026-07-03T00:00:00Z'));
+    await createBill(makeBill('b3', '2026-07-02T00:00:00Z'));
 
     const result = await listBillsPaginated({ pageSize: 10 });
     expect(result.bills.map(b => b.bill_id)).toEqual(['b2', 'b3', 'b1']);
   });
 
   it('limits results to pageSize', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z'));
-    devStore.bills.set('b3', makeBill('b3', '2026-07-03T00:00:00Z'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z'));
+    await createBill(makeBill('b2', '2026-07-02T00:00:00Z'));
+    await createBill(makeBill('b3', '2026-07-03T00:00:00Z'));
 
     const result = await listBillsPaginated({ pageSize: 2 });
     expect(result.bills).toHaveLength(2);
@@ -48,7 +51,7 @@ describe('listBillsPaginated', () => {
   });
 
   it('returns correct totalPages when all bills fit in one page', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z'));
 
     const result = await listBillsPaginated({ pageSize: 10 });
     expect(result.bills).toHaveLength(1);
@@ -57,11 +60,11 @@ describe('listBillsPaginated', () => {
   });
 
   it('paginates by page number (page 1, 2, 3)', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z'));
-    devStore.bills.set('b3', makeBill('b3', '2026-07-03T00:00:00Z'));
-    devStore.bills.set('b4', makeBill('b4', '2026-07-04T00:00:00Z'));
-    devStore.bills.set('b5', makeBill('b5', '2026-07-05T00:00:00Z'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z'));
+    await createBill(makeBill('b2', '2026-07-02T00:00:00Z'));
+    await createBill(makeBill('b3', '2026-07-03T00:00:00Z'));
+    await createBill(makeBill('b4', '2026-07-04T00:00:00Z'));
+    await createBill(makeBill('b5', '2026-07-05T00:00:00Z'));
 
     const page1 = await listBillsPaginated({ pageSize: 2, page: 1 });
     expect(page1.bills.map(b => b.bill_id)).toEqual(['b5', 'b4']);
@@ -79,9 +82,9 @@ describe('listBillsPaginated', () => {
   });
 
   it('filters by status', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z', 'FAILED'));
-    devStore.bills.set('b3', makeBill('b3', '2026-07-03T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b2', '2026-07-02T00:00:00Z', 'FAILED'));
+    await createBill(makeBill('b3', '2026-07-03T00:00:00Z', 'OCR_COMPLETED'));
 
     const result = await listBillsPaginated({ status: 'FAILED' });
     expect(result.bills).toHaveLength(1);
@@ -90,10 +93,10 @@ describe('listBillsPaginated', () => {
   });
 
   it('combines status filter with pagination', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z', 'OCR_COMPLETED'));
-    devStore.bills.set('b3', makeBill('b3', '2026-07-03T00:00:00Z', 'FAILED'));
-    devStore.bills.set('b4', makeBill('b4', '2026-07-04T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b2', '2026-07-02T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b3', '2026-07-03T00:00:00Z', 'FAILED'));
+    await createBill(makeBill('b4', '2026-07-04T00:00:00Z', 'OCR_COMPLETED'));
 
     const page1 = await listBillsPaginated({ pageSize: 1, page: 1, status: 'OCR_COMPLETED' });
     expect(page1.bills).toHaveLength(1);
@@ -108,7 +111,7 @@ describe('listBillsPaginated', () => {
 
   it('defaults to pageSize 10 when not specified', async () => {
     for (let i = 0; i < 25; i++) {
-      devStore.bills.set(`b${i}`, makeBill(`b${i}`, `2026-07-${String(i + 1).padStart(2, '0')}T00:00:00Z`));
+      await createBill(makeBill(`b${i}`, `2026-07-${String(i + 1).padStart(2, '0')}T00:00:00Z`));
     }
 
     const result = await listBillsPaginated({});
@@ -124,9 +127,9 @@ describe('listBillsPaginated', () => {
   });
 
   it('returns all completed (OCR_COMPLETED + VERIFIED) when statuses set', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z', 'VERIFIED'));
-    devStore.bills.set('b3', makeBill('b3', '2026-07-03T00:00:00Z', 'FAILED'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b2', '2026-07-02T00:00:00Z', 'VERIFIED'));
+    await createBill(makeBill('b3', '2026-07-03T00:00:00Z', 'FAILED'));
     const result = await listBillsPaginated({ statuses: ['OCR_COMPLETED', 'VERIFIED'] });
     expect(result.total).toBe(2);
     expect(result.bills.map((b) => b.bill_id).sort()).toEqual(['b1', 'b2']);
@@ -137,8 +140,8 @@ describe('listBillsPaginated', () => {
     clean.confidence_score = 0.95;
     const flagged = makeBill('flag', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
     flagged.confidence_score = 0.5;
-    devStore.bills.set('clean', clean);
-    devStore.bills.set('flag', flagged);
+    await createBill(clean);
+    await createBill(flagged);
 
     const result = await listBillsPaginated({
       statuses: ['OCR_COMPLETED', 'VERIFIED'],
@@ -158,36 +161,42 @@ describe('listBillsPaginated', () => {
     flagged.review_reasons = ['Duplicate: INV-1'];
     const verified = makeBill('ver', '2026-07-02T00:00:00Z', 'VERIFIED');
     verified.confidence_score = 0.4;
-    devStore.bills.set('low', low);
-    devStore.bills.set('ok', ok);
-    devStore.bills.set('flag', flagged);
-    devStore.bills.set('ver', verified);
+    await createBill(low);
+    await createBill(ok);
+    await createBill(flagged);
+    await createBill(verified);
 
     const result = await listBillsPaginated({ needsReview: true });
     expect(result.bills.map((b) => b.bill_id).sort()).toEqual(['flag', 'low']);
     expect(result.total).toBe(2);
   });
+
+  it('substring search matches mid-string, not just prefix', async () => {
+    await createBill({ ...makeBill('b1', '2026-07-01T00:00:00Z'), vendor_name: 'Zenith Auto Care Center' });
+    await createBill({ ...makeBill('b2', '2026-07-02T00:00:00Z'), vendor_name: 'Unrelated Motors' });
+
+    const result = await listBillsPaginated({ q: 'Auto Care' });
+    expect(result.bills.map((b) => b.bill_id)).toEqual(['b1']);
+  });
 });
 
 describe('countBills', () => {
-  beforeEach(() => {
-    devStore.bills.clear();
-  });
+  beforeEach(clearBills);
 
   it('returns 0 when no bills', async () => {
     expect(await countBills()).toBe(0);
   });
 
   it('counts all bills', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z'));
+    await createBill(makeBill('b2', '2026-07-02T00:00:00Z'));
     expect(await countBills()).toBe(2);
   });
 
   it('counts by status', async () => {
-    devStore.bills.set('b1', makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
-    devStore.bills.set('b2', makeBill('b2', '2026-07-02T00:00:00Z', 'FAILED'));
-    devStore.bills.set('b3', makeBill('b3', '2026-07-03T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b1', '2026-07-01T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('b2', '2026-07-02T00:00:00Z', 'FAILED'));
+    await createBill(makeBill('b3', '2026-07-03T00:00:00Z', 'OCR_COMPLETED'));
     expect(await countBills('FAILED')).toBe(1);
     expect(await countBills('OCR_COMPLETED')).toBe(2);
   });

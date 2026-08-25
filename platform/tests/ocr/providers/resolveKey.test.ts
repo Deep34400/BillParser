@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resolveProviderKey } from '../../../src/ocr/providers/resolveKey.js';
 import { estimateGeminiCostUsd } from '../../../src/ocr/providers/geminiClient.js';
-import { devStore } from '../../../src/shared/devStore.js';
+import { clearProviderCredentials, saveProviderCredentials } from '../../../src/shared/settings.js';
 
 describe('resolveProviderKey', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     for (const p of ['mistral', 'gemini', 'claude', 'openai']) {
-      devStore.clearCreds(p);
+      await clearProviderCredentials(p);
     }
   });
 
@@ -15,7 +15,7 @@ describe('resolveProviderKey', () => {
   });
 
   it('Gemini always uses ADC even when an API key is stored', async () => {
-    devStore.saveCreds('gemini', { apiKey: 'test-gemini-key', model: 'gemini-2.5-pro' });
+    await saveProviderCredentials('gemini', { apiKey: 'test-gemini-key', model: 'gemini-2.5-pro' });
     const g = await resolveProviderKey('gemini');
     expect(g.apiKey).toBe('');
     expect(g.useAdc).toBe(true);

@@ -18,7 +18,29 @@ steps:
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/platform:$COMMIT_SHA'
     waitFor: ['build-platform']
 
-  # 3. Deploy platform to Cloud Run
+  # 3. Apply Postgres migrations via a Cloud SQL Auth Proxy tunnel, before the new
+  # revision serves traffic. Requires the Cloud Build service account to hold
+  # roles/cloudsql.client and roles/secretmanager.secretAccessor on this project.
+  - name: 'node:20-slim'
+    id: migrate
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        apt-get update -qq && apt-get install -qq -y curl ca-certificates >/dev/null
+        curl -sLo /usr/local/bin/cloud-sql-proxy \
+          https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.0/cloud-sql-proxy.linux.amd64
+        chmod +x /usr/local/bin/cloud-sql-proxy
+        /usr/local/bin/cloud-sql-proxy --port 5432 "${_CLOUDSQL_INSTANCE}" &
+        for i in $(seq 1 15); do (echo > /dev/tcp/127.0.0.1/5432) 2>/dev/null && break; sleep 1; done
+        cd platform
+        npm ci
+        DATABASE_URL="$$DATABASE_URL" npm run db:migrate
+    secretEnv: ['DATABASE_URL']
+    waitFor: ['push-platform']
+
+  # 4. Deploy platform to Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
     id: deploy-platform
     entrypoint: gcloud
@@ -32,10 +54,13 @@ steps:
       - '--service-account=${_RUNTIME_SA}'
       - '--allow-unauthenticated'
       - '--port=4000'
-      - '--set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,STORAGE_BUCKET=${_STORAGE_BUCKET},FIRESTORE_DATABASE_ID=${_FIRESTORE_DB},VERTEX_LOCATION=${_VERTEX_LOCATION},NODE_ENV=production,LOCAL_DEV=false'
-    waitFor: ['push-platform']
+      - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
+      - '--max-instances=8'
+      - '--set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,STORAGE_BUCKET=${_STORAGE_BUCKET},VERTEX_LOCATION=${_VERTEX_LOCATION},NODE_ENV=production'
+      - '--set-secrets=DATABASE_URL=${_DB_SECRET}:latest'
+    waitFor: ['migrate']
 
-  # 4. Capture the deployed platform URL for the web build to proxy to
+  # 5. Capture the deployed platform URL for the web build to proxy to
   - name: 'gcr.io/cloud-builders/gcloud'
     id: get-platform-url
     entrypoint: bash
@@ -46,7 +71,7 @@ steps:
         echo "Platform URL: $(cat /workspace/platform_url.txt)"
     waitFor: ['deploy-platform']
 
-  # 5. Build web (frontend) image — context is repo root since web/Dockerfile COPYs "web/..." paths
+  # 6. Build web (frontend) image — context is repo root since web/Dockerfile COPYs "web/..." paths
   - name: 'gcr.io/cloud-builders/docker'
     id: build-web
     args:
@@ -58,7 +83,7 @@ steps:
       - .
     waitFor: ['-']
 
-  # 6. Push web image
+  # 7. Push web image
   - name: 'gcr.io/cloud-builders/docker'
     id: push-web
     args:
@@ -66,7 +91,7 @@ steps:
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/web:$COMMIT_SHA'
     waitFor: ['build-web']
 
-  # 7. Deploy web to Cloud Run, pointing its nginx proxy at the platform service URL
+  # 8. Deploy web to Cloud Run, pointing its nginx proxy at the platform service URL
   - name: 'gcr.io/cloud-builders/gcloud'
     id: deploy-web
     entrypoint: bash
@@ -87,13 +112,19 @@ images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/platform:$COMMIT_SHA'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/billparser/web:$COMMIT_SHA'
 
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/${_DB_SECRET}/versions/latest
+      env: DATABASE_URL
+
 substitutions:
   _REGION: asia-southeast1
   _PLATFORM_SERVICE: billparser-platform-dev
   _WEB_SERVICE: billparser-web-dev
-  _RUNTIME_SA: billparser-runtime@carrum-agent-pilot-dev.iam.gserviceaccount.com
-  _STORAGE_BUCKET: billparser-uploads
-  _FIRESTORE_DB: billparser-db
+  _RUNTIME_SA: billparser-runtime@carrum-doc-ai.iam.gserviceaccount.com
+  _STORAGE_BUCKET: carrum-doc-ai-uploads-dev
+  _CLOUDSQL_INSTANCE: carrum-doc-ai:asia-southeast1:billparser-pg
+  _DB_SECRET: billparser-db-url-dev
   _VERTEX_LOCATION: global
 
 options:

@@ -29,7 +29,7 @@ Source: [Google Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricin
 
 2. User edits Input/Output → clicks Save Pricing
    → PUT /api/settings { modelPricing: { only changed models } }
-   → saved in Firestore AppSettings.modelPricing
+   → saved in Postgres app_settings.model_pricing
 
 3. Next OCR run
    → getSettings() → resolveModelPricing(model, overrides)
@@ -149,11 +149,11 @@ OcrCostInfo = {
 
 ---
 
-## 4. How Cost Is Stored in Firestore
+## 4. How Cost Is Stored in Postgres
 
 `mapper.ts → mapParsedToBill()` persists these fields on every `BillDoc`:
 
-| Firestore Field | Source | Example |
+| Column | Source | Example |
 |----------------|--------|---------|
 | `pipeline_mode` | `'single'` or `'split'` | `'single'` |
 | `extraction_cost_usd` | extraction step cost | `0.00024` |
@@ -183,7 +183,7 @@ OcrCostInfo = {
 
 ### 5a: API Response
 
-`mapper.ts → billToInvoice()` maps Firestore fields to camelCase for the frontend:
+`mapper.ts → billToInvoice()` maps bill columns to camelCase for the frontend:
 
 ```
 BillDoc (snake_case)              →  FrontendInvoice (camelCase)
@@ -286,7 +286,7 @@ For **old invoices** (no input/output breakdown), falls back gracefully:
 - Filter by provider (Gemini / Claude / OpenAI / Mistral)
 - Edit any value → shows "CUSTOM" badge
 - Reset button restores to default
-- Save persists to Firestore → used for future cost calculations
+- Save persists to Postgres → used for future cost calculations
 
 ### Analytics Page (`AnalyticsPage.tsx`)
 
@@ -349,7 +349,7 @@ For **old invoices** (no input/output breakdown), falls back gracefully:
      ┌──────▼────────────────────────────────────────┐
      │  mapper.ts → mapParsedToBill()                  │
      │                                                 │
-     │  Writes to BillDoc (Firestore):                 │
+     │  Writes to BillDoc (Postgres bills table):      │
      │    total_cost_usd, total_input_tokens,          │
      │    total_output_tokens, total_input_cost_usd,   │
      │    total_output_cost_usd, extraction_model, ... │
@@ -414,7 +414,7 @@ Pricing always uses the **selected model** from Settings (`singleModel` / `struc
 1. Go to Settings → Model Pricing
 2. Edit input/output values for any model
 3. Click "Save Pricing"
-4. Overrides saved to Firestore `AppSettings.modelPricing`
+4. Overrides saved to Postgres `app_settings.model_pricing`
 5. All future OCR uses the new rates
 
 ### Option B: Change code defaults

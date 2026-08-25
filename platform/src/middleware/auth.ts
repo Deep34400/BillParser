@@ -7,7 +7,6 @@
 import type { FastifyRequest, FastifyReply, FastifyInstance, HookHandlerDoneFunction } from 'fastify';
 import fp from 'fastify-plugin';
 import { hashApiKey, getUserByApiKeyHash, getUser, type UserDoc } from '../users/repository.js';
-import { env } from '../config/env.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -53,7 +52,6 @@ export const authPlugin = fp(async function authPluginFn(app: FastifyInstance): 
 
     const token = bearerFromRequest(req);
     if (!token) {
-      if (env.localDev) return;
       return reply.status(401).send({ success: false, message: 'Authentication required' });
     }
 

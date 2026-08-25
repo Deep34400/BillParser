@@ -1,13 +1,12 @@
 /**
- * User Repository — Firestore CRUD for users, API keys, and token transactions.
+ * User Repository — Postgres CRUD for users, API keys, and token transactions.
  * Pure data-access layer: no business logic, no HTTP concerns.
- *
- * Collections: users, token_transactions, api_keys
  */
 import { randomBytes, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
-import { env } from '../config/env.js';
-import { db, col } from '../config/firebase.js';
-import { devStore } from '../shared/devStore.js';
+import { v4 as uuid } from 'uuid';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { db } from '../config/db.js';
+import { users, apiKeys, tokenTransactions } from '../db/schema.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,15 +55,53 @@ export interface TokenTransactionDoc {
   created_at: string;
 }
 
-// ─── Collection refs ────────────────────────────────────────────────────────
+// ─── Row <-> Doc mapping ─────────────────────────────────────────────────────
 
-const USERS_COL = 'users';
-const TX_COL = 'token_transactions';
-const KEYS_COL = 'api_keys';
+function userRowToDoc(row: typeof users.$inferSelect): UserDoc {
+  return {
+    user_id: row.userId,
+    email: row.email,
+    name: row.name,
+    password_hash: row.passwordHash,
+    role: row.role as UserRole,
+    status: row.status as UserStatus,
+    api_key_hash: row.apiKeyHash,
+    api_key_prefix: row.apiKeyPrefix,
+    token_balance: row.tokenBalance,
+    total_tokens_used: row.totalTokensUsed,
+    total_ocr_count: row.totalOcrCount,
+    total_cost_usd: row.totalCostUsd,
+    intake_email: row.intakeEmail ?? undefined,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
 
-function usersRef() { return db().collection(col(USERS_COL)); }
-function txRef() { return db().collection(col(TX_COL)); }
-function keysRef() { return db().collection(col(KEYS_COL)); }
+function keyRowToDoc(row: typeof apiKeys.$inferSelect): ApiKeyDoc {
+  return {
+    key_id: row.keyId,
+    user_id: row.userId,
+    key_hash: row.keyHash,
+    key_prefix: row.keyPrefix,
+    api_key: row.apiKey,
+    label: row.label,
+    created_at: row.createdAt.toISOString(),
+    last_used_at: row.lastUsedAt?.toISOString() ?? null,
+  };
+}
+
+function txRowToDoc(row: typeof tokenTransactions.$inferSelect): TokenTransactionDoc {
+  return {
+    tx_id: row.txId,
+    user_id: row.userId,
+    type: row.type as 'credit' | 'debit',
+    amount: row.amount,
+    balance_after: row.balanceAfter,
+    description: row.description,
+    reference_id: row.referenceId,
+    created_at: row.createdAt.toISOString(),
+  };
+}
 
 // ─── Password hashing (scrypt) ─────────────────────────────────────────────
 
@@ -98,119 +135,198 @@ export function apiKeyPrefix(key: string): string {
 // ─── User CRUD ──────────────────────────────────────────────────────────────
 
 export async function createUser(user: UserDoc): Promise<UserDoc> {
-  if (env.localDev) {
-    devStore.users.set(user.user_id, user);
-    return user;
-  }
-  await usersRef().doc(user.user_id).set(user);
+  await db().insert(users).values({
+    userId: user.user_id,
+    email: user.email,
+    name: user.name,
+    passwordHash: user.password_hash,
+    role: user.role,
+    status: user.status,
+    apiKeyHash: user.api_key_hash,
+    apiKeyPrefix: user.api_key_prefix,
+    tokenBalance: user.token_balance,
+    totalTokensUsed: user.total_tokens_used,
+    totalOcrCount: user.total_ocr_count,
+    totalCostUsd: user.total_cost_usd,
+    intakeEmail: user.intake_email ?? null,
+    createdAt: new Date(user.created_at),
+    updatedAt: new Date(user.updated_at),
+  });
   return user;
 }
 
 export async function getUser(userId: string): Promise<UserDoc | null> {
-  if (env.localDev) return devStore.users.get(userId) ?? null;
-  const snap = await usersRef().doc(userId).get();
-  return snap.exists ? (snap.data() as UserDoc) : null;
+  const [row] = await db().select().from(users).where(eq(users.userId, userId)).limit(1);
+  return row ? userRowToDoc(row) : null;
 }
 
 export async function getUserByEmail(email: string): Promise<UserDoc | null> {
-  if (env.localDev) {
-    for (const u of devStore.users.values()) {
-      if (u.email.toLowerCase() === email.toLowerCase()) return u;
-    }
-    return null;
-  }
-  const snap = await usersRef().where('email', '==', email.toLowerCase()).limit(1).get();
-  return snap.empty ? null : (snap.docs[0].data() as UserDoc);
+  const [row] = await db().select().from(users)
+    .where(sql`lower(${users.email}) = lower(${email})`).limit(1);
+  return row ? userRowToDoc(row) : null;
 }
 
 export async function getUserByApiKeyHash(hash: string): Promise<UserDoc | null> {
   const keyDoc = await getApiKeyByHash(hash);
   if (keyDoc) return getUser(keyDoc.user_id);
-  if (env.localDev) {
-    for (const u of devStore.users.values()) {
-      if (u.api_key_hash === hash) return u;
-    }
-    return null;
-  }
-  const snap = await usersRef().where('api_key_hash', '==', hash).limit(1).get();
-  return snap.empty ? null : (snap.docs[0].data() as UserDoc);
+  const [row] = await db().select().from(users).where(eq(users.apiKeyHash, hash)).limit(1);
+  return row ? userRowToDoc(row) : null;
 }
 
 export async function listUsers(): Promise<UserDoc[]> {
-  if (env.localDev) {
-    return Array.from(devStore.users.values()).sort((a, b) => a.created_at.localeCompare(b.created_at));
-  }
-  const snap = await usersRef().orderBy('created_at', 'asc').get();
-  return snap.docs.map((d) => d.data() as UserDoc);
+  const rows = await db().select().from(users).orderBy(asc(users.createdAt));
+  return rows.map(userRowToDoc);
 }
 
 export async function updateUser(userId: string, updates: Partial<UserDoc>): Promise<void> {
-  if (env.localDev) {
-    const existing = devStore.users.get(userId);
-    if (existing) devStore.users.set(userId, { ...existing, ...updates, updated_at: new Date().toISOString() });
-    return;
-  }
-  await usersRef().doc(userId).update({ ...updates, updated_at: new Date().toISOString() });
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (updates.email !== undefined) patch.email = updates.email;
+  if (updates.name !== undefined) patch.name = updates.name;
+  if (updates.password_hash !== undefined) patch.passwordHash = updates.password_hash;
+  if (updates.role !== undefined) patch.role = updates.role;
+  if (updates.status !== undefined) patch.status = updates.status;
+  if (updates.api_key_hash !== undefined) patch.apiKeyHash = updates.api_key_hash;
+  if (updates.api_key_prefix !== undefined) patch.apiKeyPrefix = updates.api_key_prefix;
+  if (updates.token_balance !== undefined) patch.tokenBalance = updates.token_balance;
+  if (updates.total_tokens_used !== undefined) patch.totalTokensUsed = updates.total_tokens_used;
+  if (updates.total_ocr_count !== undefined) patch.totalOcrCount = updates.total_ocr_count;
+  if (updates.total_cost_usd !== undefined) patch.totalCostUsd = updates.total_cost_usd;
+  if (updates.intake_email !== undefined) patch.intakeEmail = updates.intake_email || null;
+
+  await db().update(users).set(patch).where(eq(users.userId, userId));
 }
 
 // ─── API Key CRUD ───────────────────────────────────────────────────────────
 
 export async function createApiKeyDoc(doc: ApiKeyDoc): Promise<ApiKeyDoc> {
-  if (env.localDev) {
-    devStore.apiKeys.push(doc);
-    return doc;
-  }
-  await keysRef().doc(doc.key_id).set(doc);
+  await db().insert(apiKeys).values({
+    keyId: doc.key_id,
+    userId: doc.user_id,
+    keyHash: doc.key_hash,
+    keyPrefix: doc.key_prefix,
+    apiKey: doc.api_key,
+    label: doc.label,
+    createdAt: new Date(doc.created_at),
+    lastUsedAt: doc.last_used_at ? new Date(doc.last_used_at) : null,
+  });
   return doc;
 }
 
 export async function getApiKeyByHash(hash: string): Promise<ApiKeyDoc | null> {
-  if (env.localDev) {
-    return devStore.apiKeys.find((k) => k.key_hash === hash) ?? null;
-  }
-  const snap = await keysRef().where('key_hash', '==', hash).limit(1).get();
-  return snap.empty ? null : (snap.docs[0].data() as ApiKeyDoc);
+  const [row] = await db().select().from(apiKeys).where(eq(apiKeys.keyHash, hash)).limit(1);
+  return row ? keyRowToDoc(row) : null;
 }
 
 export async function listApiKeysForUser(userId: string): Promise<ApiKeyDoc[]> {
-  if (env.localDev) {
-    return devStore.apiKeys.filter((k) => k.user_id === userId);
-  }
-  const snap = await keysRef().where('user_id', '==', userId).orderBy('created_at', 'desc').get();
-  return snap.docs.map((d) => d.data() as ApiKeyDoc);
+  const rows = await db().select().from(apiKeys)
+    .where(eq(apiKeys.userId, userId))
+    .orderBy(desc(apiKeys.createdAt));
+  return rows.map(keyRowToDoc);
 }
 
 export async function deleteApiKey(keyId: string): Promise<void> {
-  if (env.localDev) {
-    const idx = devStore.apiKeys.findIndex((k) => k.key_id === keyId);
-    if (idx >= 0) devStore.apiKeys.splice(idx, 1);
-    return;
-  }
-  await keysRef().doc(keyId).delete();
+  await db().delete(apiKeys).where(eq(apiKeys.keyId, keyId));
 }
 
 // ─── Token transaction CRUD ─────────────────────────────────────────────────
 
 export async function createTransaction(tx: TokenTransactionDoc): Promise<void> {
-  if (env.localDev) {
-    devStore.tokenTransactions.push(tx);
-  } else {
-    await txRef().doc(tx.tx_id).set(tx);
-  }
+  await db().insert(tokenTransactions).values({
+    txId: tx.tx_id,
+    userId: tx.user_id,
+    type: tx.type,
+    amount: tx.amount,
+    balanceAfter: tx.balance_after,
+    description: tx.description,
+    referenceId: tx.reference_id ?? null,
+    createdAt: new Date(tx.created_at),
+  });
 }
 
 export async function getUserTransactions(userId: string, limit = 50): Promise<TokenTransactionDoc[]> {
-  if (env.localDev) {
-    return devStore.tokenTransactions
-      .filter((t) => t.user_id === userId)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at))
-      .slice(0, limit);
-  }
-  // Filter only (no orderBy) to avoid requiring a Firestore composite index.
-  // Sort newest-first in memory.
-  const snap = await txRef().where('user_id', '==', userId).get();
-  return snap.docs
-    .map((d) => d.data() as TokenTransactionDoc)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, limit);
+  const rows = await db().select().from(tokenTransactions)
+    .where(eq(tokenTransactions.userId, userId))
+    .orderBy(desc(tokenTransactions.createdAt))
+    .limit(limit);
+  return rows.map(txRowToDoc);
+}
+
+// ─── Atomic token balance operations ────────────────────────────────────────
+// Fixes a real race: the old Firestore code read the balance, checked it in
+// JS, then wrote it back — two concurrent OCR uploads could both pass the
+// check and let a user overdraw. These do the check-and-update in one
+// conditional UPDATE, plus the ledger insert, inside a single transaction.
+
+export async function applyTokenTransaction(params: {
+  userId: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  description: string;
+  referenceId?: string | null;
+}): Promise<
+  | { ok: true; user: UserDoc; tx: TokenTransactionDoc }
+  | { ok: false; reason: 'not_found' | 'insufficient_balance' }
+> {
+  return db().transaction(async (trx) => {
+    const isDebit = params.type === 'debit';
+
+    const setClause: Record<string, unknown> = {
+      tokenBalance: isDebit
+        ? sql`round((${users.tokenBalance} - ${params.amount})::numeric, 4)`
+        : sql`round((${users.tokenBalance} + ${params.amount})::numeric, 4)`,
+      updatedAt: new Date(),
+    };
+    if (isDebit) {
+      setClause.totalTokensUsed = sql`round((${users.totalTokensUsed} + ${params.amount})::numeric, 4)`;
+      setClause.totalOcrCount = sql`${users.totalOcrCount} + 1`;
+    }
+
+    const whereClause = isDebit
+      ? and(eq(users.userId, params.userId), sql`${users.tokenBalance} >= ${params.amount}`)
+      : eq(users.userId, params.userId);
+
+    const [updated] = await trx.update(users).set(setClause).where(whereClause).returning();
+
+    if (!updated) {
+      const [exists] = await trx.select({ userId: users.userId }).from(users)
+        .where(eq(users.userId, params.userId)).limit(1);
+      return { ok: false, reason: exists ? 'insufficient_balance' : 'not_found' } as const;
+    }
+
+    const txId = uuid();
+    const createdAt = new Date();
+    await trx.insert(tokenTransactions).values({
+      txId,
+      userId: params.userId,
+      type: params.type,
+      amount: params.amount,
+      balanceAfter: updated.tokenBalance,
+      description: params.description,
+      referenceId: params.referenceId ?? null,
+      createdAt,
+    });
+
+    return {
+      ok: true,
+      user: userRowToDoc(updated),
+      tx: {
+        tx_id: txId,
+        user_id: params.userId,
+        type: params.type,
+        amount: params.amount,
+        balance_after: updated.tokenBalance,
+        description: params.description,
+        reference_id: params.referenceId ?? null,
+        created_at: createdAt.toISOString(),
+      },
+    } as const;
+  });
+}
+
+/** Atomic increment — avoids the same read-modify-write race as token balance. */
+export async function incrementTotalCost(userId: string, costUsd: number): Promise<void> {
+  await db().update(users).set({
+    totalCostUsd: sql`round((${users.totalCostUsd} + ${costUsd})::numeric, 6)`,
+    updatedAt: new Date(),
+  }).where(eq(users.userId, userId));
 }

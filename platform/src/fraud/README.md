@@ -11,7 +11,7 @@ User clicks "Run Fraud Scan" in the UI
   → Frontend calls GET /api/fraud/scan
   → route.ts calls service.ts → runAllChecks()
   → runAllChecks() runs all 4 detection algorithms in parallel
-  → Each algorithm reads bills from Firestore, applies its rules
+  → Each algorithm reads bills from Postgres, applies its rules
   → Returns a combined list of FraudAlert objects
   → UI groups alerts by type and severity for review
 ```
@@ -21,7 +21,7 @@ User clicks "Run Fraud Scan" in the UI
 #### 1. Duplicate Invoice Detection (`detectDuplicateInvoices`)
 
 **How it works:**
-1. Fetches all completed bills from Firestore
+1. Fetches all completed bills from Postgres
 2. Groups bills by a key: `{invoice_number}__{vendor_gstin}`
 3. If any group has 2+ bills → that's a duplicate
 4. Returns a HIGH severity alert with the invoice number, vendor name, and amounts
@@ -90,4 +90,4 @@ Alerts are advisory only — they never modify invoices or block processing.
 
 ## Data Source
 
-Reads from `bills` and `bill_parts` Firestore collections. Works identically in LOCAL_DEV (in-memory) and production.
+Reads from the `bills` and `bill_parts` Postgres tables. Local dev and production both run Postgres (Docker locally, Cloud SQL deployed), so behaviour is identical.

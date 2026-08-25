@@ -1,13 +1,10 @@
 /**
- * Settings storage — Firestore in production, in-memory when LOCAL_DEV=true.
+ * Settings storage — Postgres, single-row `app_settings` table + `provider_credentials`.
  */
-import { env } from '../config/env.js';
-import { db, col } from '../config/firebase.js';
-import { devStore } from './devStore.js';
+import { eq } from 'drizzle-orm';
+import { db } from '../config/db.js';
+import { appSettings, providerCredentials } from '../db/schema.js';
 import type { ModelPrice } from './modelPricing.js';
-
-const SETTINGS_DOC = 'app_settings';
-const CREDS_COLLECTION = 'provider_credentials';
 
 export interface AppSettings {
   /** 'split' = separate extraction + structuring, 'single' = one provider does both */
@@ -40,51 +37,65 @@ const DEFAULTS: AppSettings = {
   singleModel: 'gemini-2.5-flash',
 };
 
+const SETTINGS_ID = 1;
+
+function rowToSettings(row: typeof appSettings.$inferSelect): AppSettings {
+  return {
+    pipelineMode: row.pipelineMode as AppSettings['pipelineMode'],
+    extractionProvider: row.extractionProvider,
+    structuringProvider: row.structuringProvider,
+    structuringModel: row.structuringModel,
+    extractionModel: row.extractionModel ?? undefined,
+    singleProvider: row.singleProvider ?? undefined,
+    singleModel: row.singleModel ?? undefined,
+    emailIntakeEnabled: row.emailIntakeEnabled ?? undefined,
+    emailIntakeUser: row.emailIntakeUser ?? undefined,
+    emailIntakePollIntervalSec: row.emailIntakePollIntervalSec ?? undefined,
+    emailIntakeAllowedSenders: row.emailIntakeAllowedSenders ?? undefined,
+    modelPricing: (row.modelPricing as Record<string, ModelPrice> | null) ?? undefined,
+  };
+}
+
 export async function getSettings(): Promise<AppSettings> {
-  if (env.localDev) return devStore.getSettings();
-  const snap = await db().collection(col('settings')).doc(SETTINGS_DOC).get();
-  if (!snap.exists) return { ...DEFAULTS };
-  return { ...DEFAULTS, ...(snap.data() as Partial<AppSettings>) };
+  const [row] = await db().select().from(appSettings).where(eq(appSettings.id, SETTINGS_ID)).limit(1);
+  if (!row) return { ...DEFAULTS };
+  return { ...DEFAULTS, ...rowToSettings(row) };
 }
 
 export async function saveSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
-  if (env.localDev) return devStore.saveSettings(settings);
   const current = await getSettings();
   const merged = { ...current, ...settings };
-  await db().collection(col('settings')).doc(SETTINGS_DOC).set(merged);
+
+  await db().insert(appSettings).values({ id: SETTINGS_ID, ...merged }).onConflictDoUpdate({
+    target: appSettings.id,
+    set: merged,
+  });
+
   return merged;
 }
 
 export async function getProviderCredentials(provider: string): Promise<Record<string, string>> {
-  if (env.localDev) return devStore.getCreds(provider);
-  const snap = await db().collection(col(CREDS_COLLECTION)).doc(provider).get();
-  if (!snap.exists) return {};
-  return snap.data() as Record<string, string>;
+  const [row] = await db().select().from(providerCredentials)
+    .where(eq(providerCredentials.provider, provider)).limit(1);
+  return (row?.credentials as Record<string, string>) ?? {};
 }
 
 export async function saveProviderCredentials(provider: string, creds: Record<string, string>): Promise<void> {
-  if (env.localDev) {
-    devStore.saveCreds(provider, creds);
-    return;
-  }
   const current = await getProviderCredentials(provider);
-  await db().collection(col(CREDS_COLLECTION)).doc(provider).set({ ...current, ...creds });
+  const merged = { ...current, ...creds };
+  await db().insert(providerCredentials).values({ provider, credentials: merged }).onConflictDoUpdate({
+    target: providerCredentials.provider,
+    set: { credentials: merged },
+  });
 }
 
 export async function clearProviderCredentials(provider: string): Promise<void> {
-  if (env.localDev) {
-    devStore.clearCreds(provider);
-    return;
-  }
-  await db().collection(col(CREDS_COLLECTION)).doc(provider).delete();
+  await db().delete(providerCredentials).where(eq(providerCredentials.provider, provider));
 }
 
 export async function getAllCredentials(): Promise<Record<string, Record<string, string>>> {
-  if (env.localDev) return devStore.getAllCreds();
-  const snap = await db().collection(col(CREDS_COLLECTION)).get();
+  const rows = await db().select().from(providerCredentials);
   const result: Record<string, Record<string, string>> = {};
-  for (const doc of snap.docs) {
-    result[doc.id] = doc.data() as Record<string, string>;
-  }
+  for (const row of rows) result[row.provider] = row.credentials as Record<string, string>;
   return result;
 }

@@ -38,13 +38,13 @@ vendorService matches existing vendor by priority:
 
 | File                  | Role                                              |
 |-----------------------|---------------------------------------------------|
-| `vendorTypes.ts`      | `VendorDoc` interface (Firestore document shape)  |
+| `vendorTypes.ts`      | `VendorDoc` interface (domain shape)           |
 | `vendorMapper.ts`     | Extract vendor fields from `ParsedInvoiceData`    |
-| `vendorRepository.ts` | Firestore CRUD + lookup helpers for `vendors`     |
+| `vendorRepository.ts` | Postgres CRUD + lookup helpers for `vendors`     |
 | `vendorService.ts`    | Matching priority + upsert logic                  |
 | `route.ts`            | API endpoints: `GET /api/vendors`, `GET /api/vendors/:id` |
 
-## Firestore Collection: `vendors`
+## Postgres Table: `vendors`
 
 | Field           | Type   | Description                                      |
 |-----------------|--------|--------------------------------------------------|

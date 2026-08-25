@@ -1,7 +1,7 @@
 /**
  * OCR Data Mapper — all data transformations in one place:
  *
- *   mapParsedToBill()  — ParsedInvoiceData → BillDoc (Firestore storage)
+ *   mapParsedToBill()  — ParsedInvoiceData → BillDoc (Postgres storage)
  *   billToInvoice()    — BillDoc → FrontendInvoice (API response for UI)
  *   toApiParsed()      — ParsedInvoiceData → stable OCR response shape (IMMUTABLE)
  */

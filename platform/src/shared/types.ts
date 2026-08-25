@@ -2,7 +2,7 @@
  * Core domain types — single source of truth.
  *
  * The OCR contract (ParsedInvoiceData) is preserved exactly as-is from the original system.
- * Firestore document shapes (BillDoc, BillPartDoc) are designed around this contract.
+ * Postgres row shapes (BillDoc, BillPartDoc) are designed around this contract.
  */
 
 // ─── OCR contract (immutable — do not rename or restructure) ─────────────────
@@ -114,7 +114,7 @@ export type BillType =
 
 export type LineType = 'PART' | 'LABOUR';
 
-// ─── Firestore document: bills collection ───────────────────────────────────
+// ─── Postgres row: bills table ───────────────────────────────────────────────
 
 export interface BillDoc {
   bill_id: string;
@@ -214,7 +214,7 @@ export interface BillDoc {
   updated_at: string;
 }
 
-// ─── Firestore document: bill_parts collection ──────────────────────────────
+// ─── Postgres row: bill_parts table ──────────────────────────────────────────
 
 export interface BillPartDoc {
   part_id: string;
