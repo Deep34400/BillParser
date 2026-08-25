@@ -34,9 +34,12 @@ export function estimateGeminiCostUsd(
   model: string,
   overrides?: Record<string, ModelPrice> | null,
 ): CostBreakdown {
+  // Rates come from Settings UI override for this model, else DEFAULT_MODEL_PRICING
   const p = geminiPricing(model, overrides);
   const input_cost_usd = (usage.prompt_tokens / 1000) * p.input;
-  const output_cost_usd = (usage.completion_tokens / 1000) * p.output;
+  // Google bills thinking tokens at the output price
+  const billedOutput = usage.completion_tokens + (usage.thinking_tokens ?? 0);
+  const output_cost_usd = (billedOutput / 1000) * p.output;
   return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
 }
 
@@ -69,11 +72,19 @@ function vertexUrl(model: string): string {
 
 function parseGeminiResponse(json: any): { text: string; usage: LlmUsage } {
   const text = extractGeminiText(json);
-  const meta = json.usageMetadata;
+  const meta = json.usageMetadata ?? {};
+  const prompt_tokens = meta.promptTokenCount ?? 0;
+  const completion_tokens = meta.candidatesTokenCount ?? 0;
+  const total_tokens = meta.totalTokenCount ?? (prompt_tokens + completion_tokens);
+  // Thinking tokens: explicit field, or gap between total and (input + output)
+  const thinking_tokens =
+    meta.thoughtsTokenCount ??
+    Math.max(0, total_tokens - prompt_tokens - completion_tokens);
   const usage: LlmUsage = {
-    prompt_tokens: meta?.promptTokenCount ?? 0,
-    completion_tokens: meta?.candidatesTokenCount ?? 0,
-    total_tokens: meta?.totalTokenCount ?? 0,
+    prompt_tokens,
+    completion_tokens,
+    thinking_tokens,
+    total_tokens,
   };
   return { text, usage };
 }

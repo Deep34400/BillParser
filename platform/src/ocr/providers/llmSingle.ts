@@ -33,7 +33,8 @@ function detectMime(buf: Buffer): string {
 
 function estimateCost(usage: LlmUsage, pricing: { input: number; output: number }): { cost_usd: number; input_cost_usd: number; output_cost_usd: number } {
   const input_cost_usd = (usage.prompt_tokens / 1000) * pricing.input;
-  const output_cost_usd = (usage.completion_tokens / 1000) * pricing.output;
+  const billedOutput = usage.completion_tokens + (usage.thinking_tokens ?? 0);
+  const output_cost_usd = (billedOutput / 1000) * pricing.output;
   return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
 }
 
@@ -215,6 +216,7 @@ async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<Singl
     const usage: LlmUsage = {
       prompt_tokens: (ocr.cost.usage.prompt_tokens ?? 0) + (structured.cost.usage.prompt_tokens ?? 0),
       completion_tokens: (ocr.cost.usage.completion_tokens ?? 0) + (structured.cost.usage.completion_tokens ?? 0),
+      thinking_tokens: (ocr.cost.usage.thinking_tokens ?? 0) + (structured.cost.usage.thinking_tokens ?? 0),
       total_tokens: (ocr.cost.usage.total_tokens ?? 0) + (structured.cost.usage.total_tokens ?? 0),
     };
     const cost: OcrStepCost = {

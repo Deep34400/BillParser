@@ -107,7 +107,8 @@ const PROVIDERS: Record<string, ModelDef> = {
 
 function estimateCost(usage: LlmUsage, pricing: { input: number; output: number }): { cost_usd: number; input_cost_usd: number; output_cost_usd: number } {
   const input_cost_usd = (usage.prompt_tokens / 1000) * pricing.input;
-  const output_cost_usd = (usage.completion_tokens / 1000) * pricing.output;
+  const billedOutput = usage.completion_tokens + (usage.thinking_tokens ?? 0);
+  const output_cost_usd = (billedOutput / 1000) * pricing.output;
   return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
 }
 

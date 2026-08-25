@@ -55,6 +55,7 @@ export interface Invoice {
   extractionTokens?: number | null; extractionInputTokens?: number | null; extractionOutputTokens?: number | null;
   structuringTokens?: number | null; structuringInputTokens?: number | null; structuringOutputTokens?: number | null;
   totalTokens?: number | null; totalInputTokens?: number | null; totalOutputTokens?: number | null;
+  totalThinkingTokens?: number | null;
   totalInputCostUsd?: number | null; totalOutputCostUsd?: number | null;
   extractionProvider?: string | null; structuringProvider?: string | null;
   extractionModel?: string | null; structuringModel?: string | null;

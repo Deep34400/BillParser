@@ -22,6 +22,7 @@ function toSingleResult(
       total_tokens: r.cost.usage.total_tokens,
       total_input_tokens: r.cost.usage.prompt_tokens,
       total_output_tokens: r.cost.usage.completion_tokens,
+      total_thinking_tokens: r.cost.usage.thinking_tokens ?? 0,
       total_input_cost_usd: r.cost.input_cost_usd,
       total_output_cost_usd: r.cost.output_cost_usd,
     },

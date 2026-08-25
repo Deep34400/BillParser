@@ -61,6 +61,7 @@ function toSingleResult(
       total_tokens: r.cost.usage.total_tokens,
       total_input_tokens: r.cost.usage.prompt_tokens,
       total_output_tokens: r.cost.usage.completion_tokens,
+      total_thinking_tokens: r.cost.usage.thinking_tokens ?? 0,
       total_input_cost_usd: r.cost.input_cost_usd,
       total_output_cost_usd: r.cost.output_cost_usd,
     },
@@ -93,6 +94,7 @@ export async function runSplitMode(
       total_tokens: extractionCost.usage.total_tokens + structResult.cost.usage.total_tokens,
       total_input_tokens: extractionCost.usage.prompt_tokens + structResult.cost.usage.prompt_tokens,
       total_output_tokens: extractionCost.usage.completion_tokens + structResult.cost.usage.completion_tokens,
+      total_thinking_tokens: (extractionCost.usage.thinking_tokens ?? 0) + (structResult.cost.usage.thinking_tokens ?? 0),
       total_input_cost_usd: extractionCost.input_cost_usd + structResult.cost.input_cost_usd,
       total_output_cost_usd: extractionCost.output_cost_usd + structResult.cost.output_cost_usd,
     };

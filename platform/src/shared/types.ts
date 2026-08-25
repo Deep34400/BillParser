@@ -194,6 +194,7 @@ export interface BillDoc {
   total_tokens?: number | null;
   total_input_tokens?: number | null;
   total_output_tokens?: number | null;
+  total_thinking_tokens?: number | null;
   total_input_cost_usd?: number | null;
   total_output_cost_usd?: number | null;
   extraction_provider?: string | null;

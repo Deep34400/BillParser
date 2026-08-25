@@ -41,7 +41,14 @@ export interface CanonicalResult {
 /** Token usage from LLM API responses. */
 export interface LlmUsage {
   prompt_tokens: number;
+  /** Answer / candidate tokens (not including thinking). */
   completion_tokens: number;
+  /**
+   * Gemini "thinking" / reasoning tokens (usageMetadata.thoughtsTokenCount).
+   * Billed at the model's output price (Google: output includes thinking).
+   */
+  thinking_tokens?: number;
+  /** API totalTokenCount (input + output + thinking when present). */
   total_tokens: number;
 }
 
@@ -53,6 +60,7 @@ export interface OcrStepCost {
   /** Estimated cost in USD */
   cost_usd: number;
   input_cost_usd: number;
+  /** Output + thinking tokens × output $/1M */
   output_cost_usd: number;
   latency_ms: number;
 }
@@ -65,6 +73,7 @@ export interface OcrCostInfo {
   total_tokens: number;
   total_input_tokens: number;
   total_output_tokens: number;
+  total_thinking_tokens: number;
   total_input_cost_usd: number;
   total_output_cost_usd: number;
 }

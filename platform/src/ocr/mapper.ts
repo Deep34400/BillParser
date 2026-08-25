@@ -122,6 +122,7 @@ export function mapParsedToBill(
     total_tokens: opts.costInfo?.total_tokens ?? null,
     total_input_tokens: opts.costInfo?.total_input_tokens ?? null,
     total_output_tokens: opts.costInfo?.total_output_tokens ?? null,
+    total_thinking_tokens: opts.costInfo?.total_thinking_tokens ?? null,
     total_input_cost_usd: opts.costInfo?.total_input_cost_usd ?? null,
     total_output_cost_usd: opts.costInfo?.total_output_cost_usd ?? null,
     extraction_provider: opts.costInfo?.extraction?.provider ?? null,
@@ -210,6 +211,7 @@ export interface FrontendInvoice {
   totalTokens?: number | null;
   totalInputTokens?: number | null;
   totalOutputTokens?: number | null;
+  totalThinkingTokens?: number | null;
   totalInputCostUsd?: number | null;
   totalOutputCostUsd?: number | null;
   extractionProvider?: string | null;
@@ -312,6 +314,7 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     totalTokens: bill.total_tokens ?? null,
     totalInputTokens: bill.total_input_tokens ?? null,
     totalOutputTokens: bill.total_output_tokens ?? null,
+    totalThinkingTokens: bill.total_thinking_tokens ?? null,
     totalInputCostUsd: bill.total_input_cost_usd ?? null,
     totalOutputCostUsd: bill.total_output_cost_usd ?? null,
     extractionProvider: bill.extraction_provider ?? null,

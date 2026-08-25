@@ -699,13 +699,23 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
   if (inv.costEstimate == null) return null;
 
   const isSingle = inv.pipelineMode === 'single';
-  const model = inv.extractionModel ?? '—';
+  const model = inv.extractionModel ?? inv.structuringModel ?? '—';
   const latency = ((inv.totalLatencyMs ?? 0) / 1000).toFixed(1);
 
   const hasBreakdown = inv.totalInputTokens != null && inv.totalOutputTokens != null;
   const inputTokens = inv.totalInputTokens ?? 0;
   const outputTokens = inv.totalOutputTokens ?? 0;
-  const totalTokens = inv.totalTokens ?? 0;
+  // Thinking = Gemini reasoning tokens (billed at output $/1M). Derive gap for older bills.
+  const thinkingTokens =
+    inv.totalThinkingTokens != null
+      ? inv.totalThinkingTokens
+      : hasBreakdown
+        ? Math.max(0, (inv.totalTokens ?? 0) - inputTokens - outputTokens)
+        : 0;
+  const billedOutputTokens = outputTokens + thinkingTokens;
+  const displayTotalTokens = hasBreakdown
+    ? inputTokens + billedOutputTokens
+    : (inv.totalTokens ?? 0);
   const inputCost = inv.totalInputCostUsd ?? 0;
   const outputCost = inv.totalOutputCostUsd ?? 0;
   const totalCost = inv.costEstimate ?? 0;
@@ -738,7 +748,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
         {hasBreakdown ? (
           <>
             <div style={rowStyle}>
-              <span>Input tokens</span>
+              <span>Input <span style={dimStyle}>(prompt · input $/1M of {model})</span></span>
               <span>
                 <span style={{ fontFamily: T.mono }}>{inputTokens.toLocaleString()}</span>
                 <span style={dimStyle}> tokens</span>
@@ -747,14 +757,22 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
               </span>
             </div>
             <div style={rowStyle}>
-              <span>Output tokens</span>
               <span>
-                <span style={{ fontFamily: T.mono }}>{outputTokens.toLocaleString()}</span>
+                Output <span style={dimStyle}>(answer{thinkingTokens > 0 ? ' + thinking' : ''} · output $/1M)</span>
+              </span>
+              <span>
+                <span style={{ fontFamily: T.mono }}>{billedOutputTokens.toLocaleString()}</span>
                 <span style={dimStyle}> tokens</span>
                 <span style={{ margin: '0 8px', color: T.border }}>→</span>
                 <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{costFmt(outputCost)}</span>
               </span>
             </div>
+            {thinkingTokens > 0 && (
+              <div style={{ ...rowStyle, paddingTop: 0, color: T.muted, fontSize: 11 }}>
+                <span style={{ paddingLeft: 12 }}>↳ answer {outputTokens.toLocaleString()} + thinking {thinkingTokens.toLocaleString()}</span>
+                <span />
+              </div>
+            )}
             <div style={{
               borderTop: `1px solid ${T.border}`, marginTop: 6, paddingTop: 8,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -763,7 +781,8 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
               <span>
                 <span style={{ fontFamily: T.mono, ...boldStyle }}>{costFmt(totalCost)}</span>
                 <span style={{ ...dimStyle, marginLeft: 8 }}>
-                  {totalTokens.toLocaleString()} tokens
+                  {displayTotalTokens.toLocaleString()} tokens
+                  {' '}(= {inputTokens.toLocaleString()} + {billedOutputTokens.toLocaleString()})
                 </span>
               </span>
             </div>
@@ -776,7 +795,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
             <span>
               <span style={{ fontFamily: T.mono, ...boldStyle }}>{costFmt(totalCost)}</span>
               <span style={{ ...dimStyle, marginLeft: 8 }}>
-                {totalTokens.toLocaleString()} tokens
+                {displayTotalTokens.toLocaleString()} tokens
               </span>
             </span>
           </div>

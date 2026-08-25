@@ -387,32 +387,24 @@ For **old invoices** (no input/output breakdown), falls back gracefully:
 ```json
 {
   "usageMetadata": {
-    "promptTokenCount": 4200,
-    "candidatesTokenCount": 363,
-    "totalTokenCount": 4563
+    "promptTokenCount": 2217,
+    "candidatesTokenCount": 1659,
+    "thoughtsTokenCount": 5111,
+    "totalTokenCount": 8987
   }
 }
 ```
 
-**Calculation:**
-```
-input_cost  = 4200 / 1,000,000 × $0.30  = $0.00126
-output_cost = 363  / 1,000,000 × $2.50  = $0.0009075
-total_cost  = $0.00126 + $0.0009075      = $0.0021675
+`totalTokenCount` ≠ input + output alone — Gemini **thinking** tokens are extra and billed at **output** price.
 
-Display (INR): $0.0021675 × 83 = ₹0.18
+**Calculation (gemini-2.5-flash: $0.30 / $2.50 per 1M):**
+```
+input_cost  = 2217 / 1,000,000 × $0.30           = $0.000665
+output_cost = (1659 + 5111) / 1,000,000 × $2.50  = $0.016925
+total_cost  = $0.01759  →  ≈ ₹1.46 (×83)
 ```
 
-**Stored in Firestore:**
-```
-total_cost_usd: 0.0022
-total_input_tokens: 4200
-total_output_tokens: 363
-total_input_cost_usd: 0.0013
-total_output_cost_usd: 0.0009
-extraction_model: "gemini-2.5-flash"
-pipeline_mode: "single"
-```
+Pricing always uses the **selected model** from Settings (`singleModel` / `structuringModel`) via `resolveModelPricing(model, settings.modelPricing)`.
 
 ---
 
