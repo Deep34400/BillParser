@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api/client.js';
 import { T } from '../theme.js';
+import carrumLogo from '../assets/carrum-logo.svg';
 
 interface Props {
   onLogin: () => void;
@@ -39,15 +40,13 @@ export function LoginPage({ onLogin }: Props) {
         boxShadow: '0 8px 32px rgba(0,0,0,0.08)', border: `1px solid ${T.border}`,
       }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: 14, background: T.accentSoft,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 16px', fontSize: 24, color: T.accent, fontWeight: 700,
-          }}>
-            P
-          </div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.text, margin: 0 }}>
-            Carrum Invoice OCR
+          <img
+            src={carrumLogo}
+            alt="Carrum"
+            style={{ width: 190, maxWidth: '100%', height: 'auto', margin: '0 auto 18px', display: 'block' }}
+          />
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: T.text, margin: 0 }}>
+            Invoice OCR
           </h1>
           <p style={{ fontSize: 13, color: T.muted, marginTop: 6 }}>
             Sign in to your account

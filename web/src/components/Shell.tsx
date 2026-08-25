@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { api, type SessionUser } from '../api/client.js';
 import { T } from '../theme.js';
+import carrumLogo from '../assets/carrum-logo.svg';
 import { costFmt } from '../lib/format.js';
 import { hasUnlimitedBalance, formatBalance, balanceNumber } from '../lib/balance.js';
 
@@ -26,23 +27,6 @@ interface Props {
   onUserUpdate: (u: SessionUser) => void;
 }
 
-function LogoMark() {
-  return (
-    <div style={{
-      width: 28, height: 28, border: `1.5px solid ${T.ink}`, borderRadius: 4,
-      position: 'relative', flexShrink: 0,
-    }}>
-      <span style={{
-        position: 'absolute', top: -1, left: -1, width: 8, height: 8,
-        borderTop: `2px solid ${T.accent}`, borderLeft: `2px solid ${T.accent}`,
-      }} />
-      <span style={{
-        position: 'absolute', bottom: -1, right: -1, width: 8, height: 8,
-        borderBottom: `2px solid ${T.accent}`, borderRight: `2px solid ${T.accent}`,
-      }} />
-    </div>
-  );
-}
 
 function NavItem({ to, label, active }: { to: string; label: string; active: boolean }) {
   return (
@@ -100,14 +84,13 @@ export function Shell({ children, user, onLogout, onUserUpdate }: Props) {
         padding: '20px 14px', position: 'sticky', top: 0, height: '100vh',
         overflow: 'auto', flexShrink: 0, display: 'flex', flexDirection: 'column',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28, padding: '0 4px' }}>
-          <LogoMark />
-          <div>
-            <div style={{ fontFamily: T.heading, fontWeight: 600, fontSize: 15, color: T.ink, lineHeight: 1.2 }}>
-              Invoice OCR
-            </div>
-            <div style={{ fontSize: 11, color: T.inkFaint, marginTop: 2 }}>Finance · self-hosted</div>
-          </div>
+        <div style={{ marginBottom: 28, padding: '0 4px' }}>
+          <img
+            src={carrumLogo}
+            alt="Carrum"
+            style={{ width: 150, maxWidth: '100%', height: 'auto', display: 'block' }}
+          />
+          <div style={{ fontSize: 11, color: T.inkFaint, marginTop: 6 }}>Invoice OCR · Finance</div>
         </div>
 
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>

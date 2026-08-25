@@ -31,21 +31,14 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPrice> = {
   'gemini-3.6-flash':        { inputPer1M: 0.75,  outputPer1M: 3.75 },
   'gemini-3.5-flash':        { inputPer1M: 1.50,  outputPer1M: 9.00 },
   'gemini-3.5-flash-lite':   { inputPer1M: 0.30,  outputPer1M: 2.50 },
-  // Not on Google's public pricing page as of Aug 2026 — rates unverified.
-  'gemini-3.1-flash-lite':   { inputPer1M: 0.25,  outputPer1M: 1.50 },
   'gemini-3.1-pro-preview':  { inputPer1M: 2.00,  outputPer1M: 12.00,
     longContext: { thresholdTokens: 200_000, inputPer1M: 4.00, outputPer1M: 18.00 } },
-  // Not on Google's public pricing page as of Aug 2026 — rates unverified.
-  'gemini-3-flash-preview':  { inputPer1M: 0.50,  outputPer1M: 3.00 },
 
   // ─── Gemini 2.5 ──────────────────────────────────────────────
   'gemini-2.5-pro':          { inputPer1M: 1.25,  outputPer1M: 10.00,
     longContext: { thresholdTokens: 200_000, inputPer1M: 2.50, outputPer1M: 15.00 } },
   'gemini-2.5-flash':        { inputPer1M: 0.30,  outputPer1M: 2.50 },
   'gemini-2.5-flash-lite':   { inputPer1M: 0.10,  outputPer1M: 0.40 },
-
-  // ─── Gemini aliases ──────────────────────────────────────────
-  'gemini-flash-latest':     { inputPer1M: 1.50,  outputPer1M: 9.00 },
 
   // ─── Claude ──────────────────────────────────────────────────
   'claude-sonnet-4-20250514':    { inputPer1M: 3.00,  outputPer1M: 15.00 },
@@ -65,15 +58,10 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPrice> = {
   'mistral-ocr-latest':     { inputPer1M: 2.00, outputPer1M: 0.00 },
 };
 
-/**
- * Resolve pricing for a model — user overrides take priority over defaults.
- * Returns per-1K-token prices (for cost calc: tokens/1000 × rate).
- *
- * Alias: gemini-flash-latest → gemini-3.5-flash rates.
- */
-const MODEL_ALIASES: Record<string, string> = {
-  'gemini-flash-latest': 'gemini-3.5-flash',
-};
+// Deliberately empty. A floating alias like "gemini-flash-latest" cannot be
+// priced honestly — Google can repoint it at a model with different rates and the
+// cost figures would be silently wrong. Pin an explicit model instead.
+const MODEL_ALIASES: Record<string, string> = {};
 
 /**
  * Resolve per-1K-token prices for a model.
