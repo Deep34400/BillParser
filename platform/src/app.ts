@@ -10,6 +10,7 @@ import { fraudRoutes } from './fraud/route.js';
 import { vendorRoutes } from './vendor/route.js';
 import { configRoutes } from './routes/config.js';
 import { settingsRoutes } from './routes/settings.js';
+import { odometerRoutes } from './odometerOcr/route.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 
@@ -29,6 +30,7 @@ export async function buildApp() {
   await app.register(vendorRoutes);
   await app.register(configRoutes);
   await app.register(settingsRoutes);
+  await app.register(odometerRoutes);
 
   app.get('/api/health', async () => ({
     success: true,

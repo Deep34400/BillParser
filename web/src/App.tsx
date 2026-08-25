@@ -6,6 +6,7 @@ import { InvoicesPage } from './pages/InvoicesPage.js';
 import { InvoiceDetailPage } from './pages/InvoiceDetailPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { FraudPage } from './pages/FraudPage.js';
+import { OdometerPage } from './pages/OdometerPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AccountPage } from './pages/AccountPage.js';
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/fraud" element={<FraudPage />} />
+          <Route path="/odometer" element={<OdometerPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/account" element={<AccountPage />} />
           {user.role === 'admin' && <Route path="/admin" element={<AdminPage />} />}
