@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../api/client.js';
 import { T } from '../theme.js';
 import { Toast } from '../components/Toast.js';
+import type { ModelPrice } from '../types/index.js';
 
 const card: React.CSSProperties = {
   background: T.panel, border: `1px solid ${T.border}`,
@@ -81,6 +82,10 @@ export function SettingsPage() {
   const [toast, setToast] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [modelPricing, setModelPricing] = useState<Record<string, ModelPrice>>({});
+  const [defaultPricing, setDefaultPricing] = useState<Record<string, ModelPrice>>({});
+  const [pricingFilter, setPricingFilter] = useState<string>('all');
+  const [savingPricing, setSavingPricing] = useState(false);
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
@@ -99,6 +104,8 @@ export function SettingsPage() {
       setSingleProv(snp); setSingleModel(snm);
       setSavedStructProv(sp); setSavedStructModel(sm);
       setSavedSingleProv(snp); setSavedSingleModel(snm);
+      if (s.modelPricing) setModelPricing(s.modelPricing);
+      if (s.defaultModelPricing) setDefaultPricing(s.defaultModelPricing);
       try {
         const { credentials } = await api.revealCreds();
         const cv: Record<string, string> = {};
@@ -154,6 +161,57 @@ export function SettingsPage() {
   const currentStructDef = ALL_PROVIDERS.find((p) => p.id === structProv) ?? ALL_PROVIDERS[0];
   const currentSingleDef = ALL_PROVIDERS.find((p) => p.id === singleProv) ?? ALL_PROVIDERS[1];
   const dirty = mode !== savedMode || structProv !== savedStructProv || structModel !== savedStructModel || singleProv !== savedSingleProv || singleModel !== savedSingleModel;
+
+  const handlePricingChange = (model: string, field: 'inputPer1M' | 'outputPer1M', val: string) => {
+    const n = parseFloat(val);
+    if (Number.isNaN(n) && val !== '') return;
+    setModelPricing((prev) => ({
+      ...prev,
+      [model]: { ...prev[model], [field]: val === '' ? 0 : n },
+    }));
+  };
+
+  const handleSavePricing = async () => {
+    setSavingPricing(true);
+    try {
+      const overrides: Record<string, ModelPrice> = {};
+      for (const [model, price] of Object.entries(modelPricing)) {
+        const def = defaultPricing[model];
+        if (!def || price.inputPer1M !== def.inputPer1M || price.outputPer1M !== def.outputPer1M) {
+          overrides[model] = price;
+        }
+      }
+      await api.saveSettings({ modelPricing: overrides });
+      flash('Model pricing saved');
+    } catch (e) { flash(`Error: ${(e as Error).message}`); }
+    finally { setSavingPricing(false); }
+  };
+
+  const handleResetPricing = (model: string) => {
+    const def = defaultPricing[model];
+    if (def) {
+      setModelPricing((prev) => ({ ...prev, [model]: { ...def } }));
+    }
+  };
+
+  const providerGroups = useMemo(() => {
+    const groups: { label: string; id: string; models: string[] }[] = [
+      { label: 'All Models', id: 'all', models: Object.keys(modelPricing) },
+      ...ALL_PROVIDERS.map((p) => ({
+        label: p.label,
+        id: p.id,
+        models: p.models.concat(p.id === 'mistral' ? ['mistral-ocr-latest'] : []),
+      })),
+    ];
+    return groups;
+  }, [modelPricing]);
+
+  const filteredModels = useMemo(() => {
+    if (pricingFilter === 'all') return Object.keys(modelPricing).sort();
+    const group = providerGroups.find((g) => g.id === pricingFilter);
+    if (!group) return Object.keys(modelPricing).sort();
+    return group.models.filter((m) => m in modelPricing).sort();
+  }, [pricingFilter, modelPricing, providerGroups]);
 
   if (!loaded) return <div style={{ padding: 24, fontFamily: T.font, color: T.muted }}>Loading...</div>;
 
@@ -273,6 +331,109 @@ export function SettingsPage() {
         <button style={btnP} disabled={saving} onClick={() => void handleSave()}>
           {saving ? 'Saving...' : `Save as ${mode.toUpperCase()} mode`}
         </button>
+      </div>
+
+      {/* ─── Model Pricing ─── */}
+      <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Model Pricing ($/1M tokens)
+      </h2>
+      <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px', lineHeight: 1.5 }}>
+        Per-model token pricing used for cost calculation. Defaults from Google/Anthropic/OpenAI/Mistral official pricing.
+        Edit any value to override — your changes are saved and used for future cost estimates.
+      </p>
+
+      <div style={card}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={lbl}>Filter by provider</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {providerGroups.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                style={{
+                  padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 12,
+                  border: `1px solid ${pricingFilter === g.id ? T.accent : T.border}`,
+                  background: pricingFilter === g.id ? T.accent : 'transparent',
+                  color: pricingFilter === g.id ? '#fff' : T.text,
+                  cursor: 'pointer', fontFamily: T.font,
+                }}
+                onClick={() => setPricingFilter(g.id)}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: T.font }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${T.border}` }}>
+                <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 700, color: T.muted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Model</th>
+                <th style={{ textAlign: 'right', padding: '8px 6px', fontWeight: 700, color: T.muted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', width: 130 }}>Input $/1M</th>
+                <th style={{ textAlign: 'right', padding: '8px 6px', fontWeight: 700, color: T.muted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', width: 130 }}>Output $/1M</th>
+                <th style={{ textAlign: 'center', padding: '8px 6px', width: 60 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredModels.map((model) => {
+                const price = modelPricing[model];
+                const def = defaultPricing[model];
+                const isModified = def && (price?.inputPer1M !== def.inputPer1M || price?.outputPer1M !== def.outputPer1M);
+                if (!price) return null;
+                return (
+                  <tr key={model} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    <td style={{ padding: '6px 6px', fontWeight: 600, color: T.text, fontSize: 12 }}>
+                      {model}
+                      {isModified && <span style={{ marginLeft: 6, fontSize: 9, color: '#e67e22', fontWeight: 700 }}>CUSTOM</span>}
+                    </td>
+                    <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        style={{ ...inp, width: 100, textAlign: 'right', padding: '4px 6px', fontSize: 12 }}
+                        value={price.inputPer1M}
+                        onChange={(e) => handlePricingChange(model, 'inputPer1M', e.target.value)}
+                      />
+                    </td>
+                    <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        style={{ ...inp, width: 100, textAlign: 'right', padding: '4px 6px', fontSize: 12 }}
+                        value={price.outputPer1M}
+                        onChange={(e) => handlePricingChange(model, 'outputPer1M', e.target.value)}
+                      />
+                    </td>
+                    <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+                      {isModified && (
+                        <button
+                          type="button"
+                          style={{ ...btnS, padding: '2px 8px', fontSize: 10 }}
+                          onClick={() => handleResetPricing(model)}
+                          title="Reset to default"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button style={btnP} disabled={savingPricing} onClick={() => void handleSavePricing()}>
+            {savingPricing ? 'Saving...' : 'Save Pricing'}
+          </button>
+          <span style={{ fontSize: 11, color: T.muted }}>
+            Prices are in USD per 1 million tokens. Changes apply to future cost calculations.
+          </span>
+        </div>
       </div>
 
       {/* ─── API Keys ─── */}

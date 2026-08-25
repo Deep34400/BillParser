@@ -29,8 +29,10 @@ function detectMime(buf: Buffer): string {
   return 'image/jpeg';
 }
 
-function estimateCost(usage: LlmUsage, pricing: { input: number; output: number }): number {
-  return (usage.prompt_tokens / 1000) * pricing.input + (usage.completion_tokens / 1000) * pricing.output;
+function estimateCost(usage: LlmUsage, pricing: { input: number; output: number }): { cost_usd: number; input_cost_usd: number; output_cost_usd: number } {
+  const input_cost_usd = (usage.prompt_tokens / 1000) * pricing.input;
+  const output_cost_usd = (usage.completion_tokens / 1000) * pricing.output;
+  return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
 }
 
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
@@ -107,11 +109,12 @@ async function claudeSingle(buf: Buffer, modelOverride?: string): Promise<Single
     completion_tokens: json.usage?.output_tokens ?? 0,
     total_tokens: (json.usage?.input_tokens ?? 0) + (json.usage?.output_tokens ?? 0),
   };
+  const breakdown = estimateCost(usage, { input: 0.003, output: 0.015 });
   const cost: OcrStepCost = {
     provider: 'claude',
     model,
     usage,
-    cost_usd: estimateCost(usage, { input: 0.003, output: 0.015 }),
+    ...breakdown,
     latency_ms,
   };
 
@@ -169,11 +172,12 @@ async function openaiSingle(buf: Buffer, modelOverride?: string): Promise<Single
     completion_tokens: json.usage?.completion_tokens ?? 0,
     total_tokens: json.usage?.total_tokens ?? 0,
   };
+  const breakdown = estimateCost(usage, { input: 0.0025, output: 0.01 });
   const cost: OcrStepCost = {
     provider: 'openai',
     model,
     usage,
-    cost_usd: estimateCost(usage, { input: 0.0025, output: 0.01 }),
+    ...breakdown,
     latency_ms,
   };
 
@@ -210,6 +214,8 @@ async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<Singl
       model: `mistral-ocr+${structModel}`,
       usage,
       cost_usd: ocr.cost.cost_usd + structured.cost.cost_usd,
+      input_cost_usd: (ocr.cost.input_cost_usd ?? 0) + (structured.cost.input_cost_usd ?? 0),
+      output_cost_usd: (ocr.cost.output_cost_usd ?? 0) + (structured.cost.output_cost_usd ?? 0),
       latency_ms,
     };
     return { parsed: structured.parsed, rawOcr: ocr.markdown, cost };
@@ -259,11 +265,12 @@ async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<Singl
     completion_tokens: json.usage?.completion_tokens ?? 0,
     total_tokens: json.usage?.total_tokens ?? 0,
   };
+  const mistralBreakdown = estimateCost(usage, { input: 0.001, output: 0.003 });
   const cost: OcrStepCost = {
     provider: 'mistral',
     model: visionModel,
     usage,
-    cost_usd: estimateCost(usage, { input: 0.001, output: 0.003 }),
+    ...mistralBreakdown,
     latency_ms,
   };
 

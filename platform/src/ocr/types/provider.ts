@@ -52,6 +52,8 @@ export interface OcrStepCost {
   usage: LlmUsage;
   /** Estimated cost in USD */
   cost_usd: number;
+  input_cost_usd: number;
+  output_cost_usd: number;
   latency_ms: number;
 }
 
@@ -61,4 +63,8 @@ export interface OcrCostInfo {
   structuring?: OcrStepCost | null;
   total_cost_usd: number;
   total_tokens: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_input_cost_usd: number;
+  total_output_cost_usd: number;
 }

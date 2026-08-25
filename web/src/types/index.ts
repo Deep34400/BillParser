@@ -52,7 +52,10 @@ export interface Invoice {
   /** 'split' | 'single' — how OCR was run */
   pipelineMode?: 'split' | 'single' | null;
   extractionCost?: number | null; structuringCost?: number | null;
-  extractionTokens?: number | null; structuringTokens?: number | null; totalTokens?: number | null;
+  extractionTokens?: number | null; extractionInputTokens?: number | null; extractionOutputTokens?: number | null;
+  structuringTokens?: number | null; structuringInputTokens?: number | null; structuringOutputTokens?: number | null;
+  totalTokens?: number | null; totalInputTokens?: number | null; totalOutputTokens?: number | null;
+  totalInputCostUsd?: number | null; totalOutputCostUsd?: number | null;
   extractionProvider?: string | null; structuringProvider?: string | null;
   extractionModel?: string | null; structuringModel?: string | null;
   extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;
@@ -83,6 +86,7 @@ export interface AppConfig {
     passwordHint?: string | null;
   };
 }
+export interface ModelPrice { inputPer1M: number; outputPer1M: number; }
 export interface SettingsData {
   pipelineMode: 'split' | 'single';
   extractionProvider: string;
@@ -92,6 +96,8 @@ export interface SettingsData {
   singleProvider?: string;
   singleModel?: string;
   providers: ProviderInfo[];
+  modelPricing?: Record<string, ModelPrice>;
+  defaultModelPricing?: Record<string, ModelPrice>;
 }
 export interface VehicleSpend { vehicle_id: string; registration_number: string | null; total_bills: number; total_amount: number; parts_amount: number; labour_amount: number; total_tax: number; }
 export interface CostPerKm { vehicle_id: string; registration_number: string | null; total_spend: number; km_range: number | null; cost_per_km: number | null; }

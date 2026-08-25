@@ -186,8 +186,16 @@ export interface BillDoc {
   structuring_cost_usd?: number | null;
   total_cost_usd?: number | null;
   extraction_tokens?: number | null;
+  extraction_input_tokens?: number | null;
+  extraction_output_tokens?: number | null;
   structuring_tokens?: number | null;
+  structuring_input_tokens?: number | null;
+  structuring_output_tokens?: number | null;
   total_tokens?: number | null;
+  total_input_tokens?: number | null;
+  total_output_tokens?: number | null;
+  total_input_cost_usd?: number | null;
+  total_output_cost_usd?: number | null;
   extraction_provider?: string | null;
   structuring_provider?: string | null;
   extraction_model?: string | null;

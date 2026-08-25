@@ -108,8 +108,10 @@ const PROVIDERS: Record<string, ModelDef> = {
   },
 };
 
-function estimateCost(usage: LlmUsage, pricing: { input: number; output: number }): number {
-  return (usage.prompt_tokens / 1000) * pricing.input + (usage.completion_tokens / 1000) * pricing.output;
+function estimateCost(usage: LlmUsage, pricing: { input: number; output: number }): { cost_usd: number; input_cost_usd: number; output_cost_usd: number } {
+  const input_cost_usd = (usage.prompt_tokens / 1000) * pricing.input;
+  const output_cost_usd = (usage.completion_tokens / 1000) * pricing.output;
+  return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
 }
 
 export interface NormalizeResult {
@@ -158,11 +160,12 @@ export async function llmNormalize(rawOcr: string, providerName: string, modelOv
   if (!text) throw new Error(`${providerName} returned empty response`);
 
   const usage = def.extractUsage(json);
+  const breakdown = estimateCost(usage, def.pricing);
   const cost: OcrStepCost = {
     provider: providerName,
     model,
     usage,
-    cost_usd: estimateCost(usage, def.pricing),
+    ...breakdown,
     latency_ms,
   };
 

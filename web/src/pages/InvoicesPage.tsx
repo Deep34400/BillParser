@@ -938,9 +938,9 @@ export function InvoicesPage() {
                     </td>
                     <td style={{ ...tdBase, textAlign: 'right', fontFamily: T.mono, color: T.inkSoft }}
                       title={
-                        row.pipelineMode === 'single'
-                          ? `Single call ${costFmt(row.costEstimate)}`
-                          : `Extraction ${costFmt(row.extractionCost)} + Structuring ${costFmt(row.structuringCost)}`
+                        row.totalInputTokens != null
+                          ? `Input: ${row.totalInputTokens.toLocaleString()} tkn = ${costFmt(row.totalInputCostUsd ?? 0)}  +  Output: ${row.totalOutputTokens?.toLocaleString() ?? 0} tkn = ${costFmt(row.totalOutputCostUsd ?? 0)}  =  Total: ${costFmt(row.costEstimate)}`
+                          : `${(row.totalTokens ?? 0).toLocaleString()} tokens · ${costFmt(row.costEstimate)}`
                       }
                     >
                       {costFmt(row.costEstimate)}

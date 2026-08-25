@@ -4,6 +4,7 @@
 import { env } from '../config/env.js';
 import { db, col } from '../config/firebase.js';
 import { devStore } from './devStore.js';
+import type { ModelPrice } from './modelPricing.js';
 
 const SETTINGS_DOC = 'app_settings';
 const CREDS_COLLECTION = 'provider_credentials';
@@ -26,6 +27,8 @@ export interface AppSettings {
   emailIntakePollIntervalSec?: number;
   /** Allowed sender emails/domains for email intake (legacy; prefer user intake_email) */
   emailIntakeAllowedSenders?: string[];
+  /** Per-model pricing overrides ($/1M tokens). When set, overrides default pricing. */
+  modelPricing?: Record<string, ModelPrice> | null;
 }
 
 const DEFAULTS: AppSettings = {

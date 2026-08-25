@@ -638,6 +638,9 @@ export function InvoiceDetailPage() {
             {/* Canonical field grid */}
             <FieldGrid inv={inv} currency={currency} />
 
+            {/* Unified cost breakdown */}
+            <CostBreakdown inv={inv} />
+
             {/* Parts / labour breakdown */}
             <InvoiceBreakdown inv={inv} currency={currency} />
 
@@ -690,6 +693,100 @@ export function InvoiceDetailPage() {
 }
 
 // ---------------------------------------------------------------------------
+// CostBreakdown sub-component — unified cost display
+// ---------------------------------------------------------------------------
+function CostBreakdown({ inv }: { inv: Invoice }) {
+  if (inv.costEstimate == null) return null;
+
+  const isSingle = inv.pipelineMode === 'single';
+  const model = inv.extractionModel ?? '—';
+  const latency = ((inv.totalLatencyMs ?? 0) / 1000).toFixed(1);
+
+  const hasBreakdown = inv.totalInputTokens != null && inv.totalOutputTokens != null;
+  const inputTokens = inv.totalInputTokens ?? 0;
+  const outputTokens = inv.totalOutputTokens ?? 0;
+  const totalTokens = inv.totalTokens ?? 0;
+  const inputCost = inv.totalInputCostUsd ?? 0;
+  const outputCost = inv.totalOutputCostUsd ?? 0;
+  const totalCost = inv.costEstimate ?? 0;
+
+  const rowStyle: React.CSSProperties = {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '6px 0', fontSize: 12, color: T.text,
+  };
+  const dimStyle: React.CSSProperties = { color: T.muted, fontSize: 11 };
+  const boldStyle: React.CSSProperties = { fontWeight: 700, fontSize: 13 };
+
+  return (
+    <div style={{
+      background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10,
+      overflow: 'hidden', marginBottom: 20,
+    }}>
+      <div style={{
+        padding: '10px 16px', borderBottom: `1px solid ${T.border}`,
+        fontSize: 11, fontWeight: 700, color: T.muted,
+        letterSpacing: '0.06em', textTransform: 'uppercase', background: T.rail,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span>Cost Breakdown</span>
+        <span style={{ fontSize: 10, fontWeight: 600, color: T.text, textTransform: 'none', letterSpacing: 0 }}>
+          {isSingle ? 'Single' : 'Split'} · {model} · {latency}s
+        </span>
+      </div>
+
+      <div style={{ padding: '12px 16px' }}>
+        {hasBreakdown ? (
+          <>
+            <div style={rowStyle}>
+              <span>Input tokens</span>
+              <span>
+                <span style={{ fontFamily: T.mono }}>{inputTokens.toLocaleString()}</span>
+                <span style={dimStyle}> tokens</span>
+                <span style={{ margin: '0 8px', color: T.border }}>→</span>
+                <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{costFmt(inputCost)}</span>
+              </span>
+            </div>
+            <div style={rowStyle}>
+              <span>Output tokens</span>
+              <span>
+                <span style={{ fontFamily: T.mono }}>{outputTokens.toLocaleString()}</span>
+                <span style={dimStyle}> tokens</span>
+                <span style={{ margin: '0 8px', color: T.border }}>→</span>
+                <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{costFmt(outputCost)}</span>
+              </span>
+            </div>
+            <div style={{
+              borderTop: `1px solid ${T.border}`, marginTop: 6, paddingTop: 8,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span style={boldStyle}>Total cost</span>
+              <span>
+                <span style={{ fontFamily: T.mono, ...boldStyle }}>{costFmt(totalCost)}</span>
+                <span style={{ ...dimStyle, marginLeft: 8 }}>
+                  {totalTokens.toLocaleString()} tokens
+                </span>
+              </span>
+            </div>
+          </>
+        ) : (
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span style={boldStyle}>Total cost</span>
+            <span>
+              <span style={{ fontFamily: T.mono, ...boldStyle }}>{costFmt(totalCost)}</span>
+              <span style={{ ...dimStyle, marginLeft: 8 }}>
+                {totalTokens.toLocaleString()} tokens
+              </span>
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // FieldGrid sub-component
 // ---------------------------------------------------------------------------
 function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
@@ -711,35 +808,20 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
     ...(inv.fallbackReason
       ? [{ label: 'Fallback', value: inv.fallbackReason }]
       : []),
-    ...(isSingle
-      ? [
-          {
-            label: 'Single-call cost',
-            value: inv.costEstimate != null
-              ? `${costFmt(inv.costEstimate)} · ${(inv.totalTokens ?? inv.extractionTokens ?? 0).toLocaleString()} tokens · ${inv.extractionModel ?? '—'}`
-              : '—',
-          },
-        ]
-      : [
-          {
-            label: 'Extraction cost',
-            value: inv.extractionCost != null
-              ? `${costFmt(inv.extractionCost)} · ${(inv.extractionTokens ?? 0).toLocaleString()} tokens · ${inv.extractionModel ?? '—'}`
-              : '—',
-          },
-          {
-            label: 'Structuring cost',
-            value: inv.structuringCost != null
-              ? `${costFmt(inv.structuringCost)} · ${(inv.structuringTokens ?? 0).toLocaleString()} tokens · ${inv.structuringModel ?? '—'}`
-              : '—',
-          },
-        ]),
-    {
-      label: 'Total cost',
-      value: inv.costEstimate != null
-        ? `${costFmt(inv.costEstimate)} · ${(inv.totalTokens ?? 0).toLocaleString()} tokens · ${((inv.totalLatencyMs ?? 0) / 1000).toFixed(1)}s`
-        : '—',
-    },
+    ...(isSingle ? [] : [
+      {
+        label: 'Extraction cost',
+        value: inv.extractionCost != null
+          ? `${costFmt(inv.extractionCost)} · ${(inv.extractionTokens ?? 0).toLocaleString()} tokens · ${inv.extractionModel ?? '—'}`
+          : '—',
+      },
+      {
+        label: 'Structuring cost',
+        value: inv.structuringCost != null
+          ? `${costFmt(inv.structuringCost)} · ${(inv.structuringTokens ?? 0).toLocaleString()} tokens · ${inv.structuringModel ?? '—'}`
+          : '—',
+      },
+    ]),
     { label: 'Confidence', value: confLabel(inv.confidence) },
   ];
 

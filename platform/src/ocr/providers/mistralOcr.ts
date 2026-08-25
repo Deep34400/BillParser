@@ -104,11 +104,14 @@ export async function mistralOcr(buf: Buffer, returnCost?: boolean): Promise<str
 
   const pagesProcessed = json.usage_info?.pages_processed ?? (pages.length || 1);
   const usage = usageFromPages(pagesProcessed);
+  const pageCost = estimateCostUsd(pagesProcessed);
   const cost: OcrStepCost = {
     provider: 'mistral',
     model: OCR_MODEL,
     usage,
-    cost_usd: estimateCostUsd(pagesProcessed),
+    cost_usd: pageCost,
+    input_cost_usd: pageCost,
+    output_cost_usd: 0,
     latency_ms,
   };
 

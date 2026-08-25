@@ -114,8 +114,16 @@ export function mapParsedToBill(
     structuring_cost_usd: opts.costInfo?.structuring?.cost_usd ?? null,
     total_cost_usd: opts.costInfo?.total_cost_usd ?? null,
     extraction_tokens: opts.costInfo?.extraction?.usage.total_tokens ?? null,
+    extraction_input_tokens: opts.costInfo?.extraction?.usage.prompt_tokens ?? null,
+    extraction_output_tokens: opts.costInfo?.extraction?.usage.completion_tokens ?? null,
     structuring_tokens: opts.costInfo?.structuring?.usage.total_tokens ?? null,
+    structuring_input_tokens: opts.costInfo?.structuring?.usage.prompt_tokens ?? null,
+    structuring_output_tokens: opts.costInfo?.structuring?.usage.completion_tokens ?? null,
     total_tokens: opts.costInfo?.total_tokens ?? null,
+    total_input_tokens: opts.costInfo?.total_input_tokens ?? null,
+    total_output_tokens: opts.costInfo?.total_output_tokens ?? null,
+    total_input_cost_usd: opts.costInfo?.total_input_cost_usd ?? null,
+    total_output_cost_usd: opts.costInfo?.total_output_cost_usd ?? null,
     extraction_provider: opts.costInfo?.extraction?.provider ?? null,
     structuring_provider: opts.costInfo?.structuring?.provider ?? null,
     extraction_model: opts.costInfo?.extraction?.model ?? null,
@@ -194,8 +202,16 @@ export interface FrontendInvoice {
   extractionCost?: number | null;
   structuringCost?: number | null;
   extractionTokens?: number | null;
+  extractionInputTokens?: number | null;
+  extractionOutputTokens?: number | null;
   structuringTokens?: number | null;
+  structuringInputTokens?: number | null;
+  structuringOutputTokens?: number | null;
   totalTokens?: number | null;
+  totalInputTokens?: number | null;
+  totalOutputTokens?: number | null;
+  totalInputCostUsd?: number | null;
+  totalOutputCostUsd?: number | null;
   extractionProvider?: string | null;
   structuringProvider?: string | null;
   extractionModel?: string | null;
@@ -288,8 +304,16 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     extractionCost: bill.extraction_cost_usd ?? null,
     structuringCost: bill.structuring_cost_usd ?? null,
     extractionTokens: bill.extraction_tokens ?? null,
+    extractionInputTokens: bill.extraction_input_tokens ?? null,
+    extractionOutputTokens: bill.extraction_output_tokens ?? null,
     structuringTokens: bill.structuring_tokens ?? null,
+    structuringInputTokens: bill.structuring_input_tokens ?? null,
+    structuringOutputTokens: bill.structuring_output_tokens ?? null,
     totalTokens: bill.total_tokens ?? null,
+    totalInputTokens: bill.total_input_tokens ?? null,
+    totalOutputTokens: bill.total_output_tokens ?? null,
+    totalInputCostUsd: bill.total_input_cost_usd ?? null,
+    totalOutputCostUsd: bill.total_output_cost_usd ?? null,
     extractionProvider: bill.extraction_provider ?? null,
     structuringProvider: bill.structuring_provider ?? null,
     extractionModel: bill.extraction_model ?? null,

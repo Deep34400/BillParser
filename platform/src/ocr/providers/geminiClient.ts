@@ -8,18 +8,21 @@ import { env } from '../../config/env.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 
 /**
- * Per-model $/1K token pricing (converted from ai.google.dev/gemini-api/docs/pricing,
- * checked 2026-07). Only the ≤200k-token input/output tier is used — Pro models charge
- * more above 200k context, which isn't tracked separately here.
+ * Per-model $/1K token pricing (from DEFAULT_MODEL_PRICING in modelPricing.ts,
+ * source: ai.google.dev/gemini-api/docs/pricing, checked Aug 2026).
+ * Values = $/1M ÷ 1000. Pro models charge more above 200k context — not tracked here.
  */
 const GEMINI_MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gemini-3.5-flash':       { input: 0.0015,  output: 0.009  },
-  'gemini-3.1-flash-lite':  { input: 0.00025, output: 0.0015 },
-  'gemini-3.1-pro-preview': { input: 0.002,   output: 0.012  },
-  'gemini-3-flash-preview': { input: 0.0005,  output: 0.003  },
-  'gemini-2.5-pro':         { input: 0.00125, output: 0.01   },
-  'gemini-2.5-flash':       { input: 0.0003,  output: 0.0025 },
-  'gemini-2.5-flash-lite':  { input: 0.0001,  output: 0.0004 },
+  'gemini-3.7-flash':       { input: 0.00075, output: 0.00375 },
+  'gemini-3.6-flash':       { input: 0.00075, output: 0.00375 },
+  'gemini-3.5-flash':       { input: 0.0015,  output: 0.009   },
+  'gemini-3.5-flash-lite':  { input: 0.0003,  output: 0.0025  },
+  'gemini-3.1-flash-lite':  { input: 0.00025, output: 0.0015  },
+  'gemini-3.1-pro-preview': { input: 0.002,   output: 0.012   },
+  'gemini-3-flash-preview': { input: 0.0005,  output: 0.003   },
+  'gemini-2.5-pro':         { input: 0.00125, output: 0.01    },
+  'gemini-2.5-flash':       { input: 0.0003,  output: 0.0025  },
+  'gemini-2.5-flash-lite':  { input: 0.0001,  output: 0.0004  },
 };
 
 /**
@@ -44,12 +47,17 @@ export function geminiPricing(model: string): { input: number; output: number } 
   return resolved ?? GEMINI_MODEL_PRICING['gemini-2.5-pro'];
 }
 
-export function estimateGeminiCostUsd(usage: LlmUsage, model: string): number {
+export interface CostBreakdown {
+  cost_usd: number;
+  input_cost_usd: number;
+  output_cost_usd: number;
+}
+
+export function estimateGeminiCostUsd(usage: LlmUsage, model: string): CostBreakdown {
   const p = geminiPricing(model);
-  return (
-    (usage.prompt_tokens / 1000) * p.input +
-    (usage.completion_tokens / 1000) * p.output
-  );
+  const input_cost_usd = (usage.prompt_tokens / 1000) * p.input;
+  const output_cost_usd = (usage.completion_tokens / 1000) * p.output;
+  return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
 }
 
 export interface GeminiGenerateResult {
@@ -199,11 +207,14 @@ export async function geminiGenerateContent(opts: {
 }
 
 export function toGeminiStepCost(r: GeminiGenerateResult): OcrStepCost {
+  const breakdown = estimateGeminiCostUsd(r.usage, r.model);
   return {
     provider: 'gemini',
     model: r.model,
     usage: r.usage,
-    cost_usd: estimateGeminiCostUsd(r.usage, r.model),
+    cost_usd: breakdown.cost_usd,
+    input_cost_usd: breakdown.input_cost_usd,
+    output_cost_usd: breakdown.output_cost_usd,
     latency_ms: r.latency_ms,
   };
 }

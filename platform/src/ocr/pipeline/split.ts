@@ -59,6 +59,10 @@ function toSingleResult(
       structuring: null,
       total_cost_usd: r.cost.cost_usd,
       total_tokens: r.cost.usage.total_tokens,
+      total_input_tokens: r.cost.usage.prompt_tokens,
+      total_output_tokens: r.cost.usage.completion_tokens,
+      total_input_cost_usd: r.cost.input_cost_usd,
+      total_output_cost_usd: r.cost.output_cost_usd,
     },
     providers: { extraction: provider, structuring: provider, mode: 'single' },
     fallbackReason,
@@ -87,6 +91,10 @@ export async function runSplitMode(
       structuring: structResult.cost,
       total_cost_usd: extractionCost.cost_usd + structResult.cost.cost_usd,
       total_tokens: extractionCost.usage.total_tokens + structResult.cost.usage.total_tokens,
+      total_input_tokens: extractionCost.usage.prompt_tokens + structResult.cost.usage.prompt_tokens,
+      total_output_tokens: extractionCost.usage.completion_tokens + structResult.cost.usage.completion_tokens,
+      total_input_cost_usd: extractionCost.input_cost_usd + structResult.cost.input_cost_usd,
+      total_output_cost_usd: extractionCost.output_cost_usd + structResult.cost.output_cost_usd,
     };
 
     return {

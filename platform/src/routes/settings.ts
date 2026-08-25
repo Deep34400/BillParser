@@ -7,6 +7,7 @@ import {
   clearProviderCredentials,
   getAllCredentials,
 } from '../shared/settings.js';
+import { DEFAULT_MODEL_PRICING } from '../shared/modelPricing.js';
 
 const PROVIDERS = [
   { name: 'mistral', displayName: 'Mistral OCR', kind: 'markdown', requiredCredentials: ['apiKey'] },
@@ -31,6 +32,16 @@ export async function settingsRoutes(app: FastifyInstance) {
       configured: !!allCreds[p.name] && Object.keys(allCreds[p.name]).length > 0,
     }));
 
+    const mergedPricing: Record<string, { inputPer1M: number; outputPer1M: number }> = {};
+    for (const [model, price] of Object.entries(DEFAULT_MODEL_PRICING)) {
+      mergedPricing[model] = { ...price };
+    }
+    if (settings.modelPricing) {
+      for (const [model, price] of Object.entries(settings.modelPricing)) {
+        mergedPricing[model] = { ...price };
+      }
+    }
+
     return {
       pipelineMode: settings.pipelineMode ?? 'single',
       extractionProvider: settings.extractionProvider,
@@ -40,6 +51,8 @@ export async function settingsRoutes(app: FastifyInstance) {
       singleProvider: settings.singleProvider ?? 'gemini',
       singleModel: settings.singleModel ?? 'gemini-2.5-flash',
       providers,
+      modelPricing: mergedPricing,
+      defaultModelPricing: DEFAULT_MODEL_PRICING,
     };
   });
 
@@ -47,8 +60,8 @@ export async function settingsRoutes(app: FastifyInstance) {
    * PUT /api/settings — save extraction/structuring selections.
    */
   app.put('/api/settings', async (req) => {
-    const body = req.body as Record<string, string>;
-    const patch: Record<string, string> = {};
+    const body = req.body as Record<string, any>;
+    const patch: Record<string, any> = {};
     if (body.pipelineMode === 'split' || body.pipelineMode === 'single') {
       patch.pipelineMode = body.pipelineMode;
     }
@@ -58,6 +71,9 @@ export async function settingsRoutes(app: FastifyInstance) {
     if (body.extractionModel) patch.extractionModel = body.extractionModel;
     if (body.singleProvider) patch.singleProvider = body.singleProvider;
     if (body.singleModel) patch.singleModel = body.singleModel;
+    if (body.modelPricing && typeof body.modelPricing === 'object') {
+      patch.modelPricing = body.modelPricing;
+    }
     const saved = await saveSettings(patch);
     return {
       ok: true,
