@@ -6,7 +6,7 @@
 import { GoogleAuth } from 'google-auth-library';
 import { env } from '../../config/env.js';
 import { getSettings } from '../../shared/settings.js';
-import { resolveModelPricing, type ModelPrice } from '../../shared/modelPricing.js';
+import { computeLlmCost, resolveModelPricing, type ModelPrice } from '../../shared/modelPricing.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 
 const TIMEOUT_MS = 120_000;
@@ -28,6 +28,13 @@ export interface CostBreakdown {
   cost_usd: number;
   input_cost_usd: number;
   output_cost_usd: number;
+  /**
+   * The $/1M rates this cost was computed with, so the figure stays reproducible
+   * (tokens × rate = cost) after someone edits pricing in Settings. Without them
+   * a historical cost cannot be audited — only taken on faith.
+   */
+  input_rate_per_1m: number;
+  output_rate_per_1m: number;
 }
 
 export function estimateGeminiCostUsd(
@@ -35,14 +42,7 @@ export function estimateGeminiCostUsd(
   model: string,
   overrides?: Record<string, ModelPrice> | null,
 ): CostBreakdown {
-  // Rates come from Settings UI override for this model, else DEFAULT_MODEL_PRICING
-  // promptTokens selects the >200k long-context tier where the model has one.
-  const p = geminiPricing(model, overrides, usage.prompt_tokens);
-  const input_cost_usd = (usage.prompt_tokens / 1000) * p.input;
-  // Google bills thinking tokens at the output price
-  const billedOutput = usage.completion_tokens + (usage.thinking_tokens ?? 0);
-  const output_cost_usd = (billedOutput / 1000) * p.output;
-  return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
+  return computeLlmCost(usage, model, overrides);
 }
 
 export interface GeminiGenerateResult {
@@ -207,9 +207,7 @@ export async function toGeminiStepCost(r: GeminiGenerateResult): Promise<OcrStep
     provider: 'gemini',
     model: r.model,
     usage: r.usage,
-    cost_usd: breakdown.cost_usd,
-    input_cost_usd: breakdown.input_cost_usd,
-    output_cost_usd: breakdown.output_cost_usd,
+    ...breakdown,
     latency_ms: r.latency_ms,
   };
 }

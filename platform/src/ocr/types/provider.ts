@@ -62,6 +62,9 @@ export interface OcrStepCost {
   input_cost_usd: number;
   /** Output + thinking tokens × output $/1M */
   output_cost_usd: number;
+  /** $/1M rates applied to this call, so the cost can be re-derived later. */
+  input_rate_per_1m?: number;
+  output_rate_per_1m?: number;
   latency_ms: number;
 }
 
@@ -74,6 +77,9 @@ export interface OcrCostInfo {
   total_input_tokens: number;
   total_output_tokens: number;
   total_thinking_tokens: number;
+  /** $/1M rates applied — persisted so the cost stays auditable. */
+  input_rate_per_1m?: number;
+  output_rate_per_1m?: number;
   total_input_cost_usd: number;
   total_output_cost_usd: number;
 }

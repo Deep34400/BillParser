@@ -713,9 +713,19 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
         ? Math.max(0, (inv.totalTokens ?? 0) - inputTokens - outputTokens)
         : 0;
   const billedOutputTokens = outputTokens + thinkingTokens;
-  const displayTotalTokens = hasBreakdown
-    ? inputTokens + billedOutputTokens
-    : (inv.totalTokens ?? 0);
+  // Show what the provider reported, not our own arithmetic — otherwise this page
+  // and the analytics page (which sums the stored value) can quietly disagree.
+  const reportedTotalTokens = inv.totalTokens ?? 0;
+  const componentSum = inputTokens + billedOutputTokens;
+  const displayTotalTokens = hasBreakdown ? (reportedTotalTokens || componentSum) : reportedTotalTokens;
+  // Non-zero when the provider's total includes tokens the components don't
+  // account for (e.g. cached input). Surfaced rather than silently absorbed.
+  const unaccountedTokens = hasBreakdown && reportedTotalTokens > 0
+    ? reportedTotalTokens - componentSum
+    : 0;
+  const inputRate = inv.inputRatePer1m ?? null;
+  const outputRate = inv.outputRatePer1m ?? null;
+  const rateLabel = (r: number | null) => (r == null ? '' : ` × $${r}/1M`);
   const inputCost = inv.totalInputCostUsd ?? 0;
   const outputCost = inv.totalOutputCostUsd ?? 0;
   const totalCost = inv.costEstimate ?? 0;
@@ -748,7 +758,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
         {hasBreakdown ? (
           <>
             <div style={rowStyle}>
-              <span>Input <span style={dimStyle}>(prompt · input $/1M of {model})</span></span>
+              <span>Input <span style={dimStyle}>(prompt{rateLabel(inputRate) || ` · input $/1M of ${model}`})</span></span>
               <span>
                 <span style={{ fontFamily: T.mono }}>{inputTokens.toLocaleString()}</span>
                 <span style={dimStyle}> tokens</span>
@@ -758,7 +768,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
             </div>
             <div style={rowStyle}>
               <span>
-                Output <span style={dimStyle}>(answer{thinkingTokens > 0 ? ' + thinking' : ''} · output $/1M)</span>
+                Output <span style={dimStyle}>(answer{thinkingTokens > 0 ? ' + thinking' : ''}{rateLabel(outputRate) || ' · output $/1M'})</span>
               </span>
               <span>
                 <span style={{ fontFamily: T.mono }}>{billedOutputTokens.toLocaleString()}</span>
@@ -773,6 +783,15 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
                 <span />
               </div>
             )}
+            {unaccountedTokens !== 0 && (
+              <div style={{ ...rowStyle, paddingTop: 0, color: T.muted, fontSize: 11 }}>
+                <span style={{ paddingLeft: 12 }}>
+                  ↳ {unaccountedTokens > 0 ? '+' : ''}{unaccountedTokens.toLocaleString()} tokens reported by the
+                  provider beyond input + output (e.g. cached input) — not separately priced here
+                </span>
+                <span />
+              </div>
+            )}
             <div style={{
               borderTop: `1px solid ${T.border}`, marginTop: 6, paddingTop: 8,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -782,7 +801,8 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
                 <span style={{ fontFamily: T.mono, ...boldStyle }}>{costFmt(totalCost)}</span>
                 <span style={{ ...dimStyle, marginLeft: 8 }}>
                   {displayTotalTokens.toLocaleString()} tokens
-                  {' '}(= {inputTokens.toLocaleString()} + {billedOutputTokens.toLocaleString()})
+                  {' '}(= {inputTokens.toLocaleString()} + {billedOutputTokens.toLocaleString()}
+                  {unaccountedTokens !== 0 ? ` ${unaccountedTokens > 0 ? '+' : '−'} ${Math.abs(unaccountedTokens).toLocaleString()}` : ''})
                 </span>
               </span>
             </div>

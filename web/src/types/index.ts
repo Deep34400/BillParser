@@ -57,6 +57,8 @@ export interface Invoice {
   totalTokens?: number | null; totalInputTokens?: number | null; totalOutputTokens?: number | null;
   totalThinkingTokens?: number | null;
   totalInputCostUsd?: number | null; totalOutputCostUsd?: number | null;
+  /** $/1M rates the cost was computed with — lets the UI show a verifiable figure. */
+  inputRatePer1m?: number | null; outputRatePer1m?: number | null;
   extractionProvider?: string | null; structuringProvider?: string | null;
   extractionModel?: string | null; structuringModel?: string | null;
   extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;

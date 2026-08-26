@@ -23,6 +23,8 @@ function toSingleResult(
       total_input_tokens: r.cost.usage.prompt_tokens,
       total_output_tokens: r.cost.usage.completion_tokens,
       total_thinking_tokens: r.cost.usage.thinking_tokens ?? 0,
+      input_rate_per_1m: r.cost.input_rate_per_1m,
+      output_rate_per_1m: r.cost.output_rate_per_1m,
       total_input_cost_usd: r.cost.input_cost_usd,
       total_output_cost_usd: r.cost.output_cost_usd,
     },

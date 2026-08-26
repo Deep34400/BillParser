@@ -93,3 +93,47 @@ export function resolveModelPricing(
 
   return { input: tier.inputPer1M / 1000, output: tier.outputPer1M / 1000 };
 }
+
+/** Token counts a cost is computed from. Matches LlmUsage's billing-relevant fields. */
+export interface CostableUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  thinking_tokens?: number;
+}
+
+export interface LlmCost {
+  cost_usd: number;
+  input_cost_usd: number;
+  output_cost_usd: number;
+  /** Rates actually applied, so the figure stays reproducible after a price edit. */
+  input_rate_per_1m: number;
+  output_rate_per_1m: number;
+}
+
+/**
+ * The single implementation of the billing rule. Every provider path must use
+ * this — it previously lived in three places (geminiClient, llmSingle,
+ * llmNormalize) and they had already drifted: only two applied the long-context
+ * tier, so large prompts were billed at the small-prompt rate.
+ *
+ * Two rules that are easy to get wrong:
+ *  - Thinking tokens bill at the OUTPUT rate (Google counts them as output).
+ *  - Prompt size selects the pricing tier on models that have one.
+ */
+export function computeLlmCost(
+  usage: CostableUsage,
+  model: string,
+  overrides?: Record<string, ModelPrice> | null,
+): LlmCost {
+  const p = resolveModelPricing(model, overrides, usage.prompt_tokens);
+  const input_cost_usd = (usage.prompt_tokens / 1000) * p.input;
+  const billedOutput = usage.completion_tokens + (usage.thinking_tokens ?? 0);
+  const output_cost_usd = (billedOutput / 1000) * p.output;
+  return {
+    cost_usd: input_cost_usd + output_cost_usd,
+    input_cost_usd,
+    output_cost_usd,
+    input_rate_per_1m: p.input * 1000,
+    output_rate_per_1m: p.output * 1000,
+  };
+}

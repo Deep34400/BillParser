@@ -94,9 +94,9 @@ export const bills = pgTable('bills', {
   parsedData: jsonb('parsed_data'),
 
   pipelineMode: text('pipeline_mode'),
-  extractionCostUsd: numeric('extraction_cost_usd', { mode: 'number', precision: 12, scale: 6 }),
-  structuringCostUsd: numeric('structuring_cost_usd', { mode: 'number', precision: 12, scale: 6 }),
-  totalCostUsd: numeric('total_cost_usd', { mode: 'number', precision: 12, scale: 6 }),
+  extractionCostUsd: numeric('extraction_cost_usd', { mode: 'number', precision: 18, scale: 10 }),
+  structuringCostUsd: numeric('structuring_cost_usd', { mode: 'number', precision: 18, scale: 10 }),
+  totalCostUsd: numeric('total_cost_usd', { mode: 'number', precision: 18, scale: 10 }),
   extractionTokens: integer('extraction_tokens'),
   extractionInputTokens: integer('extraction_input_tokens'),
   extractionOutputTokens: integer('extraction_output_tokens'),
@@ -107,8 +107,8 @@ export const bills = pgTable('bills', {
   totalInputTokens: integer('total_input_tokens'),
   totalOutputTokens: integer('total_output_tokens'),
   totalThinkingTokens: integer('total_thinking_tokens'),
-  totalInputCostUsd: numeric('total_input_cost_usd', { mode: 'number', precision: 12, scale: 6 }),
-  totalOutputCostUsd: numeric('total_output_cost_usd', { mode: 'number', precision: 12, scale: 6 }),
+  totalInputCostUsd: numeric('total_input_cost_usd', { mode: 'number', precision: 18, scale: 10 }),
+  totalOutputCostUsd: numeric('total_output_cost_usd', { mode: 'number', precision: 18, scale: 10 }),
   extractionProvider: text('extraction_provider'),
   structuringProvider: text('structuring_provider'),
   extractionModel: text('extraction_model'),
@@ -116,6 +116,11 @@ export const bills = pgTable('bills', {
   extractionLatencyMs: integer('extraction_latency_ms'),
   structuringLatencyMs: integer('structuring_latency_ms'),
   totalLatencyMs: integer('total_latency_ms'),
+
+  /** $/1M model rates this cost was computed with. Stored so the figure stays
+      reproducible (tokens × rate = cost) after someone edits pricing in Settings. */
+  inputRatePer1m: numeric('input_rate_per_1m', { mode: 'number', precision: 18, scale: 10 }),
+  outputRatePer1m: numeric('output_rate_per_1m', { mode: 'number', precision: 18, scale: 10 }),
 
   /** USD→INR rate in force when this bill was processed, so historical
       rupee figures never shift when the configured rate changes. */
@@ -187,7 +192,7 @@ export const users = pgTable('users', {
   tokenBalance: numeric('token_balance', { mode: 'number', precision: 12, scale: 4 }).notNull(),
   totalTokensUsed: numeric('total_tokens_used', { mode: 'number', precision: 14, scale: 4 }).notNull(),
   totalOcrCount: integer('total_ocr_count').notNull(),
-  totalCostUsd: numeric('total_cost_usd', { mode: 'number', precision: 12, scale: 6 }).notNull(),
+  totalCostUsd: numeric('total_cost_usd', { mode: 'number', precision: 18, scale: 10 }).notNull(),
   intakeEmail: text('intake_email'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),

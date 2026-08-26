@@ -208,6 +208,10 @@ export interface BillDoc {
   /** Linked vendor from Vendor Registry (set after OCR completion). */
   vendor_id?: string | null;
 
+  /** $/1M rates the cost was computed with — makes the figure auditable. */
+  input_rate_per_1m?: number | null;
+  output_rate_per_1m?: number | null;
+
   /**
    * USD→INR rate in force when this bill was processed. Frozen per bill so a
    * later change to the configured rate never rewrites historical rupee figures.

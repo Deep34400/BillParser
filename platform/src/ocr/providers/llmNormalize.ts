@@ -10,7 +10,7 @@ import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { resolveProviderKey } from './resolveKey.js';
 import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
 import { getSettings } from '../../shared/settings.js';
-import { resolveModelPricing } from '../../shared/modelPricing.js';
+import { computeLlmCost } from '../../shared/modelPricing.js';
 
 const TIMEOUT_MS = 120_000;
 
@@ -105,13 +105,6 @@ const PROVIDERS: Record<string, ModelDef> = {
   },
 };
 
-function estimateCost(usage: LlmUsage, pricing: { input: number; output: number }): { cost_usd: number; input_cost_usd: number; output_cost_usd: number } {
-  const input_cost_usd = (usage.prompt_tokens / 1000) * pricing.input;
-  const billedOutput = usage.completion_tokens + (usage.thinking_tokens ?? 0);
-  const output_cost_usd = (billedOutput / 1000) * pricing.output;
-  return { cost_usd: input_cost_usd + output_cost_usd, input_cost_usd, output_cost_usd };
-}
-
 export interface NormalizeResult {
   parsed: ParsedInvoiceData;
   cost: OcrStepCost;
@@ -159,7 +152,7 @@ export async function llmNormalize(rawOcr: string, providerName: string, modelOv
 
   const usage = def.extractUsage(json);
   const settings = await getSettings();
-  const breakdown = estimateCost(usage, resolveModelPricing(model, settings.modelPricing));
+  const breakdown = computeLlmCost(usage, model, settings.modelPricing);
   const cost: OcrStepCost = {
     provider: providerName,
     model,
