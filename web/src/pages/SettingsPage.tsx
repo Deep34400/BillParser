@@ -99,11 +99,13 @@ export function SettingsPage() {
   const [defaultPricing, setDefaultPricing] = useState<Record<string, ModelPrice>>({});
   const [pricingFilter, setPricingFilter] = useState<string>('all');
   const [savingPricing, setSavingPricing] = useState(false);
+  const [savingFx, setSavingFx] = useState(false);
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
 
   const [thinkingBudget, setThinkingBudget] = useState<number>(2048);
+  const [savedThinkingBudget, setSavedThinkingBudget] = useState<number>(2048);
   const [fxRate, setFxRate] = useState<string>('');
   const [savedFxRate, setSavedFxRate] = useState<number | null>(null);
 
@@ -124,7 +126,7 @@ export function SettingsPage() {
       if (s.modelPricing) setModelPricing(s.modelPricing);
       if (s.defaultModelPricing) setDefaultPricing(s.defaultModelPricing);
       if (typeof s.usdToInr === 'number') { setFxRate(String(s.usdToInr)); setSavedFxRate(s.usdToInr); }
-      if (typeof s.thinkingBudget === 'number') setThinkingBudget(s.thinkingBudget);
+      if (typeof s.thinkingBudget === 'number') { setThinkingBudget(s.thinkingBudget); setSavedThinkingBudget(s.thinkingBudget); }
       try {
         const { credentials } = await api.revealCreds();
         const cv: Record<string, string> = {};
@@ -151,9 +153,8 @@ export function SettingsPage() {
         singleProvider: singleProv,
         singleModel: singleModel,
         thinkingBudget,
-        ...(Number(fxRate) > 0 ? { usdToInr: Number(fxRate) } : {}),
       });
-      if (Number(fxRate) > 0) { setSavedFxRate(Number(fxRate)); setUsdToInr(Number(fxRate)); }
+      setSavedThinkingBudget(thinkingBudget);
       setSavedMode(mode);
       setSavedStructProv(structProv); setSavedStructModel(structModel);
       setSavedSingleProv(singleProv); setSavedSingleModel(singleModel);
@@ -183,7 +184,10 @@ export function SettingsPage() {
 
   const currentStructDef = ALL_PROVIDERS.find((p) => p.id === structProv) ?? ALL_PROVIDERS[0];
   const currentSingleDef = ALL_PROVIDERS.find((p) => p.id === singleProv) ?? ALL_PROVIDERS[1];
-  const dirty = mode !== savedMode || structProv !== savedStructProv || structModel !== savedStructModel || singleProv !== savedSingleProv || singleModel !== savedSingleModel;
+  const dirty = mode !== savedMode || structProv !== savedStructProv || structModel !== savedStructModel
+    || singleProv !== savedSingleProv || singleModel !== savedSingleModel
+    || thinkingBudget !== savedThinkingBudget;
+  const fxDirty = Number(fxRate) > 0 && Number(fxRate) !== savedFxRate;
 
   const handlePricingChange = (model: string, field: 'inputPer1M' | 'outputPer1M', val: string) => {
     const n = parseFloat(val);
@@ -192,6 +196,19 @@ export function SettingsPage() {
       ...prev,
       [model]: { ...prev[model], [field]: val === '' ? 0 : n },
     }));
+  };
+
+  const handleSaveFx = async () => {
+    const rate = Number(fxRate);
+    if (!(rate > 0)) { flash('Enter a rate greater than 0'); return; }
+    setSavingFx(true);
+    try {
+      await api.saveSettings({ usdToInr: rate });
+      setSavedFxRate(rate);
+      setUsdToInr(rate);
+      flash(`Rate saved — ₹${rate} per $1`);
+    } catch (e) { flash(`Error: ${(e as Error).message}`); }
+    finally { setSavingFx(false); }
   };
 
   const handleSavePricing = async () => {
@@ -389,12 +406,16 @@ export function SettingsPage() {
               style={{ ...inp, width: 140 }}
             />
           </div>
+          <button style={btnP} disabled={savingFx || !fxDirty} onClick={() => void handleSaveFx()}>
+            {savingFx ? 'Saving...' : 'Save rate'}
+          </button>
+          {fxDirty && <span style={badge(false)}>Unsaved change</span>}
           <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.5, flex: 1, minWidth: 260 }}>
             Model prices are quoted in USD; this converts them for display.
             {savedFxRate != null && <> Currently <strong>₹{savedFxRate}</strong> per $1.</>}
             <br />
-            Saved with the button above. Each invoice stores the rate in force when it was
-            processed, so changing this affects new invoices only — historical figures stay put.
+            Each invoice stores the rate in force when it was processed, so changing this
+            affects new invoices only — historical figures stay put.
           </div>
         </div>
       </div>
