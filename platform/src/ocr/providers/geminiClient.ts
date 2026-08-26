@@ -11,6 +11,30 @@ import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 
 const TIMEOUT_MS = 120_000;
 
+/**
+ * Cap on Gemini reasoning tokens per call.
+ *
+ * Thinking dominates both latency and cost here: on observed invoices it was
+ * 55–76% of billed output, and a run that used 2,527 thinking tokens took 20.1s
+ * against 6.9s for one that used 726 — driven by reasoning, not document size.
+ * It also shares maxOutputTokens with the answer, so an unbounded run can starve
+ * the JSON and produce a truncated, unparseable response.
+ *
+ * It must be bounded, not switched off. Measured against a GST invoice with a
+ * discount: thinkingBudget 0 got the arithmetic wrong every time (₹8,083 against
+ * a correct ₹7,080 — a 14% error on the total), while 256 and above were correct
+ * on every attempt. Anything that silently disables thinking corrupts the
+ * extracted figures.
+ *
+ * 2048 leaves the observed range (726–988) untouched and clips only the tail.
+ *
+ * Uses thinkingBudget rather than thinkingLevel deliberately: thinkingLevel is
+ * rejected outright by the 2.5 family, gemini-3.7-flash and
+ * gemini-3.1-pro-preview (HTTP 400), and 'minimal' silently means zero thinking
+ * on 3.5/3.6-flash. thinkingBudget is accepted by every model on offer.
+ */
+const THINKING_BUDGET_TOKENS = 2048;
+
 const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],
 });
@@ -143,11 +167,8 @@ export async function geminiGenerateContent(opts: {
     // Thinking models consume output budget for reasoning — give headroom for the JSON.
     maxOutputTokens: gemini3 ? 65536 : 16384,
     responseMimeType: 'application/json',
+    thinkingConfig: { thinkingBudget: THINKING_BUDGET_TOKENS },
   };
-  // Keep thinking minimal so the JSON answer isn't truncated / buried in thought parts.
-  if (gemini3) {
-    generationConfig.thinkingConfig = { thinkingLevel: 'minimal' };
-  }
 
   const body = {
     contents: [{ role: 'user', parts: opts.parts.map((p) => {
