@@ -49,7 +49,12 @@ steps:
     secretEnv: ['DATABASE_URL']
     waitFor: ['push-platform']
 
-  # 4. Deploy platform to Cloud Run
+  # 4. Deploy platform to Cloud Run.
+  #
+  # --max-instances is capped at 4 on purpose. Cloud SQL billparser-pg is shared
+  # with prod and allows 22 usable connections; prod takes 12 (6 x pool 2), so dev
+  # gets 8. Raising this without lowering prod, or moving to a larger tier, will
+  # surface as "too many clients" under load.
   - name: 'gcr.io/cloud-builders/gcloud'
     id: deploy-platform
     entrypoint: gcloud
@@ -64,7 +69,7 @@ steps:
       - '--allow-unauthenticated'
       - '--port=4000'
       - '--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}'
-      - '--max-instances=8'
+      - '--max-instances=4'
       - '--set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,STORAGE_BUCKET=${_STORAGE_BUCKET},VERTEX_LOCATION=${_VERTEX_LOCATION},NODE_ENV=production'
       - '--set-secrets=DATABASE_URL=${_DB_SECRET}:latest,JWT_SECRET=${_JWT_SECRET}:latest,ADMIN_PASSWORD=${_ADMIN_PW_SECRET}:latest'
     waitFor: ['migrate']
