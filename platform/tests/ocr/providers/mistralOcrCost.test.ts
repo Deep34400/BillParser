@@ -59,11 +59,18 @@ describe('Mistral OCR cost', () => {
     expect(cost.cost_usd).toBeCloseTo(0.015, 9);
   });
 
-  it('falls back to the previous hardcoded rate when unset', async () => {
+  it('falls back to the standard OCR 4.1 rate when unset', async () => {
     const { cost } = await runOcr(3);
-    // Matches the old MISTRAL_OCR_PRICE_PER_PAGE of 0.002, so existing
-    // deployments see no change until someone edits the setting.
-    expect(cost.cost_usd).toBeCloseTo(0.006, 9);
+    // $4/1,000 pages — docs.mistral.ai/models/ocr-4-1, checked Aug 2026.
+    expect(cost.cost_usd).toBeCloseTo(0.012, 9);
+  });
+
+  it('does not use the batch rate — this client calls the synchronous endpoint', async () => {
+    // $2/1,000 is Mistral's /v1/batch price. mistralOcr.ts posts to /v1/ocr, so
+    // billing at 2 understated every Split-mode extraction by half.
+    const { cost } = await runOcr(1000);
+    expect(cost.cost_usd).toBeCloseTo(4, 9);
+    expect(cost.cost_usd).not.toBeCloseTo(2, 9);
   });
 
   it('scales with page count', async () => {

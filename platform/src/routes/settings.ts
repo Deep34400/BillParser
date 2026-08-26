@@ -56,7 +56,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       defaultModelPricing: DEFAULT_MODEL_PRICING,
       usdToInr: settings.usdToInr ?? 96,
       thinkingBudget: resolveThinkingBudget(settings.thinkingBudget),
-      mistralOcrPricePer1kPages: settings.mistralOcrPricePer1kPages ?? 2,
+      mistralOcrPricePer1kPages: settings.mistralOcrPricePer1kPages ?? 4,
       thinkingBudgetRange: { min: THINKING_BUDGET_MIN, max: THINKING_BUDGET_MAX },
     };
   });

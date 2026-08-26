@@ -15,8 +15,16 @@ const TIMEOUT_MS = 120_000;
  * Fallback price per 1,000 pages, used only when Settings has no value.
  * Mistral bills OCR per page, not per token, so this cannot live in the
  * $/1M-token table — the editable value is Settings → mistralOcrPricePer1kPages.
+ *
+ * $4 is the standard rate for OCR 4.1 (docs.mistral.ai/models/ocr-4-1, checked
+ * Aug 2026). This was previously 2, which is Mistral's *batch* price — but this
+ * client posts to the synchronous /v1/ocr endpoint, not /v1/batch, so that
+ * discount never applied and every Split-mode extraction was recorded at half
+ * what it actually cost.
+ *
+ * Annotated pages are $5/1,000; this client does not request annotations.
  */
-const MISTRAL_OCR_FALLBACK_PER_1K_PAGES = 2;
+const MISTRAL_OCR_FALLBACK_PER_1K_PAGES = 4;
 
 function detectImageMime(buf: Buffer): string {
   if (buf[0] === 0x89) return 'image/png';

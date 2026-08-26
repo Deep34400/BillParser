@@ -50,6 +50,9 @@ export interface AppSettings {
    * Mistral OCR price per 1,000 pages. Billed per page, not per token, so it
    * cannot live in the $/1M-token table — it was previously a constant in
    * providers/mistralOcr.ts and took a deploy to correct.
+   *
+   * $4 = the standard OCR 4.1 rate. Set it to 2 only if you move the client to
+   * the /v1/batch endpoint, which is where Mistral's 50% discount applies.
    */
   mistralOcrPricePer1kPages?: number;
 }
@@ -64,7 +67,7 @@ const DEFAULTS: AppSettings = {
   // ~95.7 as of Aug 2026; override in Settings when it drifts.
   usdToInr: 96,
   thinkingBudget: 2048,
-  mistralOcrPricePer1kPages: 2,
+  mistralOcrPricePer1kPages: 4,
 };
 
 const SETTINGS_ID = 1;
