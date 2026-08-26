@@ -725,7 +725,17 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
     : 0;
   const inputRate = inv.inputRatePer1m ?? null;
   const outputRate = inv.outputRatePer1m ?? null;
-  const rateLabel = (r: number | null) => (r == null ? '' : ` × $${r}/1M`);
+  // Prices read wrong unpadded ($0.3/1M), but blindly padding to 2 dp would round
+  // away a finer rate, so keep the raw value when 2 dp would lose precision.
+  const fmtRate = (r: number) => {
+    const two = r.toFixed(2);
+    return Number(two) === r ? two : String(r);
+  };
+  const rateLabel = (r: number | null) => (r == null ? '' : ` × $${fmtRate(r)}/1M`);
+  // Costs here are fractions of a rupee, and the rates behind them are quoted in
+  // USD — showing only ₹ makes the line unverifiable. 4 dp is enough to see a
+  // sub-cent figure without turning into noise.
+  const usdFmt = (v: number) => `$${v.toFixed(4)}`;
   const inputCost = inv.totalInputCostUsd ?? 0;
   const outputCost = inv.totalOutputCostUsd ?? 0;
   const totalCost = inv.costEstimate ?? 0;
@@ -764,6 +774,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
                 <span style={dimStyle}> tokens</span>
                 <span style={{ margin: '0 8px', color: T.border }}>→</span>
                 <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{costFmt(inputCost)}</span>
+                <span style={{ ...dimStyle, fontFamily: T.mono, marginLeft: 6 }}>{usdFmt(inputCost)}</span>
               </span>
             </div>
             <div style={rowStyle}>
@@ -775,6 +786,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
                 <span style={dimStyle}> tokens</span>
                 <span style={{ margin: '0 8px', color: T.border }}>→</span>
                 <span style={{ fontFamily: T.mono, fontWeight: 600 }}>{costFmt(outputCost)}</span>
+                <span style={{ ...dimStyle, fontFamily: T.mono, marginLeft: 6 }}>{usdFmt(outputCost)}</span>
               </span>
             </div>
             {thinkingTokens > 0 && (
@@ -799,6 +811,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
               <span style={boldStyle}>Total cost</span>
               <span>
                 <span style={{ fontFamily: T.mono, ...boldStyle }}>{costFmt(totalCost)}</span>
+                <span style={{ ...dimStyle, fontFamily: T.mono, marginLeft: 6 }}>{usdFmt(totalCost)}</span>
                 <span style={{ ...dimStyle, marginLeft: 8 }}>
                   {displayTotalTokens.toLocaleString()} tokens
                   {' '}(= {inputTokens.toLocaleString()} + {billedOutputTokens.toLocaleString()}
@@ -814,6 +827,7 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
             <span style={boldStyle}>Total cost</span>
             <span>
               <span style={{ fontFamily: T.mono, ...boldStyle }}>{costFmt(totalCost)}</span>
+                <span style={{ ...dimStyle, fontFamily: T.mono, marginLeft: 6 }}>{usdFmt(totalCost)}</span>
               <span style={{ ...dimStyle, marginLeft: 8 }}>
                 {displayTotalTokens.toLocaleString()} tokens
               </span>
