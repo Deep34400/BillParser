@@ -31,8 +31,6 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPrice> = {
   'gemini-3.6-flash':        { inputPer1M: 0.75,  outputPer1M: 3.75 },
   'gemini-3.5-flash':        { inputPer1M: 1.50,  outputPer1M: 9.00 },
   'gemini-3.5-flash-lite':   { inputPer1M: 0.30,  outputPer1M: 2.50 },
-  'gemini-3.1-pro-preview':  { inputPer1M: 2.00,  outputPer1M: 12.00,
-    longContext: { thresholdTokens: 200_000, inputPer1M: 4.00, outputPer1M: 18.00 } },
 
   // ─── Gemini 2.5 ──────────────────────────────────────────────
   'gemini-2.5-pro':          { inputPer1M: 1.25,  outputPer1M: 10.00,
@@ -41,21 +39,26 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPrice> = {
   'gemini-2.5-flash-lite':   { inputPer1M: 0.10,  outputPer1M: 0.40 },
 
   // ─── Claude ──────────────────────────────────────────────────
-  'claude-sonnet-4-20250514':    { inputPer1M: 3.00,  outputPer1M: 15.00 },
-  'claude-3-5-sonnet-20241022':  { inputPer1M: 3.00,  outputPer1M: 15.00 },
-  'claude-3-haiku-20240307':     { inputPer1M: 0.25,  outputPer1M: 1.25 },
+  // The previous entries (sonnet-4, 3-5-sonnet, 3-haiku) were retired or long
+  // superseded — sonnet-4 is retired outside Bedrock/Vertex, and the 3.x pair no
+  // longer appear on Anthropic's pricing page at all.
+  'claude-sonnet-5':             { inputPer1M: 2.00,  outputPer1M: 10.00 },
+  'claude-haiku-4-5-20251001':   { inputPer1M: 1.00,  outputPer1M: 5.00 },
 
   // ─── OpenAI ──────────────────────────────────────────────────
+  // Only these two read images. The GPT-5 family is text-only, so it cannot do
+  // Single mode at all; gpt-4-turbo has dropped off OpenAI's pricing page.
   'gpt-4o':       { inputPer1M: 2.50,  outputPer1M: 10.00 },
   'gpt-4o-mini':  { inputPer1M: 0.15,  outputPer1M: 0.60 },
-  'gpt-4-turbo':  { inputPer1M: 10.00, outputPer1M: 30.00 },
 
   // ─── Mistral ─────────────────────────────────────────────────
+  // mistral-ocr-latest is intentionally absent: OCR is billed per page, not per
+  // token (see MISTRAL_OCR_PRICE_PER_PAGE in providers/mistralOcr.ts), so a row
+  // here would have looked editable while changing nothing.
   'mistral-small-latest':   { inputPer1M: 1.00, outputPer1M: 3.00 },
   'mistral-medium-latest':  { inputPer1M: 2.70, outputPer1M: 8.10 },
   'mistral-large-latest':   { inputPer1M: 2.00, outputPer1M: 6.00 },
   'pixtral-12b-2409':       { inputPer1M: 1.00, outputPer1M: 3.00 },
-  'mistral-ocr-latest':     { inputPer1M: 2.00, outputPer1M: 0.00 },
 };
 
 // Deliberately empty. A floating alias like "gemini-flash-latest" cannot be

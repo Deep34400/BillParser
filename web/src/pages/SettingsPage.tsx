@@ -74,9 +74,9 @@ const THINKING_OPTIONS = [
 
 const ALL_PROVIDERS: ProvDef[] = [
   { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest', 'pixtral-12b-2409'], canStructure: true, canSingle: true, desc: 'Mistral — Single: PDF uses OCR+structure (stays Single mode); images use Pixtral' },
-  { id: 'gemini', label: 'Google Gemini', models: ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], canStructure: true, canSingle: true, desc: 'Gemini — always Vertex AI + ADC (no API key). Pick any model; default Single mode.' },
-  { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: true, desc: 'Claude — structuring or single PDF/image call' },
-  { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: true, desc: 'OpenAI — structuring or single image call (PDF: use Split/Gemini/Claude)' },
+  { id: 'gemini', label: 'Google Gemini', models: ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], canStructure: true, canSingle: true, desc: 'Gemini — always Vertex AI + ADC (no API key). Pick any model; default Single mode.' },
+  { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-5', 'claude-haiku-4-5-20251001'], canStructure: true, canSingle: true, desc: 'Claude — structuring or single PDF/image call. Haiku 4.5 is the cheaper option; Sonnet 5 is more accurate.' },
+  { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini'], canStructure: true, canSingle: true, desc: 'OpenAI — images only, no PDF (use Split, Gemini or Claude for PDFs). The GPT-5 family is text-only and cannot read documents, so it is not offered here.' },
 ];
 
 export function SettingsPage() {
@@ -100,6 +100,7 @@ export function SettingsPage() {
   const [pricingFilter, setPricingFilter] = useState<string>('all');
   const [savingPricing, setSavingPricing] = useState(false);
   const [savingFx, setSavingFx] = useState(false);
+  const [pricingOpen, setPricingOpen] = useState(false);
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
@@ -197,6 +198,12 @@ export function SettingsPage() {
       [model]: { ...prev[model], [field]: val === '' ? 0 : n },
     }));
   };
+
+  const pricedModelCount = Object.keys(modelPricing).length;
+  const overriddenCount = Object.entries(modelPricing).filter(([m, v]) => {
+    const d = defaultPricing[m];
+    return d && (v.inputPer1M !== d.inputPer1M || v.outputPer1M !== d.outputPer1M);
+  }).length;
 
   const handleSaveFx = async () => {
     const rate = Number(fxRate);
@@ -421,12 +428,37 @@ export function SettingsPage() {
       </div>
 
       {/* ─── Model Pricing ─── */}
+      {/* Collapsed by default: it is the longest block on the page and an override
+          most people never need, since the built-in rates track the providers'
+          published pricing. The summary says when that is no longer true. */}
       <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         Model Pricing ($/1M tokens)
       </h2>
-      <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px', lineHeight: 1.5 }}>
-        Per-model token pricing used for cost calculation. Defaults from Google/Anthropic/OpenAI/Mistral official pricing.
-        Edit any value to override — your changes are saved and used for future cost estimates.
+      <button
+        type="button"
+        onClick={() => setPricingOpen((v) => !v)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 16px', background: T.panel, border: `1px solid ${T.border}`,
+          borderRadius: 10, cursor: 'pointer', fontFamily: T.font, textAlign: 'left',
+          marginBottom: pricingOpen ? 0 : 16,
+        }}
+      >
+        <span style={{ fontSize: 12, color: T.muted }}>
+          {overriddenCount > 0
+            ? `${overriddenCount} model${overriddenCount === 1 ? '' : 's'} overridden · the rest use default rates`
+            : `${pricedModelCount} models · all using default rates`}
+        </span>
+        <span style={{ fontSize: 12, color: T.accent, fontWeight: 600 }}>
+          {pricingOpen ? 'Hide' : 'Edit rates'}
+        </span>
+      </button>
+
+      {pricingOpen && (
+      <>
+      <p style={{ fontSize: 12, color: T.muted, margin: '12px 0', lineHeight: 1.5 }}>
+        Per-model token pricing used for cost calculation. Defaults track each provider's
+        published pricing. Edit any value to override — changes apply to future extractions.
       </p>
 
       <div style={card}>
@@ -522,6 +554,8 @@ export function SettingsPage() {
           </span>
         </div>
       </div>
+      </>
+      )}
 
       {/* ─── API Keys ─── */}
       <h2 style={{ fontSize: 14, fontWeight: 700, margin: '24px 0 10px', color: T.muted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>

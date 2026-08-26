@@ -8,6 +8,8 @@ services:
     ports: [ "5432:5432" ]
     volumes:
       - billparser_pg_data:/var/lib/postgresql/data
+      # Creates billparser_test on first start so `npm test` never touches the dev data.
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U billparser_app_dev -d billparser_dev" ]
       interval: 5s
