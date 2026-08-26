@@ -2,6 +2,7 @@
  * Mistral OCR — extract markdown from PDF/image using Mistral's dedicated OCR endpoint.
  * POST https://api.mistral.ai/v1/ocr (NOT chat/completions)
  */
+import { getSettings } from '../../shared/settings.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { isPdf, isImage } from '../../shared/storage.js';
 import { resolveProviderKey } from './resolveKey.js';
@@ -10,8 +11,12 @@ const MISTRAL_OCR_URL = 'https://api.mistral.ai/v1/ocr';
 const OCR_MODEL = 'mistral-ocr-latest';
 const TIMEOUT_MS = 120_000;
 
-/** ~$2 per 1000 pages (Mistral OCR pricing). */
-const MISTRAL_OCR_PRICE_PER_PAGE = 0.002;
+/**
+ * Fallback price per 1,000 pages, used only when Settings has no value.
+ * Mistral bills OCR per page, not per token, so this cannot live in the
+ * $/1M-token table — the editable value is Settings → mistralOcrPricePer1kPages.
+ */
+const MISTRAL_OCR_FALLBACK_PER_1K_PAGES = 2;
 
 function detectImageMime(buf: Buffer): string {
   if (buf[0] === 0x89) return 'image/png';
@@ -37,13 +42,21 @@ function buildDocumentPayload(buf: Buffer): Record<string, string> {
   throw new Error('Unsupported file type — upload a PDF or image (JPEG/PNG/WebP)');
 }
 
-function estimateCostUsd(pagesProcessed: number): number {
-  return pagesProcessed * MISTRAL_OCR_PRICE_PER_PAGE;
+async function estimateCostUsd(pagesProcessed: number): Promise<number> {
+  const per1k = (await getSettings()).mistralOcrPricePer1kPages ?? MISTRAL_OCR_FALLBACK_PER_1K_PAGES;
+  return (pagesProcessed / 1000) * per1k;
 }
 
-function usageFromPages(pagesProcessed: number): LlmUsage {
-  const tokens = pagesProcessed * 1000;
-  return { prompt_tokens: tokens, completion_tokens: 0, total_tokens: tokens };
+/**
+ * Mistral OCR reports pages, not tokens.
+ *
+ * This used to return pagesProcessed * 1000 invented tokens purely to fill the
+ * LlmUsage shape, which made a fabricated number indistinguishable from a
+ * measured one everywhere it surfaced — including the Analytics token totals.
+ * Zero is honest: the cost is computed from `pages`, which is carried alongside.
+ */
+function usageFromPages(): LlmUsage {
+  return { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 }
 
 export interface MistralOcrResult {
@@ -103,8 +116,8 @@ export async function mistralOcr(buf: Buffer, returnCost?: boolean): Promise<str
   if (!markdown.trim()) throw new Error('Mistral OCR returned empty response');
 
   const pagesProcessed = json.usage_info?.pages_processed ?? (pages.length || 1);
-  const usage = usageFromPages(pagesProcessed);
-  const pageCost = estimateCostUsd(pagesProcessed);
+  const usage = usageFromPages();
+  const pageCost = await estimateCostUsd(pagesProcessed);
   const cost: OcrStepCost = {
     provider: 'mistral',
     model: OCR_MODEL,
@@ -112,6 +125,7 @@ export async function mistralOcr(buf: Buffer, returnCost?: boolean): Promise<str
     cost_usd: pageCost,
     input_cost_usd: pageCost,
     output_cost_usd: 0,
+    pages: pagesProcessed,
     latency_ms,
   };
 

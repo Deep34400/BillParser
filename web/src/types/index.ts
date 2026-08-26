@@ -59,6 +59,8 @@ export interface Invoice {
   totalInputCostUsd?: number | null; totalOutputCostUsd?: number | null;
   /** $/1M rates the cost was computed with — lets the UI show a verifiable figure. */
   inputRatePer1m?: number | null; outputRatePer1m?: number | null;
+  /** Pages billed by a per-page extraction step (Mistral OCR); null when token-billed. */
+  extractionPages?: number | null;
   extractionProvider?: string | null; structuringProvider?: string | null;
   extractionModel?: string | null; structuringModel?: string | null;
   extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;
@@ -106,6 +108,8 @@ export interface SettingsData {
   /** Cap on model reasoning tokens per call. */
   thinkingBudget?: number;
   thinkingBudgetRange?: { min: number; max: number };
+  /** Mistral OCR price per 1,000 pages — billed per page, not per token. */
+  mistralOcrPricePer1kPages?: number;
 }
 export interface VehicleSpend { vehicle_id: string; registration_number: string | null; total_bills: number; total_amount: number; parts_amount: number; labour_amount: number; total_tax: number; }
 export interface CostPerKm { vehicle_id: string; registration_number: string | null; total_spend: number; km_range: number | null; cost_per_km: number | null; }

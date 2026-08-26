@@ -723,6 +723,9 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
   const unaccountedTokens = hasBreakdown && reportedTotalTokens > 0
     ? reportedTotalTokens - componentSum
     : 0;
+  // Mistral OCR is billed per page and reports no tokens, so a token line would
+  // read 0 next to a real cost. Show what was actually billed instead.
+  const extractionPages = inv.extractionPages ?? null;
   const inputRate = inv.inputRatePer1m ?? null;
   const outputRate = inv.outputRatePer1m ?? null;
   // Prices read wrong unpadded ($0.3/1M), but blindly padding to 2 dp would round
@@ -800,6 +803,15 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
                 <span style={{ paddingLeft: 12 }}>
                   ↳ {unaccountedTokens > 0 ? '+' : ''}{unaccountedTokens.toLocaleString()} tokens reported by the
                   provider beyond input + output (e.g. cached input) — not separately priced here
+                </span>
+                <span />
+              </div>
+            )}
+            {extractionPages != null && (
+              <div style={{ ...rowStyle, paddingTop: 0, color: T.muted, fontSize: 11 }}>
+                <span style={{ paddingLeft: 12 }}>
+                  ↳ extraction billed per page — {extractionPages.toLocaleString()} page
+                  {extractionPages === 1 ? '' : 's'}, not tokens
                 </span>
                 <span />
               </div>

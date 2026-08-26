@@ -101,6 +101,7 @@ export function SettingsPage() {
   const [savingPricing, setSavingPricing] = useState(false);
   const [savingFx, setSavingFx] = useState(false);
   const [pricingOpen, setPricingOpen] = useState(false);
+  const [ocrPageRate, setOcrPageRate] = useState<string>('');
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
@@ -128,6 +129,7 @@ export function SettingsPage() {
       if (s.defaultModelPricing) setDefaultPricing(s.defaultModelPricing);
       if (typeof s.usdToInr === 'number') { setFxRate(String(s.usdToInr)); setSavedFxRate(s.usdToInr); }
       if (typeof s.thinkingBudget === 'number') { setThinkingBudget(s.thinkingBudget); setSavedThinkingBudget(s.thinkingBudget); }
+      if (typeof s.mistralOcrPricePer1kPages === 'number') setOcrPageRate(String(s.mistralOcrPricePer1kPages));
       try {
         const { credentials } = await api.revealCreds();
         const cv: Record<string, string> = {};
@@ -228,7 +230,10 @@ export function SettingsPage() {
           overrides[model] = price;
         }
       }
-      await api.saveSettings({ modelPricing: overrides });
+      await api.saveSettings({
+        modelPricing: overrides,
+        ...(Number(ocrPageRate) >= 0 && ocrPageRate !== '' ? { mistralOcrPricePer1kPages: Number(ocrPageRate) } : {}),
+      });
       flash('Model pricing saved');
     } catch (e) { flash(`Error: ${(e as Error).message}`); }
     finally { setSavingPricing(false); }
@@ -552,6 +557,22 @@ export function SettingsPage() {
           <span style={{ fontSize: 11, color: T.muted }}>
             Prices are in USD per 1 million tokens. Changes apply to future cost calculations.
           </span>
+        </div>
+
+        <div style={{ borderTop: `1px solid ${T.border}`, marginTop: 18, paddingTop: 16 }}>
+          <div style={lbl}>Mistral OCR — $ per 1,000 pages</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <input
+              type="number" step="0.01" min="0" value={ocrPageRate}
+              onChange={(e) => setOcrPageRate(e.target.value)}
+              placeholder="2"
+              style={{ ...inp, width: 140 }}
+            />
+            <span style={{ fontSize: 11, color: T.muted, flex: 1, minWidth: 260, lineHeight: 1.5 }}>
+              Mistral bills OCR per page, not per token, so it cannot sit in the table above.
+              Used only in Split mode. Saved with <strong>Save Pricing</strong>.
+            </span>
+          </div>
         </div>
       </div>
       </>

@@ -56,6 +56,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       defaultModelPricing: DEFAULT_MODEL_PRICING,
       usdToInr: settings.usdToInr ?? 96,
       thinkingBudget: resolveThinkingBudget(settings.thinkingBudget),
+      mistralOcrPricePer1kPages: settings.mistralOcrPricePer1kPages ?? 2,
       thinkingBudgetRange: { min: THINKING_BUDGET_MIN, max: THINKING_BUDGET_MAX },
     };
   });
@@ -93,6 +94,11 @@ export async function settingsRoutes(app: FastifyInstance) {
       // makes the model get invoice arithmetic wrong, and it fails silently.
       patch.thinkingBudget = resolveThinkingBudget(b);
     }
+    if (body.mistralOcrPricePer1kPages !== undefined) {
+      const r = Number(body.mistralOcrPricePer1kPages);
+      if (!Number.isFinite(r) || r < 0) throw new Error('mistralOcrPricePer1kPages must be zero or greater');
+      patch.mistralOcrPricePer1kPages = r;
+    }
     const saved = await saveSettings(patch);
     return {
       ok: true,
@@ -103,6 +109,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       singleModel: saved.singleModel,
       usdToInr: saved.usdToInr,
       thinkingBudget: saved.thinkingBudget,
+      mistralOcrPricePer1kPages: saved.mistralOcrPricePer1kPages,
     };
   });
 

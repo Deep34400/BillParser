@@ -46,6 +46,12 @@ export interface AppSettings {
    * bounded-to-generous, never off.
    */
   thinkingBudget?: number;
+  /**
+   * Mistral OCR price per 1,000 pages. Billed per page, not per token, so it
+   * cannot live in the $/1M-token table — it was previously a constant in
+   * providers/mistralOcr.ts and took a deploy to correct.
+   */
+  mistralOcrPricePer1kPages?: number;
 }
 
 const DEFAULTS: AppSettings = {
@@ -58,6 +64,7 @@ const DEFAULTS: AppSettings = {
   // ~95.7 as of Aug 2026; override in Settings when it drifts.
   usdToInr: 96,
   thinkingBudget: 2048,
+  mistralOcrPricePer1kPages: 2,
 };
 
 const SETTINGS_ID = 1;
@@ -78,6 +85,7 @@ function rowToSettings(row: typeof appSettings.$inferSelect): AppSettings {
     modelPricing: (row.modelPricing as Record<string, ModelPrice> | null) ?? undefined,
     usdToInr: row.usdToInr ?? undefined,
     thinkingBudget: row.thinkingBudget ?? undefined,
+    mistralOcrPricePer1kPages: row.mistralOcrPricePer1kPages ?? undefined,
   };
 }
 

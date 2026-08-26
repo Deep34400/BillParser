@@ -65,6 +65,8 @@ export interface OcrStepCost {
   /** $/1M rates applied to this call, so the cost can be re-derived later. */
   input_rate_per_1m?: number;
   output_rate_per_1m?: number;
+  /** Pages billed, for steps priced per page rather than per token (Mistral OCR). */
+  pages?: number;
   latency_ms: number;
 }
 
@@ -80,6 +82,8 @@ export interface OcrCostInfo {
   /** $/1M rates applied — persisted so the cost stays auditable. */
   input_rate_per_1m?: number;
   output_rate_per_1m?: number;
+  /** Pages billed by a per-page step, if any. */
+  extraction_pages?: number;
   total_input_cost_usd: number;
   total_output_cost_usd: number;
 }

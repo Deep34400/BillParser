@@ -115,6 +115,7 @@ export function mapParsedToBill(
     extraction_cost_usd: opts.costInfo?.extraction?.cost_usd ?? null,
     structuring_cost_usd: opts.costInfo?.structuring?.cost_usd ?? null,
     total_cost_usd: opts.costInfo?.total_cost_usd ?? null,
+    extraction_pages: opts.costInfo?.extraction_pages ?? null,
     input_rate_per_1m: opts.costInfo?.input_rate_per_1m ?? null,
     output_rate_per_1m: opts.costInfo?.output_rate_per_1m ?? null,
     fx_rate_usd_inr: opts.fxRateUsdInr ?? null,
@@ -218,6 +219,7 @@ export interface FrontendInvoice {
   totalOutputTokens?: number | null;
   totalThinkingTokens?: number | null;
   totalInputCostUsd?: number | null;
+  extractionPages?: number | null;
   inputRatePer1m?: number | null;
   outputRatePer1m?: number | null;
   totalOutputCostUsd?: number | null;
@@ -323,6 +325,7 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     totalOutputTokens: bill.total_output_tokens ?? null,
     totalThinkingTokens: bill.total_thinking_tokens ?? null,
     totalInputCostUsd: bill.total_input_cost_usd ?? null,
+    extractionPages: bill.extraction_pages ?? null,
     inputRatePer1m: bill.input_rate_per_1m ?? null,
     outputRatePer1m: bill.output_rate_per_1m ?? null,
     totalOutputCostUsd: bill.total_output_cost_usd ?? null,

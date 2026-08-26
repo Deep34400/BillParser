@@ -117,6 +117,9 @@ export const bills = pgTable('bills', {
   structuringLatencyMs: integer('structuring_latency_ms'),
   totalLatencyMs: integer('total_latency_ms'),
 
+  /** Pages billed by a per-page extraction step (Mistral OCR). */
+  extractionPages: integer('extraction_pages'),
+
   /** $/1M model rates this cost was computed with. Stored so the figure stays
       reproducible (tokens × rate = cost) after someone edits pricing in Settings. */
   inputRatePer1m: numeric('input_rate_per_1m', { mode: 'number', precision: 18, scale: 10 }),
@@ -251,6 +254,7 @@ export const appSettings = pgTable('app_settings', {
   modelPricing: jsonb('model_pricing'),
   usdToInr: numeric('usd_to_inr', { mode: 'number', precision: 10, scale: 4 }),
   thinkingBudget: integer('thinking_budget'),
+  mistralOcrPricePer1kPages: numeric('mistral_ocr_price_per_1k_pages', { mode: 'number', precision: 10, scale: 4 }),
 }, (t) => [
   check('app_settings_singleton_check', sql`${t.id} = 1`),
 ]);

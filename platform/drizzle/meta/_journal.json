@@ -43,6 +43,13 @@
       "when": 1787715155452,
       "tag": "0005_perpetual_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787720402743,
+      "tag": "0006_sudden_roulette",
+      "breakpoints": true
     }
   ]
 }

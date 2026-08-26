@@ -208,6 +208,9 @@ export interface BillDoc {
   /** Linked vendor from Vendor Registry (set after OCR completion). */
   vendor_id?: string | null;
 
+  /** Pages billed by a per-page extraction step (Mistral OCR). Null for token-billed steps. */
+  extraction_pages?: number | null;
+
   /** $/1M rates the cost was computed with — makes the figure auditable. */
   input_rate_per_1m?: number | null;
   output_rate_per_1m?: number | null;
