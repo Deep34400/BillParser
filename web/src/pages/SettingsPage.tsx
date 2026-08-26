@@ -60,6 +60,18 @@ interface ProvDef {
   desc: string;
 }
 
+/**
+ * Reasoning-limit presets. No "off" option on purpose: with thinking disabled the
+ * model got invoice arithmetic wrong on every measured attempt (₹8,083 against a
+ * correct ₹7,080) and the failure is silent, so the range runs bounded→generous.
+ * Labels describe headroom, not a quality grade — every option here tested correct.
+ */
+const THINKING_OPTIONS = [
+  { value: 1024, label: 'Tight — 1,024 tokens', hint: 'Caps slow outliers. Fine for simple, single-page invoices.' },
+  { value: 2048, label: 'Balanced — 2,048 tokens (default)', hint: 'Covers every invoice seen so far, including the heaviest.' },
+  { value: 4096, label: 'Generous — 4,096 tokens', hint: 'Extra headroom for dense or multi-page invoices. Slower worst case.' },
+];
+
 const ALL_PROVIDERS: ProvDef[] = [
   { id: 'mistral', label: 'Mistral', models: ['mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest', 'pixtral-12b-2409'], canStructure: true, canSingle: true, desc: 'Mistral — Single: PDF uses OCR+structure (stays Single mode); images use Pixtral' },
   { id: 'gemini', label: 'Google Gemini', models: ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], canStructure: true, canSingle: true, desc: 'Gemini — always Vertex AI + ADC (no API key). Pick any model; default Single mode.' },
@@ -91,6 +103,7 @@ export function SettingsPage() {
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
 
+  const [thinkingBudget, setThinkingBudget] = useState<number>(2048);
   const [fxRate, setFxRate] = useState<string>('');
   const [savedFxRate, setSavedFxRate] = useState<number | null>(null);
 
@@ -111,6 +124,7 @@ export function SettingsPage() {
       if (s.modelPricing) setModelPricing(s.modelPricing);
       if (s.defaultModelPricing) setDefaultPricing(s.defaultModelPricing);
       if (typeof s.usdToInr === 'number') { setFxRate(String(s.usdToInr)); setSavedFxRate(s.usdToInr); }
+      if (typeof s.thinkingBudget === 'number') setThinkingBudget(s.thinkingBudget);
       try {
         const { credentials } = await api.revealCreds();
         const cv: Record<string, string> = {};
@@ -136,6 +150,7 @@ export function SettingsPage() {
         structuringModel: structModel,
         singleProvider: singleProv,
         singleModel: singleModel,
+        thinkingBudget,
         ...(Number(fxRate) > 0 ? { usdToInr: Number(fxRate) } : {}),
       });
       if (Number(fxRate) > 0) { setSavedFxRate(Number(fxRate)); setUsdToInr(Number(fxRate)); }
@@ -335,6 +350,24 @@ export function SettingsPage() {
             </div>
           </>
         )}
+
+        {/* Reasoning limit — a ceiling on how much the model may think per call.
+            Deliberately has no "off": with thinking disabled the model gets
+            invoice arithmetic wrong, and it fails silently. */}
+        <div style={{ marginBottom: 18, paddingTop: 4, borderTop: `1px solid ${T.border}` }}>
+          <div style={{ ...lbl, marginTop: 14 }}>Reasoning limit</div>
+          <select style={sel} value={thinkingBudget} onChange={(e) => setThinkingBudget(Number(e.target.value))}>
+            {THINKING_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <div style={note}>
+            {THINKING_OPTIONS.find((o) => o.value === thinkingBudget)?.hint}
+            <br />
+            Models use only what they need — typically 150–800 tokens — up to this cap, so
+            raising it costs nothing on ordinary invoices and only affects complex ones.
+          </div>
+        </div>
 
         <button style={btnP} disabled={saving} onClick={() => void handleSave()}>
           {saving ? 'Saving...' : `Save as ${mode.toUpperCase()} mode`}

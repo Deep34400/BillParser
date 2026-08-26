@@ -103,6 +103,9 @@ export interface SettingsData {
   defaultModelPricing?: Record<string, ModelPrice>;
   /** USD→INR rate used for rupee display. */
   usdToInr?: number;
+  /** Cap on model reasoning tokens per call. */
+  thinkingBudget?: number;
+  thinkingBudgetRange?: { min: number; max: number };
 }
 export interface VehicleSpend { vehicle_id: string; registration_number: string | null; total_bills: number; total_amount: number; parts_amount: number; labour_amount: number; total_tax: number; }
 export interface CostPerKm { vehicle_id: string; registration_number: string | null; total_spend: number; km_range: number | null; cost_per_km: number | null; }

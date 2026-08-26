@@ -24,6 +24,35 @@
  *    thinking corrupts extracted financial figures.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { resolveThinkingBudget, THINKING_BUDGET_MIN, THINKING_BUDGET_MAX } from '../../../src/ocr/providers/geminiClient.js';
+
+describe('resolveThinkingBudget', () => {
+  it('refuses to go below the floor, however it is configured', () => {
+    // The floor exists because a too-small budget makes the model get invoice
+    // arithmetic wrong, and the failure is silent.
+    for (const bad of [0, -1, 1, 256, 512, 1023]) {
+      expect(resolveThinkingBudget(bad), String(bad)).toBe(THINKING_BUDGET_MIN);
+    }
+  });
+
+  it('caps runaway values so latency stays bounded', () => {
+    expect(resolveThinkingBudget(1_000_000)).toBe(THINKING_BUDGET_MAX);
+  });
+
+  it('passes through values inside the safe range', () => {
+    for (const ok of [1024, 2048, 4096, 8192]) {
+      expect(resolveThinkingBudget(ok), String(ok)).toBe(ok);
+    }
+  });
+
+  it('falls back to the default when unset or nonsense', () => {
+    for (const v of [undefined, null, NaN, Infinity]) {
+      const r = resolveThinkingBudget(v as number);
+      expect(r).toBeGreaterThanOrEqual(THINKING_BUDGET_MIN);
+      expect(r).toBeLessThanOrEqual(THINKING_BUDGET_MAX);
+    }
+  });
+});
 
 function captureRequestBody() {
   const fetchMock = vi.fn().mockResolvedValue({

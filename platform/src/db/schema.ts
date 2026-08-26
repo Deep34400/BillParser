@@ -250,6 +250,7 @@ export const appSettings = pgTable('app_settings', {
   emailIntakeAllowedSenders: text('email_intake_allowed_senders').array(),
   modelPricing: jsonb('model_pricing'),
   usdToInr: numeric('usd_to_inr', { mode: 'number', precision: 10, scale: 4 }),
+  thinkingBudget: integer('thinking_budget'),
 }, (t) => [
   check('app_settings_singleton_check', sql`${t.id} = 1`),
 ]);

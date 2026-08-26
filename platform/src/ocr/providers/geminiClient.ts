@@ -33,7 +33,17 @@ const TIMEOUT_MS = 120_000;
  * gemini-3.1-pro-preview (HTTP 400), and 'minimal' silently means zero thinking
  * on 3.5/3.6-flash. thinkingBudget is accepted by every model on offer.
  */
-const THINKING_BUDGET_TOKENS = 2048;
+const THINKING_BUDGET_DEFAULT = 2048;
+/** Hard floor. Below this the model starts getting invoice arithmetic wrong, and
+ *  it fails silently, so no configured value is allowed underneath it. */
+export const THINKING_BUDGET_MIN = 1024;
+export const THINKING_BUDGET_MAX = 8192;
+
+/** Clamp a configured budget into the safe range. */
+export function resolveThinkingBudget(configured?: number | null): number {
+  if (typeof configured !== 'number' || !Number.isFinite(configured)) return THINKING_BUDGET_DEFAULT;
+  return Math.min(THINKING_BUDGET_MAX, Math.max(THINKING_BUDGET_MIN, Math.round(configured)));
+}
 
 const auth = new GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],
@@ -162,12 +172,13 @@ export async function geminiGenerateContent(opts: {
 }): Promise<GeminiGenerateResult> {
   const t0 = Date.now();
   const gemini3 = isGemini3Family(opts.model);
+  const thinkingBudget = resolveThinkingBudget((await getSettings()).thinkingBudget);
   const generationConfig: Record<string, unknown> = {
     temperature: 0,
     // Thinking models consume output budget for reasoning — give headroom for the JSON.
     maxOutputTokens: gemini3 ? 65536 : 16384,
     responseMimeType: 'application/json',
-    thinkingConfig: { thinkingBudget: THINKING_BUDGET_TOKENS },
+    thinkingConfig: { thinkingBudget },
   };
 
   const body = {

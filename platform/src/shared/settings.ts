@@ -35,6 +35,17 @@ export interface AppSettings {
    * (`fx_rate_usd_inr`), so changing it never rewrites historical figures.
    */
   usdToInr?: number;
+  /**
+   * Cap on Gemini reasoning tokens per call. A ceiling, not an allocation —
+   * models use what they need (typically 150–800) and stop, so raising it costs
+   * nothing on ordinary invoices and only affects complex ones.
+   *
+   * Floored well above zero on purpose: with thinking disabled the model got
+   * invoice arithmetic wrong every time (₹8,083 against a correct ₹7,080). That
+   * failure is silent — the number still looks plausible — so the range is
+   * bounded-to-generous, never off.
+   */
+  thinkingBudget?: number;
 }
 
 const DEFAULTS: AppSettings = {
@@ -46,6 +57,7 @@ const DEFAULTS: AppSettings = {
   singleModel: 'gemini-2.5-flash',
   // ~95.7 as of Aug 2026; override in Settings when it drifts.
   usdToInr: 96,
+  thinkingBudget: 2048,
 };
 
 const SETTINGS_ID = 1;
@@ -65,6 +77,7 @@ function rowToSettings(row: typeof appSettings.$inferSelect): AppSettings {
     emailIntakeAllowedSenders: row.emailIntakeAllowedSenders ?? undefined,
     modelPricing: (row.modelPricing as Record<string, ModelPrice> | null) ?? undefined,
     usdToInr: row.usdToInr ?? undefined,
+    thinkingBudget: row.thinkingBudget ?? undefined,
   };
 }
 

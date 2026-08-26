@@ -7,6 +7,7 @@ import {
   clearProviderCredentials,
   getAllCredentials,
 } from '../shared/settings.js';
+import { resolveThinkingBudget, THINKING_BUDGET_MIN, THINKING_BUDGET_MAX } from '../ocr/providers/geminiClient.js';
 import { DEFAULT_MODEL_PRICING } from '../shared/modelPricing.js';
 
 const PROVIDERS = [
@@ -54,6 +55,8 @@ export async function settingsRoutes(app: FastifyInstance) {
       modelPricing: mergedPricing,
       defaultModelPricing: DEFAULT_MODEL_PRICING,
       usdToInr: settings.usdToInr ?? 96,
+      thinkingBudget: resolveThinkingBudget(settings.thinkingBudget),
+      thinkingBudgetRange: { min: THINKING_BUDGET_MIN, max: THINKING_BUDGET_MAX },
     };
   });
 
@@ -83,6 +86,13 @@ export async function settingsRoutes(app: FastifyInstance) {
       }
       patch.usdToInr = rate;
     }
+    if (body.thinkingBudget !== undefined) {
+      const b = Number(body.thinkingBudget);
+      if (!Number.isFinite(b)) throw new Error('thinkingBudget must be a number');
+      // Clamped rather than rejected: the floor exists because a too-small budget
+      // makes the model get invoice arithmetic wrong, and it fails silently.
+      patch.thinkingBudget = resolveThinkingBudget(b);
+    }
     const saved = await saveSettings(patch);
     return {
       ok: true,
@@ -92,6 +102,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       singleProvider: saved.singleProvider,
       singleModel: saved.singleModel,
       usdToInr: saved.usdToInr,
+      thinkingBudget: saved.thinkingBudget,
     };
   });
 
