@@ -186,7 +186,9 @@ export async function billRoutes(app: FastifyInstance) {
    * Query/body:
    *   start_date, end_date  — YYYY-MM-DD (created_at, inclusive)
    *   mode                  — "check" (default, dry-run) | "update" (persist)
-   *   include_verified      — "1" to also re-check VERIFIED bills
+   *   status                — optional filter: NEED_REVIEW | OCR_COMPLETED | VERIFIED
+   *                           (comma-separated ok). Omit = all eligible.
+   *   include_verified      — "1" to also re-check VERIFIED bills (when status omitted)
    *
    * Auth: API key or JWT session.
    */
@@ -205,6 +207,12 @@ export async function billRoutes(app: FastifyInstance) {
         || body.include_verified === '1'
         || qs.include_verified === '1'
         || qs.include_verified === 'true';
+      const statusRaw = body.status ?? qs.status;
+      const status = statusRaw == null || statusRaw === ''
+        ? null
+        : Array.isArray(statusRaw)
+          ? statusRaw.map(String)
+          : String(statusRaw);
 
       if (!startDate || !endDate) {
         return reply.code(400).send({
@@ -218,11 +226,12 @@ export async function billRoutes(app: FastifyInstance) {
         endDate,
         mode,
         includeVerified,
+        status,
       });
       return { success: true, data };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (/start_date|end_date|Invalid/i.test(msg)) {
+      if (/start_date|end_date|Invalid|status filter/i.test(msg)) {
         return reply.code(400).send({ success: false, message: msg });
       }
       req.log.error(err, 'reconcile-range failed');

@@ -9,12 +9,23 @@ import { cacheInvalidate } from '../../shared/cache.js';
 
 export type ReconcileRangeMode = 'check' | 'update';
 
+const ALLOWED_STATUS_FILTER: BillStatus[] = [
+  'OCR_COMPLETED',
+  'NEED_REVIEW',
+  'VERIFIED',
+];
+
 export interface ReconcileRangeOpts {
   startDate: string;
   endDate: string;
   mode?: ReconcileRangeMode;
   /** When true, also re-check VERIFIED bills (may set NEED_REVIEW). Default false. */
   includeVerified?: boolean;
+  /**
+   * Optional status filter (e.g. "NEED_REVIEW" or "NEED_REVIEW,OCR_COMPLETED").
+   * When omitted, all eligible statuses are picked.
+   */
+  status?: string | BillStatus | BillStatus[] | null;
   maxBills?: number;
 }
 
@@ -35,6 +46,7 @@ export interface ReconcileRangeResult {
   start_date: string;
   end_date: string;
   mode: ReconcileRangeMode;
+  status_filter: BillStatus[] | null;
   scanned: number;
   eligible: number;
   would_update: number;
@@ -65,6 +77,26 @@ export function parseCreatedAtRange(startDate: string, endDate: string): { start
   return { startIso, endIso };
 }
 
+/** Parse optional status=NEED_REVIEW (or comma list). null = all eligible. */
+export function parseStatusFilter(
+  raw?: string | BillStatus | BillStatus[] | null,
+): BillStatus[] | null {
+  if (raw == null || raw === '') return null;
+  const parts = (Array.isArray(raw) ? raw : String(raw).split(','))
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+  if (!parts.length) return null;
+
+  const out: BillStatus[] = [];
+  for (const p of parts) {
+    if (!ALLOWED_STATUS_FILTER.includes(p as BillStatus)) {
+      throw new Error(`Invalid status filter "${p}". Allowed: ${ALLOWED_STATUS_FILTER.join(', ')}`);
+    }
+    if (!out.includes(p as BillStatus)) out.push(p as BillStatus);
+  }
+  return out;
+}
+
 function nextStatus(bill: BillDoc, hasCodes: boolean, includeVerified: boolean): BillStatus {
   if (SKIP_STATUSES.includes(bill.ocr_status)) return bill.ocr_status;
   if (bill.ocr_status === 'VERIFIED' && !includeVerified) return 'VERIFIED';
@@ -73,9 +105,17 @@ function nextStatus(bill: BillDoc, hasCodes: boolean, includeVerified: boolean):
   return 'OCR_COMPLETED';
 }
 
-function isEligible(bill: BillDoc, includeVerified: boolean): boolean {
+function isEligible(
+  bill: BillDoc,
+  includeVerified: boolean,
+  statusFilter: BillStatus[] | null,
+): boolean {
   if (SKIP_STATUSES.includes(bill.ocr_status)) return false;
-  if (bill.ocr_status === 'VERIFIED' && !includeVerified) return false;
+  if (statusFilter) {
+    if (!statusFilter.includes(bill.ocr_status)) return false;
+  } else if (bill.ocr_status === 'VERIFIED' && !includeVerified) {
+    return false;
+  }
   if (!bill.parsed_data || typeof bill.parsed_data !== 'object') return false;
   return true;
 }
@@ -83,8 +123,13 @@ function isEligible(bill: BillDoc, includeVerified: boolean): boolean {
 export async function reconcileBillsInCreatedAtRange(opts: ReconcileRangeOpts): Promise<ReconcileRangeResult> {
   const mode: ReconcileRangeMode = opts.mode === 'update' ? 'update' : 'check';
   const includeVerified = opts.includeVerified === true;
+  const statusFilter = parseStatusFilter(opts.status);
   const maxBills = Math.min(Math.max(opts.maxBills ?? DEFAULT_MAX, 1), DEFAULT_MAX);
   const { startIso, endIso } = parseCreatedAtRange(opts.startDate, opts.endDate);
+
+  // Explicit status=VERIFIED implies those bills are in scope
+  const effectiveIncludeVerified =
+    includeVerified || (statusFilter?.includes('VERIFIED') ?? false);
 
   const bills = await listBillsByCreatedAtRange(startIso, endIso, maxBills);
 
@@ -97,7 +142,7 @@ export async function reconcileBillsInCreatedAtRange(opts: ReconcileRangeOpts): 
   let clearedToCompleted = 0;
 
   for (const bill of bills) {
-    if (!isEligible(bill, includeVerified)) {
+    if (!isEligible(bill, effectiveIncludeVerified, statusFilter)) {
       skipped += 1;
       continue;
     }
@@ -107,7 +152,7 @@ export async function reconcileBillsInCreatedAtRange(opts: ReconcileRangeOpts): 
       const codes = review.codes;
       const reasons = review.reasons;
       const hasCodes = codes.length > 0;
-      const next = nextStatus(bill, hasCodes, includeVerified);
+      const next = nextStatus(bill, hasCodes, effectiveIncludeVerified);
       const wouldChange =
         next !== bill.ocr_status
         || JSON.stringify(bill.review_codes ?? []) !== JSON.stringify(codes)
@@ -119,7 +164,6 @@ export async function reconcileBillsInCreatedAtRange(opts: ReconcileRangeOpts): 
 
       let didUpdate = false;
       if (mode === 'update') {
-        // Always refresh reconciliation snapshot; status/codes only when changed
         await updateBill(bill.bill_id, {
           ocr_status: next,
           review_codes: codes.length ? codes : null,
@@ -158,6 +202,7 @@ export async function reconcileBillsInCreatedAtRange(opts: ReconcileRangeOpts): 
     start_date: startIso,
     end_date: endIso,
     mode,
+    status_filter: statusFilter,
     scanned: bills.length,
     eligible: results.length,
     would_update: wouldUpdate,

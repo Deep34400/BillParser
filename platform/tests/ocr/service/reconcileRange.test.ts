@@ -97,6 +97,54 @@ describe('reconcileBillsInCreatedAtRange', () => {
     expect(stored?.total_reconciliation?.matched).toBe(false);
   });
 
+  it('status=NEED_REVIEW only picks NEED_REVIEW bills', async () => {
+    const done = mapParsedToBill('b-done', goodParsed());
+    done.created_at = '2026-08-15T10:00:00.000Z';
+    done.ocr_status = 'OCR_COMPLETED';
+    await createBill(done);
+
+    const nr = mapParsedToBill('b-nr-only', badTotalParsed());
+    nr.created_at = '2026-08-15T11:00:00.000Z';
+    nr.ocr_status = 'NEED_REVIEW';
+    nr.review_codes = ['TOTAL_MISMATCH'];
+    await createBill(nr);
+
+    const r = await reconcileBillsInCreatedAtRange({
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+      mode: 'check',
+      status: 'NEED_REVIEW',
+    });
+
+    expect(r.status_filter).toEqual(['NEED_REVIEW']);
+    expect(r.eligible).toBe(1);
+    expect(r.skipped).toBe(1);
+    expect(r.results[0].bill_id).toBe('b-nr-only');
+    expect(r.results[0].previous_status).toBe('NEED_REVIEW');
+  });
+
+  it('without status picks all eligible (OCR_COMPLETED + NEED_REVIEW)', async () => {
+    const done = mapParsedToBill('b-all-1', goodParsed());
+    done.created_at = '2026-08-15T10:00:00.000Z';
+    done.ocr_status = 'OCR_COMPLETED';
+    await createBill(done);
+
+    const nr = mapParsedToBill('b-all-2', badTotalParsed());
+    nr.created_at = '2026-08-15T11:00:00.000Z';
+    nr.ocr_status = 'NEED_REVIEW';
+    await createBill(nr);
+
+    const r = await reconcileBillsInCreatedAtRange({
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+      mode: 'update',
+    });
+
+    expect(r.status_filter).toBeNull();
+    expect(r.eligible).toBe(2);
+    expect(r.updated).toBe(2);
+  });
+
   it('skips VERIFIED unless include_verified', async () => {
     const bill = mapParsedToBill('b-ver', badTotalParsed());
     bill.created_at = '2026-08-15T12:00:00.000Z';
