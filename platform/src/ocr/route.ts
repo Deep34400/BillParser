@@ -14,6 +14,7 @@ import { runPipeline } from './process.js';
 import { cacheInvalidate } from '../shared/cache.js';
 import { upsertVendorFromInvoice } from '../vendor/vendorService.js';
 import { bearerFromRequest } from '../middleware/auth.js';
+import { reconcileBillsInCreatedAtRange } from './service/reconcileRange.js';
 
 /** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill (so UI shows the chosen model, not mistral). */
 async function applyPipelineSettingsToBill(bill: import('../shared/types.js').BillDoc): Promise<void> {
@@ -174,6 +175,58 @@ export async function billRoutes(app: FastifyInstance) {
       return { counts };
     } catch (err) {
       return reply.code(500).send({ error: 'Failed to count invoices' });
+    }
+  });
+
+  /**
+   * POST /api/invoices/reconcile-range
+   *
+   * Re-run total reconciliation + review codes for bills in a created_at window.
+   *
+   * Query/body:
+   *   start_date, end_date  — YYYY-MM-DD (created_at, inclusive)
+   *   mode                  — "check" (default, dry-run) | "update" (persist)
+   *   include_verified      — "1" to also re-check VERIFIED bills
+   *
+   * Auth: API key or JWT session.
+   */
+  app.post('/api/invoices/reconcile-range', async (req, reply) => {
+    try {
+      if (!req.appUser) {
+        return reply.status(401).send({ success: false, message: 'API key or session token required' });
+      }
+      const qs = req.query as Record<string, string | undefined>;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const startDate = String(body.start_date ?? qs.start_date ?? '').trim();
+      const endDate = String(body.end_date ?? qs.end_date ?? '').trim();
+      const modeRaw = String(body.mode ?? qs.mode ?? 'check').toLowerCase();
+      const mode = modeRaw === 'update' ? 'update' as const : 'check' as const;
+      const includeVerified = body.include_verified === true
+        || body.include_verified === '1'
+        || qs.include_verified === '1'
+        || qs.include_verified === 'true';
+
+      if (!startDate || !endDate) {
+        return reply.code(400).send({
+          success: false,
+          message: 'start_date and end_date are required (YYYY-MM-DD)',
+        });
+      }
+
+      const data = await reconcileBillsInCreatedAtRange({
+        startDate,
+        endDate,
+        mode,
+        includeVerified,
+      });
+      return { success: true, data };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/start_date|end_date|Invalid/i.test(msg)) {
+        return reply.code(400).send({ success: false, message: msg });
+      }
+      req.log.error(err, 'reconcile-range failed');
+      return reply.code(500).send({ success: false, message: msg });
     }
   });
 

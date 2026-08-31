@@ -470,6 +470,27 @@ export function extractPartsFromParsed(billId: string, parsed: ParsedInvoiceData
   return parts;
 }
 
+export async function listBillsByCreatedAtRange(
+  startIso: string,
+  endIso: string,
+  maxDocs = 5_000,
+): Promise<BillDoc[]> {
+  const limit = Math.min(Math.max(maxDocs, 1), 5_000);
+  if (env.localDev) {
+    return Array.from(devStore.bills.values())
+      .filter((b) => b.created_at >= startIso && b.created_at <= endIso)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .slice(0, limit);
+  }
+  const snap = await billsRef()
+    .where('created_at', '>=', startIso)
+    .where('created_at', '<=', endIso)
+    .orderBy('created_at', 'asc')
+    .limit(limit)
+    .get();
+  return snap.docs.map((d) => d.data() as BillDoc);
+}
+
 export async function saveBillParts(parts: BillPartDoc[]): Promise<void> {
   if (!parts.length) return;
   if (env.localDev) {
