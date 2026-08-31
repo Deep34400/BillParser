@@ -190,9 +190,15 @@ export function InvoiceDetailPage() {
 
   // When invoice status transitions to COMPLETED/FAILED after processing, clear processing flag
   useEffect(() => {
-    if (processing && inv && (inv.status === 'COMPLETED' || inv.status === 'FAILED')) {
+    if (processing && inv && (inv.status === 'COMPLETED' || inv.status === 'NEEDS_REVIEW' || inv.status === 'FAILED')) {
       setProcessing(false);
-      setToast(inv.status === 'COMPLETED' ? 'Re-extraction complete' : 'Re-extraction failed');
+      setToast(
+        inv.status === 'FAILED'
+          ? 'Re-extraction failed'
+          : inv.status === 'NEEDS_REVIEW'
+            ? 'Re-extraction complete — needs review'
+            : 'Re-extraction complete',
+      );
     }
   }, [inv?.status, processing]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -523,8 +529,8 @@ export function InvoiceDetailPage() {
         </div>
       </div>
 
-      {/* Review warnings — OCR could not confirm some fields (e.g. handwritten bill, no GST/PAN) */}
-      {!editMode && !inv.verified && (inv.reviewReasons?.length ?? 0) > 0 && (
+      {/* Review warnings — shown when DB status is NEED_REVIEW */}
+      {!editMode && inv.status === 'NEEDS_REVIEW' && (
         <div style={{
           margin: '12px 30px 0',
           padding: '14px 18px',
@@ -538,11 +544,27 @@ export function InvoiceDetailPage() {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>
             ⚠ Needs review — please verify these fields against the document
           </div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {inv.reviewReasons!.map((r, i) => (
-              <li key={i} style={{ marginBottom: 2 }}>{r}</li>
-            ))}
-          </ul>
+          {(inv.reviewReasons?.length ?? 0) > 0 ? (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {inv.reviewReasons!.map((r, i) => (
+                <li key={i} style={{ marginBottom: 2 }}>{r}</li>
+              ))}
+            </ul>
+          ) : (
+            <div style={{ marginBottom: 4 }}>Missing GSTIN and PAN — confirm vendor tax IDs.</div>
+          )}
+          {inv.totalReconciliation && !inv.totalReconciliation.matched && (
+            <div style={{ marginTop: 10, padding: '10px 14px', background: '#fff3f0', borderRadius: 6, fontSize: 12, lineHeight: 1.6 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Total reconciliation</div>
+              <div>Parts base: {money(inv.totalReconciliation.parts_base)} | Labour base: {money(inv.totalReconciliation.labour_base)}</div>
+              {(inv.totalReconciliation.deductibles > 0 || inv.totalReconciliation.salvage > 0) && (
+                <div>Deductibles: {money(inv.totalReconciliation.deductibles)} | Salvage: {money(inv.totalReconciliation.salvage)}</div>
+              )}
+              <div style={{ fontWeight: 600, marginTop: 4 }}>
+                Calculated: {money(inv.totalReconciliation.calculated_total)} vs Printed: {money(inv.totalReconciliation.grand_total_invoice ?? 0)} (diff: {money(inv.totalReconciliation.difference ?? 0)})
+              </div>
+            </div>
+          )}
           <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
             Use <b>Edit fields</b> to correct, then <b>Save &amp; verify</b> to clear this warning.
           </div>
@@ -664,7 +686,7 @@ export function InvoiceDetailPage() {
               </button>
               {showRaw && (
                 <div style={{ marginTop: 10 }}>
-                  <RawOcrBlock rawText={inv.rawText} />
+                  <RawOcrBlock rawText={buildFinalOcrJson(inv)} />
                 </div>
               )}
             </div>
@@ -1235,8 +1257,23 @@ function SummaryColumnsEditor({
 }
 
 // ---------------------------------------------------------------------------
-// RawOcrBlock — shared monospace raw-OCR renderer (or placeholder)
+// RawOcrBlock — final OCR JSON (parsed + review + reconciliation) or raw text
 // ---------------------------------------------------------------------------
+function buildFinalOcrJson(inv: Invoice): string | null {
+  if (inv.parsedData) {
+    return JSON.stringify(
+      {
+        ...inv.parsedData,
+        review_reasons: inv.reviewReasons ?? [],
+        total_reconciliation: inv.totalReconciliation ?? null,
+      },
+      null,
+      2,
+    );
+  }
+  return inv.rawText ?? null;
+}
+
 function RawOcrBlock({ rawText, maxHeight }: { rawText: string | null | undefined; maxHeight?: number | string }) {
   if (!rawText) {
     return <div style={{ fontSize: 13, color: T.muted, fontStyle: 'italic' }}>No OCR text</div>;
@@ -1364,7 +1401,7 @@ function PdfSplit({
             <InvoiceBreakdown inv={inv} currency={currency} />
           </>
         ) : (
-          <RawOcrBlock rawText={inv.rawText} maxHeight="calc(100vh - 260px)" />
+          <RawOcrBlock rawText={buildFinalOcrJson(inv)} maxHeight="calc(100vh - 260px)" />
         )}
       </div>
     </div>

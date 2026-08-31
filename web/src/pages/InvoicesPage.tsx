@@ -40,41 +40,7 @@ function buildQs(params: Record<string, string | undefined>): string {
   return s ? '?' + s : '';
 }
 
-function needsReview(inv: Invoice): boolean {
-  if (inv.status !== 'COMPLETED' || inv.verified) return false;
-  if ((inv.confidence ?? 1) < 0.75) return true;
-  return (inv.reviewReasons?.length ?? 0) > 0;
-}
-
-function applyClientFilters(invoices: Invoice[], statusFilter: StatusFilter): Invoice[] {
-  if (statusFilter === 'ALL') return invoices;
-  if (statusFilter === 'NEEDS_REVIEW') return invoices.filter(needsReview);
-  if (statusFilter === 'COMPLETED') return invoices.filter((inv) => inv.status === 'COMPLETED' && !needsReview(inv));
-  return invoices.filter((inv) => inv.status === statusFilter);
-}
-
-function countsByStatus(invoices: Invoice[]): Record<StatusFilter, number> {
-  const counts: Record<StatusFilter, number> = {
-    ALL: invoices.length,
-    DRAFT: 0,
-    PENDING: 0,
-    PROCESSING: 0,
-    COMPLETED: 0,
-    FAILED: 0,
-    NEEDS_REVIEW: 0,
-  };
-  for (const inv of invoices) {
-    if (inv.status === 'DRAFT') counts.DRAFT++;
-    else if (inv.status === 'PENDING') counts.PENDING++;
-    else if (inv.status === 'PROCESSING') counts.PROCESSING++;
-    else if (inv.status === 'COMPLETED') {
-      if (needsReview(inv)) counts.NEEDS_REVIEW++;
-      else counts.COMPLETED++;
-    }
-    else if (inv.status === 'FAILED') counts.FAILED++;
-  }
-  return counts;
-}
+// Status comes from API (DB ocr_status) — no runtime needs-review heuristics.
 
 const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'ALL', label: 'All' },
@@ -85,11 +51,6 @@ const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'FAILED', label: 'Failed' },
   { key: 'NEEDS_REVIEW', label: 'Needs review' },
 ];
-
-function rowDisplayStatus(inv: Invoice): string {
-  if (needsReview(inv)) return 'NEEDS_REVIEW';
-  return inv.status;
-}
 
 function isDuplicate(inv: Invoice): boolean {
   return (inv.reviewReasons ?? []).some((r) => r.startsWith('Duplicate:'));
@@ -148,7 +109,7 @@ export function InvoicesPage() {
       case 'PROCESSING': return { status: 'PROCESSING' };
       case 'COMPLETED': return { completed: '1' }; // OCR_COMPLETED + VERIFIED
       case 'FAILED': return { status: 'FAILED' };
-      case 'NEEDS_REVIEW': return { needsReview: '1' };
+      case 'NEEDS_REVIEW': return { status: 'NEED_REVIEW' };
       default: return {};
     }
   };
@@ -204,16 +165,16 @@ export function InvoicesPage() {
   }, []);
 
   const applyCountsToState = useCallback((c: Record<string, number>) => {
-    const completedRaw = (c['OCR_COMPLETED'] ?? 0) + (c['VERIFIED'] ?? 0);
-    const completedClean = c['completed_clean'] ?? completedRaw;
+    // Persisted NEED_REVIEW only — ignore legacy `needs_review` / `completed_clean`
+    // (older API responses used runtime heuristics and inflated the pill to ~6.5k).
     setGlobalCounts({
-      ALL: c['all'] ?? 0,
+      ALL: c['all'] ?? c['ALL'] ?? 0,
       DRAFT: c['DRAFT'] ?? 0,
       PENDING: c['UPLOADED'] ?? 0,
       PROCESSING: c['PROCESSING'] ?? 0,
-      COMPLETED: completedClean,
+      COMPLETED: (c['OCR_COMPLETED'] ?? 0) + (c['VERIFIED'] ?? 0),
       FAILED: c['FAILED'] ?? 0,
-      NEEDS_REVIEW: c['needs_review'] ?? 0,
+      NEEDS_REVIEW: c['NEED_REVIEW'] ?? 0,
     });
   }, []);
 
@@ -565,8 +526,8 @@ export function InvoicesPage() {
             {loading && allInvoices.length === 0
               ? 'Loading…'
               : statusFilter === 'ALL'
-                ? `${totalRecords.toLocaleString()} invoice${totalRecords !== 1 ? 's' : ''}`
-                : `${totalRecords.toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${globalCounts.ALL.toLocaleString()} total`}
+                ? `${(globalCounts.ALL || totalRecords).toLocaleString()} invoice${(globalCounts.ALL || totalRecords) !== 1 ? 's' : ''}`
+                : `${(globalCounts[statusFilter] ?? totalRecords).toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${(globalCounts.ALL || totalRecords).toLocaleString()} total`}
           </div>
         </div>
 
@@ -879,7 +840,7 @@ export function InvoicesPage() {
                     </td>
                     <td style={tdBase}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <StatusDot status={rowDisplayStatus(row)} />
+                        <StatusDot status={row.status} />
                         {isDuplicate(row) && (
                           <span style={{
                             fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',

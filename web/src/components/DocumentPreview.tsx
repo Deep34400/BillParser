@@ -13,14 +13,6 @@ interface FieldRow {
   value: string | null | undefined;
 }
 
-function displayStatus(inv: Invoice): string {
-  if (inv.status === 'COMPLETED' && !inv.verified) {
-    if ((inv.confidence ?? 1) < 0.75) return 'NEEDS_REVIEW';
-    if ((inv.reviewReasons?.length ?? 0) > 0) return 'NEEDS_REVIEW';
-  }
-  return inv.status;
-}
-
 function CornerIcon() {
   return (
     <span style={{
@@ -51,7 +43,7 @@ export function DocumentPreview({ invoice }: { invoice: Invoice | null }) {
     );
   }
 
-  const statusKey = displayStatus(invoice);
+  const statusKey = invoice.status;
   const statusInfo = STATUS[statusKey] ?? { label: invoice.status, color: T.inkFaint };
 
   const fields: FieldRow[] = [

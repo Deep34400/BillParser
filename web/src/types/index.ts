@@ -1,4 +1,4 @@
-export type InvoiceStatus = 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type InvoiceStatus = 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'NEEDS_REVIEW' | 'FAILED';
 export interface SummaryColumn { label?: string | null; subtotal?: number | null; discount?: number | null; cgst?: number | null; sgst?: number | null; igst?: number | null; total?: number | null; }
 export interface PartsLineItem {
   rate?: number | null; quantity?: number | null; hsn_sac_code?: string | null; tax_percentage?: number | null;
@@ -62,6 +62,12 @@ export interface Invoice {
   extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;
   lineItems?: LineItem[]; runs?: ExtractionRun[];
   reviewReasons?: string[] | null;
+  totalReconciliation?: {
+    matched: boolean; calculated_total: number; grand_total_invoice: number | null;
+    difference: number | null; tolerance: 2;
+    parts_base: number; labour_base: number;
+    deductibles: number; salvage: number; reason: string | null;
+  } | null;
   /** Set when single/Gemini failed and pipeline fell back to Mistral split */
   fallbackReason?: string | null;
 }

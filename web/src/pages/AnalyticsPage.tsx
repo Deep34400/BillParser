@@ -8,7 +8,7 @@ import { DocNote, type DocItem } from '../components/DocNote.js';
 const KPI_DOCS: DocItem[] = [
   { label: 'Total Spend', formula: 'SUM(grand_total_amount) WHERE status = OCR_COMPLETED or VERIFIED', description: 'Sum of net bill amounts across all successfully extracted invoices.', sourceFile: 'platform/src/routes/analytics.ts' },
   { label: 'Parts / Labour / Tax', formula: 'Parts = SUM(parts_amount) · Labour = SUM(labour_amount) · Tax = SUM(total_tax_amount)', description: 'Breakdown of spend by category from OCR-parsed footer totals.', sourceFile: 'platform/src/services/analytics/analyticsService.ts' },
-  { label: 'Needs Review', formula: 'COUNT WHERE confidence < 0.75 AND status ≠ VERIFIED', description: 'Low-confidence invoices not yet human-verified.', sourceFile: 'platform/src/routes/analytics.ts' },
+  { label: 'Needs Review', formula: 'COUNT WHERE ocr_status = NEED_REVIEW (no GSTIN and no PAN at OCR save)', description: 'Persisted status — not runtime confidence.', sourceFile: 'platform/src/ocr/mapper.ts' },
 ];
 
 type MainTab = 'overview' | 'costs';
@@ -97,7 +97,7 @@ function OverviewTab({
     { label: 'WORKSHOPS', value: countFmt(kpis.vendorCount), color: T.text, hint: 'Unique vendors' },
     { label: 'VEHICLES', value: countFmt(kpis.vehicleCount), color: T.text, hint: 'Unique reg numbers' },
     { label: 'COMPLETED', value: countFmt(kpis.completedCount), color: T.green, hint: 'OCR done' },
-    { label: 'NEEDS REVIEW', value: countFmt(kpis.needsReview), color: kpis.needsReview > 0 ? T.red : T.green, hint: 'Low confidence' },
+    { label: 'NEEDS REVIEW', value: countFmt(kpis.needsReview), color: kpis.needsReview > 0 ? T.red : T.green, hint: 'ocr_status = NEED_REVIEW' },
   ];
 
   return (
