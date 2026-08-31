@@ -5,7 +5,7 @@
  * Active rules → stable review_codes for filtering:
  *   MISSING_TAX_ID       — no GSTIN and no PAN
  *   TOTAL_MISMATCH       — line-recomputed total vs grand_total_invoice (> ₹2)
- *   PARTS_BASE_MISMATCH  — Σ parts (qty×rate) vs parts_total (> ₹2)
+ *   PARTS_BASE_MISMATCH  — Σ parts taxable vs parts_total (> ₹2), only when total also mismatches
  *   LABOUR_BASE_MISMATCH — Σ labour_charges vs labour_total (> ₹2)
  */
 import type { ParsedInvoiceData } from '../types/invoice.js';
@@ -45,8 +45,11 @@ export function computeReview(parsed: ParsedInvoiceData): ReviewResult {
   const t = parsed.totals_and_tax_summary;
   const pBase = sumPartsBase(parsed.parts_line_items ?? []);
   const lBase = labourBase(parsed);
+  const recon = reconcileInvoiceTotal(parsed);
 
-  if (t?.parts_total != null && (parsed.parts_line_items?.length ?? 0) > 0) {
+  // Footer parts_total is often OCR-wrong on insurance/body-repair bills while line
+  // taxables still reconcile to grand total — only flag when total also fails.
+  if (t?.parts_total != null && (parsed.parts_line_items?.length ?? 0) > 0 && !recon.matched) {
     const diff = roundMoney(Math.abs(pBase - t.parts_total));
     if (diff > TOLERANCE) {
       codes.push('PARTS_BASE_MISMATCH');
@@ -66,7 +69,6 @@ export function computeReview(parsed: ParsedInvoiceData): ReviewResult {
     }
   }
 
-  const recon = reconcileInvoiceTotal(parsed);
   if (!recon.matched && recon.reason) {
     codes.push('TOTAL_MISMATCH');
     reasons.push(recon.reason);

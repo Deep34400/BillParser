@@ -74,7 +74,7 @@ describe('computeReview — review codes', () => {
     expect(r.codes).toContain('TOTAL_MISMATCH');
   });
 
-  it('flags PARTS_BASE_MISMATCH when taxable sum ≠ parts_total', () => {
+  it('flags PARTS_BASE_MISMATCH when taxable sum ≠ parts_total and total also mismatches', () => {
     const r = computeReview(parsed({
       parts_line_items: [{ quantity: 2, rate: 100, taxable_amount: 200 }],
       totals_and_tax_summary: {
@@ -82,20 +82,43 @@ describe('computeReview — review codes', () => {
         labour_total: 0,
         parts_cgst_rate: 9,
         parts_sgst_rate: 9,
-        grand_total_invoice: 236,
+        grand_total_invoice: 999, // does not reconcile with line base
         sub_total_calculated: 236,
       },
     }));
     expect(r.codes).toContain('PARTS_BASE_MISMATCH');
+    expect(r.codes).toContain('TOTAL_MISMATCH');
   });
 
-  it('does NOT flag PARTS_BASE when insurance taxable 0 lines match parts_total', () => {
+  it('does NOT flag PARTS_BASE when bad footer parts_total but line base reconciles to grand total', () => {
+    const r = computeReview(parsed({
+      parts_line_items: [
+        { quantity: 1, rate: 1122.88, taxable_amount: 0 }, // contributes 0
+        { quantity: 1, rate: 100, taxable_amount: 100, tax_percentage: 18 }, // qty×rate
+      ],
+      labour_service_line_items: [{ labour_charges: 0 }],
+      totals_and_tax_summary: {
+        parts_total: 6395.38, // wrong footer — line base is 100
+        labour_total: 0,
+        parts_discount: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        deductibles: 500,
+        grand_total_invoice: 618, // 100 + 18 tax + 500
+      },
+    }));
+    expect(r.total_reconciliation?.matched).toBe(true);
+    expect(r.codes).not.toContain('PARTS_BASE_MISMATCH');
+    expect(r.codes).not.toContain('TOTAL_MISMATCH');
+  });
+
+  it('does NOT flag PARTS_BASE when insurance lines have rate 0 so qty*rate matches parts_total', () => {
     const r = computeReview({
       company_name: 'MY CAR',
       gstin: '27AAECM2713M1ZD',
       pan: 'AAECM2713M',
       parts_line_items: [
-        { quantity: 1, rate: 2309.32, taxable_amount: 0 },
+        { quantity: 1, rate: 0, taxable_amount: 0 },
         { quantity: 1, rate: 54.23, taxable_amount: 54.23 },
         { quantity: 1, rate: 54.23, taxable_amount: 54.23 },
         { quantity: 1, rate: 79.66, taxable_amount: 79.66 },

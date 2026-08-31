@@ -77,54 +77,62 @@ describe('reconcileInvoiceTotal', () => {
     expect(r.difference).toBe(2);
   });
 
-  it('falls back to taxable_amount when qty*rate = 0', () => {
+  it('uses 0 when taxable_amount is 0 even if qty*rate > 0', () => {
+    const r = reconcileInvoiceTotal(parsed({
+      parts_line_items: [
+        { quantity: 1, rate: 1122.88, taxable_amount: 0 },
+        { quantity: 1, rate: 100, taxable_amount: 100, tax_percentage: 18 },
+      ],
+      labour_service_line_items: [],
+      totals_and_tax_summary: {
+        parts_total: 100,
+        labour_total: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        grand_total_invoice: 118,
+        sub_total_calculated: 118,
+      },
+    }));
+    // insurance line contributes 0; other line uses qty×rate = 100
+    expect(r.parts_base).toBe(100);
+    expect(r.matched).toBe(true);
+  });
+
+  it('uses qty*rate when taxable_amount is non-zero (even if taxable differs)', () => {
+    const r = reconcileInvoiceTotal(parsed({
+      parts_line_items: [
+        { quantity: 1, rate: 1953.38, taxable_amount: 97.67, tax_percentage: 18 },
+      ],
+      labour_service_line_items: [],
+      totals_and_tax_summary: {
+        parts_total: 1953.38,
+        labour_total: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        grand_total_invoice: 2304.99, // 1953.38 * 1.18
+        sub_total_calculated: 2304.99,
+      },
+    }));
+    expect(r.parts_base).toBe(1953.38);
+    expect(r.matched).toBe(true);
+  });
+
+  it('uses 0 when qty*rate is 0', () => {
     const r = reconcileInvoiceTotal(parsed({
       parts_line_items: [
         { quantity: 0, rate: 0, taxable_amount: 300, tax_percentage: 18 },
       ],
+      labour_service_line_items: [],
       totals_and_tax_summary: {
-        ...parsed().totals_and_tax_summary!,
-        parts_total: 300,
-        // 300 + 500 + 300*0.18 + 500*0.18 = 800 + 144 = 944
-        grand_total_invoice: 944,
-        sub_total_calculated: 944,
-      },
-    }));
-    expect(r.parts_base).toBe(300);
-    expect(r.matched).toBe(true);
-    expect(r.calculated_total).toBe(944);
-  });
-
-  it('uses taxable_amount 0 for insurance lines even when qty*rate > 0', () => {
-    // My Car Pune body repair: insurance 100% parts have rate but taxable 0
-    const r = reconcileInvoiceTotal({
-      parts_line_items: [
-        { quantity: 1, rate: 2309.32, taxable_amount: 0 },
-        { quantity: 1, rate: 1652.54, taxable_amount: 0 },
-        { quantity: 1, rate: 54.23, taxable_amount: 54.23, tax_percentage: 18 },
-        { quantity: 1, rate: 54.23, taxable_amount: 54.23, tax_percentage: 18 },
-        { quantity: 1, rate: 5042.37, taxable_amount: 0 },
-        { quantity: 1, rate: 79.66, taxable_amount: 79.66, tax_percentage: 18 },
-        { quantity: 1, rate: 78.81, taxable_amount: 78.81, tax_percentage: 18 },
-      ],
-      labour_service_line_items: [
-        { labour_charges: 0 },
-        { labour_charges: 0 },
-      ],
-      totals_and_tax_summary: {
-        parts_total: 266.93,
+        parts_total: 0,
         labour_total: 0,
         parts_cgst_rate: 9,
         parts_sgst_rate: 9,
-        parts_cgst_amount: 24.02,
-        parts_sgst_amount: 24.02,
-        deductibles: 500,
-        grand_total_invoice: 815,
-        sub_total_calculated: 314.97,
+        grand_total_invoice: 0,
+        sub_total_calculated: 0,
       },
-    });
-    // 54.23+54.23+79.66+78.81 = 266.93; tax 18% = 48.05; + deductibles 500 = 814.98 ≈ 815
-    expect(r.parts_base).toBe(266.93);
+    }));
+    expect(r.parts_base).toBe(0);
     expect(r.matched).toBe(true);
   });
 

@@ -20,13 +20,11 @@ function roundMoney(n: number): number {
 
 /**
  * Parts line amount for reconciliation:
- * - If taxable_amount is set (including 0 for insurance 100%), trust it.
- * - Else use qty×rate (0 when product is 0).
+ * - If taxable_amount is 0 → 0 (insurance 100% covered).
+ * - Otherwise → qty × rate.
  */
 export function partsLineAmount(p: PartsLineItem): number {
-  if (p.taxable_amount != null && Number.isFinite(p.taxable_amount)) {
-    return p.taxable_amount;
-  }
+  if (p.taxable_amount === 0) return 0;
   return (p.quantity ?? 0) * (p.rate ?? 0);
 }
 
