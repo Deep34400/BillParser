@@ -9,22 +9,13 @@
  *   LABOUR_BASE_MISMATCH — Σ labour_charges vs labour_total (> ₹2)
  */
 import type { ParsedInvoiceData } from '../types/invoice.js';
-import { reconcileInvoiceTotal, type TotalReconciliation } from './reconcileTotal.js';
+import { reconcileInvoiceTotal, sumPartsBase, type TotalReconciliation } from './reconcileTotal.js';
 import type { ReviewReasonCode } from './reviewCodes.js';
 
 const TOLERANCE = 2;
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
-}
-
-function partsBase(parsed: ParsedInvoiceData): number {
-  return roundMoney(
-    (parsed.parts_line_items ?? []).reduce((sum, p) => {
-      const qr = (p.quantity ?? 0) * (p.rate ?? 0);
-      return sum + (qr !== 0 ? qr : (p.taxable_amount ?? 0));
-    }, 0),
-  );
 }
 
 function labourBase(parsed: ParsedInvoiceData): number {
@@ -52,7 +43,7 @@ export function computeReview(parsed: ParsedInvoiceData): ReviewResult {
   }
 
   const t = parsed.totals_and_tax_summary;
-  const pBase = partsBase(parsed);
+  const pBase = sumPartsBase(parsed.parts_line_items ?? []);
   const lBase = labourBase(parsed);
 
   if (t?.parts_total != null && (parsed.parts_line_items?.length ?? 0) > 0) {

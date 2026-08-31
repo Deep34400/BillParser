@@ -74,7 +74,7 @@ describe('computeReview — review codes', () => {
     expect(r.codes).toContain('TOTAL_MISMATCH');
   });
 
-  it('flags PARTS_BASE_MISMATCH when qty×rate sum ≠ parts_total', () => {
+  it('flags PARTS_BASE_MISMATCH when taxable sum ≠ parts_total', () => {
     const r = computeReview(parsed({
       parts_line_items: [{ quantity: 2, rate: 100, taxable_amount: 200 }],
       totals_and_tax_summary: {
@@ -82,12 +82,37 @@ describe('computeReview — review codes', () => {
         labour_total: 0,
         parts_cgst_rate: 9,
         parts_sgst_rate: 9,
-        // calculated = (200-0)*1.18 = 236 vs grand 118 → also TOTAL_MISMATCH
         grand_total_invoice: 236,
         sub_total_calculated: 236,
       },
     }));
     expect(r.codes).toContain('PARTS_BASE_MISMATCH');
+  });
+
+  it('does NOT flag PARTS_BASE when insurance taxable 0 lines match parts_total', () => {
+    const r = computeReview({
+      company_name: 'MY CAR',
+      gstin: '27AAECM2713M1ZD',
+      pan: 'AAECM2713M',
+      parts_line_items: [
+        { quantity: 1, rate: 2309.32, taxable_amount: 0 },
+        { quantity: 1, rate: 54.23, taxable_amount: 54.23 },
+        { quantity: 1, rate: 54.23, taxable_amount: 54.23 },
+        { quantity: 1, rate: 79.66, taxable_amount: 79.66 },
+        { quantity: 1, rate: 78.81, taxable_amount: 78.81 },
+      ],
+      labour_service_line_items: [{ labour_charges: 0 }],
+      totals_and_tax_summary: {
+        parts_total: 266.93,
+        labour_total: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        deductibles: 500,
+        grand_total_invoice: 815,
+      },
+    });
+    expect(r.codes).not.toContain('PARTS_BASE_MISMATCH');
+    expect(r.codes).not.toContain('TOTAL_MISMATCH');
   });
 
   it('flags LABOUR_BASE_MISMATCH when labour sum ≠ labour_total', () => {

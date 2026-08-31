@@ -95,6 +95,58 @@ describe('reconcileInvoiceTotal', () => {
     expect(r.calculated_total).toBe(944);
   });
 
+  it('uses taxable_amount 0 for insurance lines even when qty*rate > 0', () => {
+    // My Car Pune body repair: insurance 100% parts have rate but taxable 0
+    const r = reconcileInvoiceTotal({
+      parts_line_items: [
+        { quantity: 1, rate: 2309.32, taxable_amount: 0 },
+        { quantity: 1, rate: 1652.54, taxable_amount: 0 },
+        { quantity: 1, rate: 54.23, taxable_amount: 54.23, tax_percentage: 18 },
+        { quantity: 1, rate: 54.23, taxable_amount: 54.23, tax_percentage: 18 },
+        { quantity: 1, rate: 5042.37, taxable_amount: 0 },
+        { quantity: 1, rate: 79.66, taxable_amount: 79.66, tax_percentage: 18 },
+        { quantity: 1, rate: 78.81, taxable_amount: 78.81, tax_percentage: 18 },
+      ],
+      labour_service_line_items: [
+        { labour_charges: 0 },
+        { labour_charges: 0 },
+      ],
+      totals_and_tax_summary: {
+        parts_total: 266.93,
+        labour_total: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        parts_cgst_amount: 24.02,
+        parts_sgst_amount: 24.02,
+        deductibles: 500,
+        grand_total_invoice: 815,
+        sub_total_calculated: 314.97,
+      },
+    });
+    // 54.23+54.23+79.66+78.81 = 266.93; tax 18% = 48.05; + deductibles 500 = 814.98 ≈ 815
+    expect(r.parts_base).toBe(266.93);
+    expect(r.matched).toBe(true);
+  });
+
+  it('uses qty*rate when taxable_amount is null', () => {
+    const r = reconcileInvoiceTotal(parsed({
+      parts_line_items: [
+        { quantity: 2, rate: 100, taxable_amount: null, tax_percentage: 18 },
+      ],
+      labour_service_line_items: [],
+      totals_and_tax_summary: {
+        parts_total: 200,
+        labour_total: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        grand_total_invoice: 236,
+        sub_total_calculated: 236,
+      },
+    }));
+    expect(r.parts_base).toBe(200);
+    expect(r.matched).toBe(true);
+  });
+
   it('applies discounts before tax per side', () => {
     const r = reconcileInvoiceTotal(parsed({
       totals_and_tax_summary: {

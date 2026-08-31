@@ -1,4 +1,4 @@
-import type { ParsedInvoiceData, TotalsAndTaxSummary } from '../types/invoice.js';
+import type { ParsedInvoiceData, PartsLineItem, TotalsAndTaxSummary } from '../types/invoice.js';
 
 /** Slim audit object: bases + final compare. Discount/tax still applied internally. */
 export interface TotalReconciliation {
@@ -16,6 +16,22 @@ export interface TotalReconciliation {
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Parts line amount for reconciliation:
+ * - If taxable_amount is set (including 0 for insurance 100%), trust it.
+ * - Else use qty×rate (0 when product is 0).
+ */
+export function partsLineAmount(p: PartsLineItem): number {
+  if (p.taxable_amount != null && Number.isFinite(p.taxable_amount)) {
+    return p.taxable_amount;
+  }
+  return (p.quantity ?? 0) * (p.rate ?? 0);
+}
+
+export function sumPartsBase(parts: PartsLineItem[]): number {
+  return roundMoney(parts.reduce((sum, p) => sum + partsLineAmount(p), 0));
 }
 
 function taxRatePct(t: TotalsAndTaxSummary, side: 'parts' | 'labour'): number {
@@ -44,18 +60,12 @@ export function reconcileInvoiceTotal(parsed: ParsedInvoiceData): TotalReconcili
     };
   }
 
-  const partsBase = roundMoney(
-    parts.reduce((sum, p) => {
-      const qr = (p.quantity ?? 0) * (p.rate ?? 0);
-      return sum + (qr !== 0 ? qr : (p.taxable_amount ?? 0));
-    }, 0),
-  );
+  const partsBase = sumPartsBase(parts);
 
   const labourBase = roundMoney(
     labour.reduce((sum, l) => sum + (l.labour_charges ?? 0), 0),
   );
 
-  // Discount + tax applied internally — not exposed on the response object
   const partsDisc = (t.parts_discount ?? 0) + (t.parts_special_discount ?? 0);
   const labourDisc = (t.labour_discount ?? 0) + (t.labour_special_discount ?? 0);
   const partsTaxable = roundMoney(partsBase - partsDisc);
