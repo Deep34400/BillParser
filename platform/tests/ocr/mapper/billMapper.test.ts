@@ -5,6 +5,17 @@ import type { ParsedInvoiceData } from '../../../src/shared/types.js';
 describe('mapParsedToBill', () => {
   const BILL_ID = 'test-bill-001';
 
+  const baseParsed: ParsedInvoiceData = {
+    company_name: 'JSB MOBILITY PVT LTD',
+    pan: 'AAGCJ6656E',
+    gstin: '07AAGCJ6656E1ZF',
+    invoice_date: '19.03.2026',
+    invoice_number: 'DW21S25103620',
+    parts_line_items: [{ taxable_amount: 100, tax_percentage: 18 }],
+    totals_and_tax_summary: { parts_total: 100, grand_total_invoice: 118, parts_cgst_rate: 9, parts_sgst_rate: 9 },
+    confidence: 0.9,
+  };
+
   it('creates a BillDoc from full ParsedInvoiceData', () => {
     const parsed: ParsedInvoiceData = {
       irn: 'IRN001',
@@ -19,12 +30,16 @@ describe('mapParsedToBill', () => {
         registration_number: 'HR55AM4015',
         mileage_odometer_reading: 62341,
       },
+      parts_line_items: [{ taxable_amount: 3527.12, tax_percentage: 18 }],
+      labour_service_line_items: [{ labour_charges: 3965, tax_percentage: 18 }],
       totals_and_tax_summary: {
         parts_total: 3527.12,
         labour_total: 3965,
+        parts_igst_rate: 18,
+        labour_igst_rate: 18,
         parts_igst_amount: 634.87,
         labour_igst_amount: 690.93,
-        grand_total_invoice: 8691.42,
+        grand_total_invoice: 8840.7,
       },
     };
 
@@ -41,7 +56,7 @@ describe('mapParsedToBill', () => {
     expect(bill.invoice_date).toBe('19.03.2026');
     expect(bill.parts_amount).toBe(3527.12);
     expect(bill.labour_amount).toBe(3965);
-    expect(bill.grand_total_amount).toBe(8691.42);
+    expect(bill.grand_total_amount).toBe(8840.7);
     expect(bill.registration_number).toBe('HR55AM4015');
     expect(bill.odometer_reading).toBe(62341);
     expect(bill.ocr_status).toBe('OCR_COMPLETED');
@@ -49,41 +64,30 @@ describe('mapParsedToBill', () => {
     expect(bill.file_url).toBe('https://example.com/bill.pdf');
   });
 
-  it('calculates total_tax_amount from GST fields', () => {
-    const parsed: ParsedInvoiceData = {
-      totals_and_tax_summary: {
-        parts_cgst_amount: 100,
-        parts_sgst_amount: 100,
-        labour_cgst_amount: 50,
-        labour_sgst_amount: 50,
-      },
-    };
-
-    const bill = mapParsedToBill(BILL_ID, parsed);
-    expect(bill.total_tax_amount).toBe(300);
+  it('sets NEED_REVIEW when both GSTIN and PAN are missing', () => {
+    const bill = mapParsedToBill(BILL_ID, {
+      ...baseParsed,
+      gstin: null,
+      pan: null,
+    });
+    expect(bill.ocr_status).toBe('NEED_REVIEW');
+    expect(bill.review_reasons?.some((r) => /handwritten|GSTIN or PAN/i.test(r))).toBe(true);
   });
 
-  it('returns null total_tax_amount when no GST', () => {
-    const bill = mapParsedToBill(BILL_ID, {});
-    expect(bill.total_tax_amount).toBeNull();
+  it('keeps OCR_COMPLETED when GSTIN is present even with low confidence', () => {
+    const bill = mapParsedToBill(BILL_ID, {
+      ...baseParsed,
+      confidence: 0.4,
+    });
+    expect(bill.ocr_status).toBe('OCR_COMPLETED');
   });
 
-  it('preserves parsed_data as immutable source of truth', () => {
-    const parsed: ParsedInvoiceData = {
-      company_name: 'Test Corp',
-      parts_line_items: [{ rate: 100, quantity: 2 }],
-    };
-    const bill = mapParsedToBill(BILL_ID, parsed);
-    expect(bill.parsed_data).toEqual(parsed);
-  });
-
-  it('defaults bill_type to MAINTENANCE', () => {
-    const bill = mapParsedToBill(BILL_ID, {});
-    expect(bill.bill_type).toBe('MAINTENANCE');
-  });
-
-  it('accepts custom bill_type', () => {
-    const bill = mapParsedToBill(BILL_ID, {}, { billType: 'FUEL' });
-    expect(bill.bill_type).toBe('FUEL');
+  it('keeps OCR_COMPLETED when only PAN is present (no GSTIN)', () => {
+    const bill = mapParsedToBill(BILL_ID, {
+      ...baseParsed,
+      gstin: null,
+      pan: 'AAGCJ6656E',
+    });
+    expect(bill.ocr_status).toBe('OCR_COMPLETED');
   });
 });

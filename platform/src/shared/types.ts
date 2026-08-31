@@ -94,6 +94,7 @@ export type BillStatus =
   | 'UPLOADED'
   | 'PROCESSING'
   | 'OCR_COMPLETED'
+  | 'NEED_REVIEW'
   | 'VERIFIED'
   | 'FAILED';
 
@@ -168,8 +169,11 @@ export interface BillDoc {
   processing_status?: string | null;
   confidence_score?: number | null;
 
-  /** Advisory human-review reasons (missing GSTIN/PAN, unclear vendor, etc.). Not blocking. */
+  /** Advisory human-review reasons (missing GSTIN/PAN, total mismatch, etc.). Not blocking. */
   review_reasons?: string[] | null;
+
+  /** Structured total reconciliation result from line-item recomputation. */
+  total_reconciliation?: import('../ocr/transformer/reconcileTotal.js').TotalReconciliation | null;
 
   file_url?: string | null;
   storage_path?: string | null;

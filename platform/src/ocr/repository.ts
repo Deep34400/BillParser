@@ -151,10 +151,9 @@ export async function listAllBillsLean(opts: {
 }
 
 export function billNeedsReview(b: BillDoc): boolean {
-  if (b.ocr_status === 'VERIFIED') return false;
-  if (b.ocr_status !== 'OCR_COMPLETED') return false;
-  if ((b.confidence_score ?? 1) < 0.75) return true;
-  return (b.review_reasons?.length ?? 0) > 0;
+  // Prefer persisted status (no runtime confidence / reasons heuristics)
+  if (b.ocr_status === 'NEED_REVIEW') return true;
+  return false;
 }
 
 export interface PaginatedBills {
@@ -183,17 +182,16 @@ export async function countBills(status?: BillStatus): Promise<number> {
 
 /**
  * Count bills per status using Firestore count() aggregation (no doc reads).
- * Also estimates needs_review from a cached lean scan of completed bills.
+ * needs_review mirrors persisted NEED_REVIEW (no runtime heuristics).
  */
 export async function countAllStatuses(): Promise<Record<string, number>> {
-  const statuses: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'VERIFIED', 'FAILED'];
+  const statuses: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'NEED_REVIEW', 'VERIFIED', 'FAILED'];
   if (env.localDev) {
     const rows = Array.from(devStore.bills.values());
     const counts: Record<string, number> = { all: rows.length };
     for (const s of statuses) counts[s] = rows.filter((b) => b.ocr_status === s).length;
-    counts.needs_review = rows.filter(billNeedsReview).length;
-    const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-    counts.completed_clean = Math.max(0, completedRaw - counts.needs_review);
+    counts.needs_review = counts['NEED_REVIEW'] ?? 0;
+    counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
     return counts;
   }
   const results = await Promise.all([
@@ -203,17 +201,9 @@ export async function countAllStatuses(): Promise<Record<string, number>> {
   const counts: Record<string, number> = { all: results[0] };
   statuses.forEach((s, i) => { counts[s] = results[i + 1]; });
 
-  // Needs-review + completed-clean: await lean scan (cached for 5min after first call)
-  try {
-    const lean = await listAllBillsLean({ maxDocs: AGG_MAX_DOCS });
-    const needsReview = lean.filter(billNeedsReview).length;
-    counts.needs_review = needsReview;
-    const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-    counts.completed_clean = Math.max(0, completedRaw - needsReview);
-  } catch {
-    counts.needs_review = 0;
-    counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-  }
+  // Needs-review = persisted NEED_REVIEW status (Firestore count — no runtime confidence)
+  counts.needs_review = counts['NEED_REVIEW'] ?? 0;
+  counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
   return counts;
 }
 

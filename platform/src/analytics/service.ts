@@ -67,7 +67,7 @@ export async function computeKpis(): Promise<KpiResult> {
     const vid = bill.vehicle_id ?? bill.registration_number;
     if (vid) vehicleIds.add(vid);
 
-    if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
+      if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
       completedCount++;
       const amount = bill.grand_total_amount ?? 0;
       totalSpend += amount;
@@ -75,7 +75,6 @@ export async function computeKpis(): Promise<KpiResult> {
       totalLabour += bill.labour_amount ?? 0;
       totalTax += bill.total_tax_amount ?? 0;
       if (bill.confidence_score != null) confidenceSum += bill.confidence_score;
-      if ((bill.confidence_score ?? 1) < 0.75 && bill.ocr_status !== 'VERIFIED') needsReview++;
 
       const vendor = bill.vendor_name ?? bill.company_name ?? 'Unknown';
       if (!isJunkVendorName(vendor)) {
@@ -87,6 +86,7 @@ export async function computeKpis(): Promise<KpiResult> {
         monthTotals.set(mk, (monthTotals.get(mk) ?? 0) + amount);
       }
     }
+    if (bill.ocr_status === 'NEED_REVIEW') needsReview++;
   }
 
   return {

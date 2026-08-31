@@ -11,7 +11,8 @@ import type {
   ServiceDetails, VehicleDetails,
 } from '../shared/types.js';
 import type { OcrCostInfo } from './types/provider.js';
-import { computeReviewReasons } from './transformer/review.js';
+import { computeReview } from './transformer/review.js';
+import { reconcileInvoiceTotal } from './transformer/reconcileTotal.js';
 
 // ── mapParsedToBill ─────────────────────────────────────────────
 
@@ -48,6 +49,10 @@ export function mapParsedToBill(
     t?.parts_cgst_amount, t?.parts_sgst_amount, t?.parts_igst_amount,
     t?.labour_cgst_amount, t?.labour_sgst_amount, t?.labour_igst_amount,
   );
+
+  const review = hasParsedContent(parsed) ? computeReview(parsed) : null;
+  const reviewReasons = review?.reasons ?? null;
+  const ocrStatus = (reviewReasons && reviewReasons.length > 0) ? 'NEED_REVIEW' : 'OCR_COMPLETED';
 
   return {
     bill_id: billId,
@@ -97,11 +102,12 @@ export function mapParsedToBill(
     registration_number: vd?.registration_number ?? null,
     chassis_number: vd?.chassis_number ?? null,
 
-    ocr_status: 'OCR_COMPLETED',
+    ocr_status: ocrStatus,
     processing_status: null,
     confidence_score: parsed.confidence ?? null,
 
-    review_reasons: hasParsedContent(parsed) ? computeReviewReasons(parsed) : null,
+    review_reasons: reviewReasons,
+    total_reconciliation: review?.total_reconciliation ?? null,
 
     file_url: opts.fileUrl ?? null,
     storage_path: opts.storagePath ?? null,
@@ -224,6 +230,7 @@ export interface FrontendInvoice {
   lineItems?: FrontendLineItem[];
   runs?: unknown[];
   reviewReasons?: string[] | null;
+  totalReconciliation?: import('./transformer/reconcileTotal.js').TotalReconciliation | null;
   fallbackReason?: string | null;
 }
 
@@ -232,6 +239,7 @@ const STATUS_MAP: Record<string, string> = {
   UPLOADED: 'PENDING',
   PROCESSING: 'PROCESSING',
   OCR_COMPLETED: 'COMPLETED',
+  NEED_REVIEW: 'NEEDS_REVIEW',
   VERIFIED: 'COMPLETED',
   FAILED: 'FAILED',
 };
@@ -327,6 +335,8 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     lineItems: lineItems.length ? lineItems : undefined,
     runs: [],
     reviewReasons: bill.review_reasons ?? null,
+    totalReconciliation: bill.total_reconciliation
+      ?? (bill.parsed_data ? reconcileInvoiceTotal(bill.parsed_data) : null),
     fallbackReason: bill.processing_status?.startsWith('FALLBACK:')
       ? bill.processing_status.slice('FALLBACK:'.length).trim()
       : null,

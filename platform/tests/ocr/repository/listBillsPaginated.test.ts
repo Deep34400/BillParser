@@ -134,9 +134,8 @@ describe('listBillsPaginated', () => {
 
   it('excludes needs-review bills from completed when excludeNeedsReview=true', async () => {
     const clean = makeBill('clean', '2026-07-05T00:00:00Z', 'OCR_COMPLETED');
-    clean.confidence_score = 0.95;
-    const flagged = makeBill('flag', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
-    flagged.confidence_score = 0.5;
+    const flagged = makeBill('flag', '2026-07-04T00:00:00Z', 'NEED_REVIEW');
+    flagged.review_reasons = ['No GSTIN or PAN detected — likely a handwritten/informal bill. Verify vendor details manually.'];
     devStore.bills.set('clean', clean);
     devStore.bills.set('flag', flagged);
 
@@ -149,23 +148,26 @@ describe('listBillsPaginated', () => {
   });
 
   it('returns only bills that need review when needsReview=true', async () => {
-    const low = makeBill('low', '2026-07-05T00:00:00Z', 'OCR_COMPLETED');
-    low.confidence_score = 0.5;
+    const need = makeBill('need', '2026-07-05T00:00:00Z', 'NEED_REVIEW');
+    need.review_reasons = ['No GSTIN or PAN detected — likely a handwritten/informal bill. Verify vendor details manually.'];
     const ok = makeBill('ok', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
-    ok.confidence_score = 0.95;
-    const flagged = makeBill('flag', '2026-07-03T00:00:00Z', 'OCR_COMPLETED');
-    flagged.confidence_score = 0.9;
-    flagged.review_reasons = ['Duplicate: INV-1'];
     const verified = makeBill('ver', '2026-07-02T00:00:00Z', 'VERIFIED');
     verified.confidence_score = 0.4;
-    devStore.bills.set('low', low);
+    devStore.bills.set('need', need);
     devStore.bills.set('ok', ok);
-    devStore.bills.set('flag', flagged);
     devStore.bills.set('ver', verified);
 
     const result = await listBillsPaginated({ needsReview: true });
-    expect(result.bills.map((b) => b.bill_id).sort()).toEqual(['flag', 'low']);
-    expect(result.total).toBe(2);
+    expect(result.bills.map((b) => b.bill_id)).toEqual(['need']);
+    expect(result.total).toBe(1);
+  });
+
+  it('filters by status=NEED_REVIEW', async () => {
+    devStore.bills.set('a', makeBill('a', '2026-07-05T00:00:00Z', 'NEED_REVIEW'));
+    devStore.bills.set('b', makeBill('b', '2026-07-04T00:00:00Z', 'OCR_COMPLETED'));
+    const result = await listBillsPaginated({ status: 'NEED_REVIEW' });
+    expect(result.total).toBe(1);
+    expect(result.bills[0].bill_id).toBe('a');
   });
 });
 

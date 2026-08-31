@@ -68,15 +68,15 @@ function processInBackground(
         costInfo,
         pipelineMode: providers.mode,
       });
-      bill.ocr_status = 'OCR_COMPLETED';
+      bill.ocr_status = bill.ocr_status === 'NEED_REVIEW' ? 'NEED_REVIEW' : 'OCR_COMPLETED';
       if (result.fallbackReason) {
         bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
       }
 
-      await updateBillStatus(billId, 'OCR_COMPLETED', bill);
+      await updateBillStatus(billId, bill.ocr_status, bill);
       cacheInvalidate('analytics');
 
-      // Duplicate check — non-blocking warning only
+      // Duplicate check — advisory only (does NOT force NEED_REVIEW while policy is GSTIN/PAN-only)
       try {
         const dupes = await findDuplicateBills(enriched.invoice_number, enriched.gstin, billId);
         if (dupes.length > 0) {
@@ -145,10 +145,10 @@ export async function billRoutes(app: FastifyInstance) {
       const result = await listBillsPaginated({
         page,
         pageSize,
-        status: completed || needsReview ? undefined : status,
+        status: needsReview ? 'NEED_REVIEW' : (completed ? undefined : status),
         statuses: completed ? ['OCR_COMPLETED', 'VERIFIED'] : undefined,
-        needsReview: needsReview || undefined,
-        excludeNeedsReview: completed || undefined,
+        needsReview: undefined,
+        excludeNeedsReview: undefined,
         q,
       });
       const invoices = result.bills.map((b) => billToInvoice(b));
@@ -179,7 +179,7 @@ export async function billRoutes(app: FastifyInstance) {
    * GET /api/invoices/:id — single invoice detail.
    *
    * API key (Bearer inv_…): lean OCR payload only
-   *   { success, data: { bill_id, status, parsed_data, review_reasons, fallback_reason } }
+   *   { success, data: { bill_id, status, parsed_data, review_reasons, total_reconciliation, fallback_reason } }
    *
    * JWT / UI session: full FrontendInvoice (camelCase) for the detail page.
    */
@@ -201,6 +201,7 @@ export async function billRoutes(app: FastifyInstance) {
             status: inv.status,
             parsedData: toApiParsed(bill.parsed_data),
             review_reasons: inv.reviewReasons ?? [],
+            total_reconciliation: inv.totalReconciliation ?? null,
             fallback_reason: inv.fallbackReason ?? null,
           },
         };
@@ -640,7 +641,7 @@ export async function billRoutes(app: FastifyInstance) {
         costInfo,
         pipelineMode: providers.mode,
       });
-      bill.ocr_status = 'OCR_COMPLETED';
+      // Keep mapper status (OCR_COMPLETED or NEED_REVIEW) — do not force COMPLETED
       if (result.fallbackReason) {
         bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
       }
@@ -663,8 +664,10 @@ export async function billRoutes(app: FastifyInstance) {
         success: true,
         data: {
           bill_id: billId,
+          status: bill.ocr_status === 'NEED_REVIEW' ? 'NEEDS_REVIEW' : 'COMPLETED',
           parsed_data: toApiParsed(enriched),
           review_reasons: bill.review_reasons ?? [],
+          total_reconciliation: bill.total_reconciliation ?? null,
           fallback_reason: result.fallbackReason ?? null,
           raw_ocr: rawOcr,
           cost: {
