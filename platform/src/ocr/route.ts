@@ -5,7 +5,7 @@ import {
   getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts,
   getSettings, findDuplicateBills, countAllStatuses, type ParsedInvoiceData,
 } from './repository.js';
-import { billToInvoice, toApiParsed, mapParsedToBill } from './mapper.js';
+import { billToInvoice, toApiParsed, mapParsedToBill, toExternalOcrPayload } from './mapper.js';
 import { isPdf, isImage, uploadFile, getStoredFile } from '../shared/storage.js';
 import { env } from '../config/env.js';
 import { deductTokens, trackOcrCost } from '../users/service.js';
@@ -196,14 +196,16 @@ export async function billRoutes(app: FastifyInstance) {
 
       if (isApiKey) {
         const inv = billToInvoice(bill);
+        const ext = toExternalOcrPayload(bill);
         return {
           success: true,
           data: {
             bill_id: bill.bill_id,
-            status: inv.status,
+            status: ext.status,
+            needs_review: ext.needs_review,
             parsedData: toApiParsed(bill.parsed_data),
-            review_reasons: inv.reviewReasons ?? [],
-            review_codes: inv.reviewCodes ?? [],
+            review_reasons: ext.review_reasons,
+            review_codes: ext.review_codes,
             total_reconciliation: inv.totalReconciliation ?? null,
             fallback_reason: inv.fallbackReason ?? null,
           },
@@ -663,14 +665,16 @@ export async function billRoutes(app: FastifyInstance) {
         try { await trackOcrCost(user.user_id, costInfo.total_cost_usd); } catch { /* ignore */ }
       }
 
+      const ext = toExternalOcrPayload(bill);
       return {
         success: true,
         data: {
           bill_id: billId,
-          status: bill.ocr_status === 'NEED_REVIEW' ? 'NEEDS_REVIEW' : 'COMPLETED',
+          status: ext.status,
+          needs_review: ext.needs_review,
           parsed_data: toApiParsed(enriched),
-          review_reasons: bill.review_reasons ?? [],
-          review_codes: bill.review_codes ?? [],
+          review_reasons: ext.review_reasons,
+          review_codes: ext.review_codes,
           total_reconciliation: bill.total_reconciliation ?? null,
           fallback_reason: result.fallbackReason ?? null,
           raw_ocr: rawOcr,

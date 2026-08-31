@@ -247,6 +247,48 @@ const STATUS_MAP: Record<string, string> = {
   FAILED: 'FAILED',
 };
 
+/**
+ * Status for sync / async poll (API key consumers like Carrum).
+ * NEED_REVIEW means OCR finished with advisory flags — not a hard failure.
+ * Integrations that only accept COMPLETED|FAILED|PROCESSING would treat
+ * NEEDS_REVIEW as failed; so we return COMPLETED + needs_review=true instead.
+ * UI (JWT billToInvoice) still uses NEEDS_REVIEW.
+ */
+export function toExternalOcrPayload(bill: BillDoc): {
+  status: string;
+  needs_review: boolean;
+  review_reasons: string[];
+  review_codes: string[];
+} {
+  const codes = bill.review_codes
+    ?? (bill.parsed_data ? computeReview(bill.parsed_data).codes : [])
+    ?? [];
+  const reasons = bill.review_reasons ?? [];
+  const needsReview = bill.ocr_status === 'NEED_REVIEW' || codes.length > 0;
+
+  if (bill.ocr_status === 'FAILED') {
+    return { status: 'FAILED', needs_review: false, review_reasons: reasons, review_codes: codes };
+  }
+  if (bill.ocr_status === 'PROCESSING' || bill.ocr_status === 'UPLOADED') {
+    return {
+      status: bill.ocr_status === 'UPLOADED' ? 'PENDING' : 'PROCESSING',
+      needs_review: false,
+      review_reasons: reasons,
+      review_codes: codes,
+    };
+  }
+  if (bill.ocr_status === 'DRAFT') {
+    return { status: 'DRAFT', needs_review: false, review_reasons: reasons, review_codes: codes };
+  }
+  // OCR_COMPLETED | NEED_REVIEW | VERIFIED → pipeline finished
+  return {
+    status: 'COMPLETED',
+    needs_review: needsReview,
+    review_reasons: reasons,
+    review_codes: codes,
+  };
+}
+
 export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInvoice {
   const t = bill.parsed_data?.totals_and_tax_summary;
 

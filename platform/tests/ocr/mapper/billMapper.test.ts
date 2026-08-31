@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { mapParsedToBill } from '../../../src/ocr/mapper.js';
+import { mapParsedToBill, toExternalOcrPayload } from '../../../src/ocr/mapper.js';
 import type { ParsedInvoiceData } from '../../../src/shared/types.js';
 
+const BILL_ID = 'test-bill-001';
+
+const baseParsed: ParsedInvoiceData = {
+  company_name: 'JSB MOBILITY PVT LTD',
+  pan: 'AAGCJ6656E',
+  gstin: '07AAGCJ6656E1ZF',
+  invoice_date: '19.03.2026',
+  invoice_number: 'DW21S25103620',
+  parts_line_items: [{ taxable_amount: 100, tax_percentage: 18 }],
+  totals_and_tax_summary: { parts_total: 100, grand_total_invoice: 118, parts_cgst_rate: 9, parts_sgst_rate: 9 },
+  confidence: 0.9,
+};
+
 describe('mapParsedToBill', () => {
-  const BILL_ID = 'test-bill-001';
-
-  const baseParsed: ParsedInvoiceData = {
-    company_name: 'JSB MOBILITY PVT LTD',
-    pan: 'AAGCJ6656E',
-    gstin: '07AAGCJ6656E1ZF',
-    invoice_date: '19.03.2026',
-    invoice_number: 'DW21S25103620',
-    parts_line_items: [{ taxable_amount: 100, tax_percentage: 18 }],
-    totals_and_tax_summary: { parts_total: 100, grand_total_invoice: 118, parts_cgst_rate: 9, parts_sgst_rate: 9 },
-    confidence: 0.9,
-  };
-
   it('creates a BillDoc from full ParsedInvoiceData', () => {
     const parsed: ParsedInvoiceData = {
       irn: 'IRN001',
@@ -90,5 +90,28 @@ describe('mapParsedToBill', () => {
       pan: 'AAGCJ6656E',
     });
     expect(bill.ocr_status).toBe('OCR_COMPLETED');
+  });
+});
+
+describe('toExternalOcrPayload', () => {
+  it('maps NEED_REVIEW to COMPLETED with needs_review true (for Carrum poll/sync)', () => {
+    const bill = mapParsedToBill(BILL_ID, {
+      ...baseParsed,
+      gstin: null,
+      pan: null,
+    });
+    expect(bill.ocr_status).toBe('NEED_REVIEW');
+    const ext = toExternalOcrPayload(bill);
+    expect(ext.status).toBe('COMPLETED');
+    expect(ext.needs_review).toBe(true);
+    expect(ext.review_codes).toContain('MISSING_TAX_ID');
+  });
+
+  it('keeps FAILED as FAILED', () => {
+    const bill = mapParsedToBill(BILL_ID, baseParsed);
+    bill.ocr_status = 'FAILED';
+    const ext = toExternalOcrPayload(bill);
+    expect(ext.status).toBe('FAILED');
+    expect(ext.needs_review).toBe(false);
   });
 });
