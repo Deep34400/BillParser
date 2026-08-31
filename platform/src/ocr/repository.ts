@@ -78,7 +78,7 @@ const LEAN_BILL_FIELDS = [
   'labour_cgst_rate', 'labour_sgst_rate', 'labour_igst_rate',
   'total_tax_amount', 'grand_total_amount', 'deductibles', 'salvage',
   'odometer_reading', 'registration_number', 'ocr_status', 'confidence_score',
-  'review_reasons', 'pipeline_mode',
+  'review_reasons', 'review_codes', 'pipeline_mode',
   'extraction_cost_usd', 'structuring_cost_usd', 'total_cost_usd',
   'extraction_tokens', 'structuring_tokens', 'total_tokens',
   'extraction_provider', 'structuring_provider',
@@ -156,6 +156,24 @@ export function billNeedsReview(b: BillDoc): boolean {
   return false;
 }
 
+/** Resolve stable review codes (persisted, or inferred from legacy review_reasons text). */
+export function billReviewCodes(b: BillDoc): string[] {
+  if (b.review_codes?.length) return b.review_codes;
+  const reasons = b.review_reasons ?? [];
+  const codes: string[] = [];
+  for (const r of reasons) {
+    if (/GSTIN or PAN|handwritten/i.test(r)) codes.push('MISSING_TAX_ID');
+    if (/Total mismatch|Grand total missing/i.test(r)) codes.push('TOTAL_MISMATCH');
+    if (/Parts base/i.test(r)) codes.push('PARTS_BASE_MISMATCH');
+    if (/Labour base/i.test(r)) codes.push('LABOUR_BASE_MISMATCH');
+  }
+  return [...new Set(codes)];
+}
+
+export function billHasReviewCode(b: BillDoc, code: string): boolean {
+  return billReviewCodes(b).includes(code);
+}
+
 export interface PaginatedBills {
   bills: BillDoc[];
   total: number;
@@ -182,16 +200,29 @@ export async function countBills(status?: BillStatus): Promise<number> {
 
 /**
  * Count bills per status using Firestore count() aggregation (no doc reads).
- * needs_review mirrors persisted NEED_REVIEW (no runtime heuristics).
+ * Also counts review_codes among NEED_REVIEW bills (lean scan).
+ * Keys: review_MISSING_TAX_ID, review_TOTAL_MISMATCH, review_PARTS_BASE_MISMATCH, review_LABOUR_BASE_MISMATCH
  */
 export async function countAllStatuses(): Promise<Record<string, number>> {
   const statuses: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'NEED_REVIEW', 'VERIFIED', 'FAILED'];
+  const reviewCodeKeys = [
+    'MISSING_TAX_ID', 'TOTAL_MISMATCH', 'PARTS_BASE_MISMATCH', 'LABOUR_BASE_MISMATCH',
+  ] as const;
+
+  const addReviewCodeCounts = (counts: Record<string, number>, rows: BillDoc[]) => {
+    const needReview = rows.filter((b) => b.ocr_status === 'NEED_REVIEW');
+    for (const code of reviewCodeKeys) {
+      counts[`review_${code}`] = needReview.filter((b) => billHasReviewCode(b, code)).length;
+    }
+  };
+
   if (env.localDev) {
     const rows = Array.from(devStore.bills.values());
     const counts: Record<string, number> = { all: rows.length };
     for (const s of statuses) counts[s] = rows.filter((b) => b.ocr_status === s).length;
     counts.needs_review = counts['NEED_REVIEW'] ?? 0;
     counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+    addReviewCodeCounts(counts, rows);
     return counts;
   }
   const results = await Promise.all([
@@ -201,9 +232,17 @@ export async function countAllStatuses(): Promise<Record<string, number>> {
   const counts: Record<string, number> = { all: results[0] };
   statuses.forEach((s, i) => { counts[s] = results[i + 1]; });
 
-  // Needs-review = persisted NEED_REVIEW status (Firestore count — no runtime confidence)
   counts.needs_review = counts['NEED_REVIEW'] ?? 0;
   counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+
+  // Per-reason counts from lean NEED_REVIEW rows
+  try {
+    const lean = await listAllBillsLean({ maxDocs: AGG_MAX_DOCS });
+    addReviewCodeCounts(counts, lean);
+  } catch {
+    for (const code of reviewCodeKeys) counts[`review_${code}`] = 0;
+  }
+
   return counts;
 }
 
@@ -225,6 +264,8 @@ export async function listBillsPaginated(opts: {
   needsReview?: boolean;
   /** When true with statuses=completed, exclude needs-review bills. */
   excludeNeedsReview?: boolean;
+  /** Filter NEED_REVIEW bills by a stable review_code (e.g. TOTAL_MISMATCH). */
+  reviewCode?: string;
   q?: string;
 } = {}): Promise<PaginatedBills> {
   const pageSize = Math.min(Math.max(opts.pageSize ?? 10, 1), 100);
@@ -241,6 +282,9 @@ export async function listBillsPaginated(opts: {
     } else if (opts.status) {
       out = out.filter((b) => b.ocr_status === opts.status);
     }
+    if (opts.reviewCode) {
+      out = out.filter((b) => billHasReviewCode(b, opts.reviewCode!));
+    }
     if (searchTerm) out = out.filter((b) => billMatchesSearch(b, searchTerm));
     out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     return out;
@@ -253,7 +297,7 @@ export async function listBillsPaginated(opts: {
   }
 
   // Any status / review filter → lean scan (no composite index required)
-  if (opts.needsReview || opts.statuses?.length || opts.status) {
+  if (opts.needsReview || opts.statuses?.length || opts.status || opts.reviewCode) {
     const lean = await listAllBillsLean({ maxDocs: AGG_MAX_DOCS });
     const rows = filterRows(lean);
     const total = rows.length;

@@ -544,6 +544,18 @@ export function InvoiceDetailPage() {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>
             ⚠ Needs review — please verify these fields against the document
           </div>
+          {(inv.reviewCodes?.length ?? 0) > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+              {inv.reviewCodes!.map((code) => (
+                <span key={code} style={{
+                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                  background: '#FDE8E4', color: '#B42318', border: '1px solid #F9CBBE',
+                }}>
+                  {code}
+                </span>
+              ))}
+            </div>
+          )}
           {(inv.reviewReasons?.length ?? 0) > 0 ? (
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {inv.reviewReasons!.map((r, i) => (
@@ -1265,6 +1277,7 @@ function buildFinalOcrJson(inv: Invoice): string | null {
       {
         ...inv.parsedData,
         review_reasons: inv.reviewReasons ?? [],
+        review_codes: inv.reviewCodes ?? [],
         total_reconciliation: inv.totalReconciliation ?? null,
       },
       null,

@@ -172,6 +172,12 @@ export interface BillDoc {
   /** Advisory human-review reasons (missing GSTIN/PAN, total mismatch, etc.). Not blocking. */
   review_reasons?: string[] | null;
 
+  /**
+   * Stable machine codes for filtering Needs review in UI/API.
+   * e.g. MISSING_TAX_ID | TOTAL_MISMATCH | PARTS_BASE_MISMATCH | LABOUR_BASE_MISMATCH
+   */
+  review_codes?: string[] | null;
+
   /** Structured total reconciliation result from line-item recomputation. */
   total_reconciliation?: import('../ocr/transformer/reconcileTotal.js').TotalReconciliation | null;
 

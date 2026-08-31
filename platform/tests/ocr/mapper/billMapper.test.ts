@@ -71,6 +71,7 @@ describe('mapParsedToBill', () => {
       pan: null,
     });
     expect(bill.ocr_status).toBe('NEED_REVIEW');
+    expect(bill.review_codes).toContain('MISSING_TAX_ID');
     expect(bill.review_reasons?.some((r) => /handwritten|GSTIN or PAN/i.test(r))).toBe(true);
   });
 

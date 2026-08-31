@@ -51,8 +51,9 @@ export function mapParsedToBill(
   );
 
   const review = hasParsedContent(parsed) ? computeReview(parsed) : null;
-  const reviewReasons = review?.reasons ?? null;
-  const ocrStatus = (reviewReasons && reviewReasons.length > 0) ? 'NEED_REVIEW' : 'OCR_COMPLETED';
+  const reviewReasons = review?.reasons?.length ? review.reasons : null;
+  const reviewCodes = review?.codes?.length ? review.codes : null;
+  const ocrStatus = (reviewCodes && reviewCodes.length > 0) ? 'NEED_REVIEW' : 'OCR_COMPLETED';
 
   return {
     bill_id: billId,
@@ -107,6 +108,7 @@ export function mapParsedToBill(
     confidence_score: parsed.confidence ?? null,
 
     review_reasons: reviewReasons,
+    review_codes: reviewCodes,
     total_reconciliation: review?.total_reconciliation ?? null,
 
     file_url: opts.fileUrl ?? null,
@@ -230,6 +232,7 @@ export interface FrontendInvoice {
   lineItems?: FrontendLineItem[];
   runs?: unknown[];
   reviewReasons?: string[] | null;
+  reviewCodes?: string[] | null;
   totalReconciliation?: import('./transformer/reconcileTotal.js').TotalReconciliation | null;
   fallbackReason?: string | null;
 }
@@ -335,6 +338,8 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     lineItems: lineItems.length ? lineItems : undefined,
     runs: [],
     reviewReasons: bill.review_reasons ?? null,
+    reviewCodes: bill.review_codes
+      ?? (bill.parsed_data ? computeReview(bill.parsed_data).codes : null),
     totalReconciliation: bill.total_reconciliation
       ?? (bill.parsed_data ? reconcileInvoiceTotal(bill.parsed_data) : null),
     fallbackReason: bill.processing_status?.startsWith('FALLBACK:')

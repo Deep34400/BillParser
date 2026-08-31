@@ -62,6 +62,7 @@ export interface Invoice {
   extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;
   lineItems?: LineItem[]; runs?: ExtractionRun[];
   reviewReasons?: string[] | null;
+  reviewCodes?: string[] | null;
   totalReconciliation?: {
     matched: boolean; calculated_total: number; grand_total_invoice: number | null;
     difference: number | null; tolerance: 2;

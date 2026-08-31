@@ -412,6 +412,10 @@ export function resolveBillSummary(
     t.grand_total_invoice = gp;
   }
 
+  // Recover full labour/parts write-off when LLM missed the discount column
+  // (e.g. "Less Discount … | 157.71 | 0.00 | 925.00 |" with labour_discount left as 0).
+  inferFullyDiscountedColumn(t);
+
   const pNet = columnNet(t, 'parts');
   const lNet = columnNet(t, 'labour');
   if (pNet != null && lNet != null && t.grand_total_invoice != null) {
@@ -422,4 +426,34 @@ export function resolveBillSummary(
   }
 
   return t;
+}
+
+/**
+ * When one column alone matches grand_total and the other has gross > 0, discount 0,
+ * and no GST — treat that column as fully discounted (common Maruti free-labour pattern).
+ */
+function inferFullyDiscountedColumn(t: TotalsAndTaxSummary): void {
+  const grand = t.grand_total_invoice;
+  if (grand == null) return;
+
+  const trySide = (side: 'parts' | 'labour') => {
+    const total = side === 'parts' ? t.parts_total : t.labour_total;
+    const discKey = side === 'parts' ? 'parts_discount' : 'labour_discount';
+    const disc = t[discKey] ?? 0;
+    if (total == null || total <= 0 || disc > 0) return;
+
+    const cgst = side === 'parts' ? (t.parts_cgst_amount ?? 0) : (t.labour_cgst_amount ?? 0);
+    const sgst = side === 'parts' ? (t.parts_sgst_amount ?? 0) : (t.labour_sgst_amount ?? 0);
+    const igst = side === 'parts' ? (t.parts_igst_amount ?? 0) : (t.labour_igst_amount ?? 0);
+    if (cgst + sgst + igst > 0.05) return;
+
+    const otherNet = columnNet(t, side === 'parts' ? 'labour' : 'parts');
+    if (otherNet == null) return;
+    if (Math.abs(otherNet - grand) <= 2 || Math.round(otherNet) === Math.round(grand)) {
+      t[discKey] = roundMoney(total);
+    }
+  };
+
+  trySide('labour');
+  trySide('parts');
 }

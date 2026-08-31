@@ -52,6 +52,16 @@ const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'NEEDS_REVIEW', label: 'Needs review' },
 ];
 
+type ReviewCodeFilter = '' | 'MISSING_TAX_ID' | 'TOTAL_MISMATCH' | 'PARTS_BASE_MISMATCH' | 'LABOUR_BASE_MISMATCH';
+
+const REVIEW_CODE_CHIPS: { key: ReviewCodeFilter; label: string; countKey: string }[] = [
+  { key: '', label: 'All reasons', countKey: 'NEED_REVIEW' },
+  { key: 'MISSING_TAX_ID', label: 'No GSTIN / PAN', countKey: 'review_MISSING_TAX_ID' },
+  { key: 'TOTAL_MISMATCH', label: 'Total mismatch', countKey: 'review_TOTAL_MISMATCH' },
+  { key: 'PARTS_BASE_MISMATCH', label: 'Parts base ≠ total', countKey: 'review_PARTS_BASE_MISMATCH' },
+  { key: 'LABOUR_BASE_MISMATCH', label: 'Labour base ≠ total', countKey: 'review_LABOUR_BASE_MISMATCH' },
+];
+
 function isDuplicate(inv: Invoice): boolean {
   return (inv.reviewReasons ?? []).some((r) => r.startsWith('Duplicate:'));
 }
@@ -69,9 +79,11 @@ export function InvoicesPage() {
   const [globalCounts, setGlobalCounts] = useState<Record<StatusFilter, number>>({
     ALL: 0, DRAFT: 0, PENDING: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0, NEEDS_REVIEW: 0,
   });
+  const [reviewCodeCounts, setReviewCodeCounts] = useState<Record<string, number>>({});
 
   // Filter / sort state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [reviewCodeFilter, setReviewCodeFilter] = useState<ReviewCodeFilter>('');
   const [q, setQ] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [sort, setSort] = useState<SortKey>('none');
@@ -114,12 +126,19 @@ export function InvoicesPage() {
     }
   };
 
-  const fetchPage = useCallback(async (page: number, size: number, search?: string, status?: StatusFilter) => {
+  const fetchPage = useCallback(async (
+    page: number,
+    size: number,
+    search?: string,
+    status?: StatusFilter,
+    reviewCode?: ReviewCodeFilter,
+  ) => {
     setLoading(true);
     setAllInvoices([]);
     try {
       const statusParams = statusToApiParams(status ?? 'ALL');
-      const cacheKey = `${page}-${size}-${search ?? ''}-${JSON.stringify(statusParams)}`;
+      const code = reviewCode ?? '';
+      const cacheKey = `${page}-${size}-${search ?? ''}-${JSON.stringify(statusParams)}-${code}`;
       if (invCache && Date.now() - invCache.at < INV_CACHE_TTL && invCache.cacheKey === cacheKey) {
         setAllInvoices(invCache.invoices);
         setBatches(invCache.batches);
@@ -134,6 +153,7 @@ export function InvoicesPage() {
         ...statusParams,
       };
       if (search) params.q = search;
+      if (code && (status ?? 'ALL') === 'NEEDS_REVIEW') params.review_code = code;
       const qs = buildQs(params);
       const [inv, bat] = await Promise.all([api.list(qs), api.batches().catch(() => ({ batches: [] }))]);
       invCache = { invoices: inv.invoices, batches: bat.batches, total: inv.total, page: inv.page, pageSize: inv.pageSize, totalPages: inv.totalPages, at: Date.now(), cacheKey };
@@ -176,16 +196,23 @@ export function InvoicesPage() {
       FAILED: c['FAILED'] ?? 0,
       NEEDS_REVIEW: c['NEED_REVIEW'] ?? 0,
     });
+    setReviewCodeCounts({
+      NEED_REVIEW: c['NEED_REVIEW'] ?? 0,
+      review_MISSING_TAX_ID: c['review_MISSING_TAX_ID'] ?? 0,
+      review_TOTAL_MISMATCH: c['review_TOTAL_MISMATCH'] ?? 0,
+      review_PARTS_BASE_MISMATCH: c['review_PARTS_BASE_MISMATCH'] ?? 0,
+      review_LABOUR_BASE_MISMATCH: c['review_LABOUR_BASE_MISMATCH'] ?? 0,
+    });
   }, []);
 
   const refetch = useCallback(async () => {
-    await fetchPage(currentPage, pageSize, q || undefined, statusFilter);
-  }, [fetchPage, currentPage, pageSize, q, statusFilter]);
+    await fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter);
+  }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
 
-  // Fetch when page, pageSize, search, or status changes
+  // Fetch when page, pageSize, search, status, or review code changes
   useEffect(() => {
-    void fetchPage(currentPage, pageSize, q || undefined, statusFilter);
-  }, [fetchPage, currentPage, pageSize, q, statusFilter]);
+    void fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter);
+  }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
 
   // Fetch global counts on mount
   useEffect(() => {
@@ -689,7 +716,15 @@ export function InvoicesPage() {
         {STATUS_PILLS.map(({ key, label }) => {
           const active = statusFilter === key;
           return (
-            <button key={key} onClick={() => { setStatusFilter(key); setCurrentPage(1); invalidateInvoiceCache(); }} style={{
+            <button
+              key={key}
+              onClick={() => {
+                setStatusFilter(key);
+                setReviewCodeFilter('');
+                setCurrentPage(1);
+                invalidateInvoiceCache();
+              }}
+              style={{
               padding: '6px 14px', borderRadius: 999,
               border: `1px solid ${active ? T.accent : T.border}`,
               background: active ? T.accent : T.surface,
@@ -710,6 +745,45 @@ export function InvoicesPage() {
           );
         })}
       </div>
+
+      {/* Needs-review reason chips */}
+      {statusFilter === 'NEEDS_REVIEW' && (
+        <div style={{ padding: '8px 28px 0', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: T.inkFaint, marginRight: 4 }}>Why:</span>
+          {REVIEW_CODE_CHIPS.map(({ key, label, countKey }) => {
+            const active = reviewCodeFilter === key;
+            const n = reviewCodeCounts[countKey] ?? 0;
+            return (
+              <button
+                key={key || 'all'}
+                onClick={() => {
+                  setReviewCodeFilter(key);
+                  setCurrentPage(1);
+                  invalidateInvoiceCache();
+                }}
+                style={{
+                  padding: '4px 12px', borderRadius: 999,
+                  border: `1px solid ${active ? T.accent : T.border}`,
+                  background: active ? '#E8F0FE' : T.surface,
+                  color: active ? T.accent : T.inkSoft,
+                  fontSize: 12, fontWeight: active ? 600 : 500, cursor: 'pointer', fontFamily: T.font,
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                {label}
+                <span style={{
+                  fontSize: 10, fontWeight: 600,
+                  color: active ? T.accent : T.inkFaint,
+                  background: active ? 'rgba(26,115,232,0.12)' : '#F0EEE6',
+                  borderRadius: 8, padding: '0 6px',
+                }}>
+                  {n}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {batchFilter && (() => {
         const b = batches.find((x) => x.id === batchFilter);

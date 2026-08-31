@@ -141,14 +141,16 @@ export async function billRoutes(app: FastifyInstance) {
       const q = qs.q?.trim().toLowerCase();
       const needsReview = qs.needsReview === '1' || qs.needsReview === 'true';
       const completed = qs.completed === '1' || qs.completed === 'true';
+      const reviewCode = qs.review_code?.trim() || undefined;
 
       const result = await listBillsPaginated({
         page,
         pageSize,
-        status: needsReview ? 'NEED_REVIEW' : (completed ? undefined : status),
+        status: needsReview || reviewCode ? 'NEED_REVIEW' : (completed ? undefined : status),
         statuses: completed ? ['OCR_COMPLETED', 'VERIFIED'] : undefined,
         needsReview: undefined,
         excludeNeedsReview: undefined,
+        reviewCode,
         q,
       });
       const invoices = result.bills.map((b) => billToInvoice(b));
@@ -201,6 +203,7 @@ export async function billRoutes(app: FastifyInstance) {
             status: inv.status,
             parsedData: toApiParsed(bill.parsed_data),
             review_reasons: inv.reviewReasons ?? [],
+            review_codes: inv.reviewCodes ?? [],
             total_reconciliation: inv.totalReconciliation ?? null,
             fallback_reason: inv.fallbackReason ?? null,
           },
@@ -667,6 +670,7 @@ export async function billRoutes(app: FastifyInstance) {
           status: bill.ocr_status === 'NEED_REVIEW' ? 'NEEDS_REVIEW' : 'COMPLETED',
           parsed_data: toApiParsed(enriched),
           review_reasons: bill.review_reasons ?? [],
+          review_codes: bill.review_codes ?? [],
           total_reconciliation: bill.total_reconciliation ?? null,
           fallback_reason: result.fallbackReason ?? null,
           raw_ocr: rawOcr,
