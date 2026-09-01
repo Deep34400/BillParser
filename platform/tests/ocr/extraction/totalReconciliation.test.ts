@@ -204,6 +204,39 @@ describe('reconcileInvoiceTotal', () => {
     expect(r.matched).toBe(true);
   });
 
+  it('respects mixed line tax_percentage including 0% (JMD fuel) — no flat 18% on zero-rated lines', () => {
+    // Printed: before tax 11259.32, CGST+SGST 1990.68, grand 13250
+    // FULE 200 @ 0% must not attract 18% tax (that alone adds ₹36).
+    const r = reconcileInvoiceTotal({
+      company_name: 'J. M. D. AUTO GARAGE',
+      gstin: '27AZFPP2560C1ZJ',
+      invoice_number: 'JMD/1540/26-27',
+      parts_line_items: [
+        { quantity: 1, rate: 1000, taxable_amount: 1000, tax_percentage: 18 },
+        { quantity: 1, rate: 2309.32, taxable_amount: 2309.32, tax_percentage: 18 },
+        { quantity: 1, rate: 200, taxable_amount: 200, tax_percentage: 0 },
+      ],
+      labour_service_line_items: [
+        { labour_charges: 7750, tax_percentage: 18 },
+      ],
+      totals_and_tax_summary: {
+        parts_total: 3509.32,
+        labour_total: 7750,
+        parts_discount: 0,
+        labour_discount: 0,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        labour_cgst_rate: 9,
+        labour_sgst_rate: 9,
+        grand_total_invoice: 13250,
+      },
+      confidence: 0.9,
+    });
+    expect(r.calculated_total).toBe(13250);
+    expect(r.difference).toBe(0);
+    expect(r.matched).toBe(true);
+  });
+
   it('uses IGST rate when CGST/SGST rates absent', () => {
     const r = reconcileInvoiceTotal(parsed({
       totals_and_tax_summary: {

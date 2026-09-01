@@ -580,15 +580,24 @@ export function extractSummaryFromMarkdown(md: string): Partial<TotalsAndTaxSumm
       continue;
     }
 
-    // Standalone "Parts Total" / "Labour Total" labels (Autorox-style), single value.
-    if (/\bparts?\s+total\b/i.test(line) && !/sub|grand|gst/i.test(line)) {
+    // Standalone "Parts Total" / "Labour Total" / "Parts Net Amt" / "Labour Net Amt" labels.
+    if (/\bparts?\s+(?:total|net\s*amt)\b/i.test(line) && !/sub|grand|gst/i.test(line)) {
       const tok = moneyTokensFromText(line);
       if (tok.length && !chargeTable.has('parts')) out.parts_total = tok[tok.length - 1];
       continue;
     }
-    if (/\blabou?r\s+total\b/i.test(line) && !/sub|grand|gst/i.test(line)) {
+    if (/\blabou?r\s+(?:total|net\s*amt)\b/i.test(line) && !/sub|grand|gst/i.test(line)) {
       const tok = moneyTokensFromText(line);
       if (tok.length && !chargeTable.has('labour')) out.labour_total = tok[tok.length - 1];
+      continue;
+    }
+
+    // Combined "Parts Net Amt : 3,509.32    Labour Net Amt : 7,750.00" on one line.
+    if (/parts?\s+net\s*amt/i.test(line) && /labou?r\s+net\s*amt/i.test(line)) {
+      const pM = line.match(/parts?\s+net\s*amt\s*[:.]\s*([\d,]+\.?\d*)/i);
+      const lM = line.match(/labou?r\s+net\s*amt\s*[:.]\s*([\d,]+\.?\d*)/i);
+      if (pM && !chargeTable.has('parts')) { const v = parseMoneyToken(pM[1]); if (v != null) out.parts_total = v; }
+      if (lM && !chargeTable.has('labour')) { const v = parseMoneyToken(lM[1]); if (v != null) out.labour_total = v; }
       continue;
     }
 

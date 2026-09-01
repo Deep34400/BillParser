@@ -38,7 +38,48 @@ function taxRatePct(t: TotalsAndTaxSummary, side: 'parts' | 'labour'): number {
   if (cgst != null && sgst != null) return cgst + sgst;
   const igst = side === 'parts' ? t.parts_igst_rate : t.labour_igst_rate;
   if (igst != null) return igst;
+
+  // Indian invoices apply the same GST rate to both parts and labour.
+  // If this side has no rate but the other side does, inherit it.
+  const otherCgst = side === 'parts' ? t.labour_cgst_rate : t.parts_cgst_rate;
+  const otherSgst = side === 'parts' ? t.labour_sgst_rate : t.parts_sgst_rate;
+  if (otherCgst != null && otherSgst != null) return otherCgst + otherSgst;
+  const otherIgst = side === 'parts' ? t.labour_igst_rate : t.parts_igst_rate;
+  if (otherIgst != null) return otherIgst;
+
   return 0;
+}
+
+/**
+ * Tax for one side. When line tax_percentage values are mixed (e.g. 18% + 0% fuel),
+ * tax each line after proportional discount — avoids flat footer rate on zero-rated lines.
+ * Uniform (or missing) line rates keep the existing footer-rate behaviour.
+ */
+function sideTax(
+  lines: { amount: number; tax_percentage?: number | null }[],
+  discount: number,
+  footerRatePct: number,
+): number {
+  const gross = roundMoney(lines.reduce((s, l) => s + l.amount, 0));
+  if (gross <= 0) return 0;
+
+  const presentRates = lines
+    .map((l) => l.tax_percentage)
+    .filter((r): r is number => r != null);
+  const mixedRates = presentRates.length > 0 && new Set(presentRates).size > 1;
+
+  if (!mixedRates) {
+    return roundMoney(Math.max(0, gross - discount) * footerRatePct / 100);
+  }
+
+  let tax = 0;
+  for (const l of lines) {
+    const share = l.amount / gross;
+    const taxable = Math.max(0, l.amount - discount * share);
+    const rate = l.tax_percentage ?? footerRatePct;
+    tax += taxable * rate / 100;
+  }
+  return roundMoney(tax);
 }
 
 const TOLERANCE = 2;
@@ -68,8 +109,16 @@ export function reconcileInvoiceTotal(parsed: ParsedInvoiceData): TotalReconcili
   const labourDisc = (t.labour_discount ?? 0) + (t.labour_special_discount ?? 0);
   const partsTaxable = roundMoney(partsBase - partsDisc);
   const labourTaxable = roundMoney(labourBase - labourDisc);
-  const partsTax = roundMoney(partsTaxable * taxRatePct(t, 'parts') / 100);
-  const labourTax = roundMoney(labourTaxable * taxRatePct(t, 'labour') / 100);
+  const partsTax = sideTax(
+    parts.map((p) => ({ amount: partsLineAmount(p), tax_percentage: p.tax_percentage })),
+    partsDisc,
+    taxRatePct(t, 'parts'),
+  );
+  const labourTax = sideTax(
+    labour.map((l) => ({ amount: l.labour_charges ?? 0, tax_percentage: l.tax_percentage })),
+    labourDisc,
+    taxRatePct(t, 'labour'),
+  );
 
   const deductibles = t.deductibles ?? 0;
   const salvage = t.salvage ?? 0;

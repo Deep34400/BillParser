@@ -107,6 +107,73 @@ function hasCgstSgstRate(t: TotalsAndTaxSummary): boolean {
   );
 }
 
+/** Parse "Add : CGST/SGST/IGST <amount>" footer lines common on UnifyGST / JMD bills. */
+function footerAddGstAmounts(markdown: string): { cgst: number; sgst: number; igst: number } {
+  const pick = (kind: string): number => {
+    const m = markdown.match(new RegExp(`Add\\s*:\\s*${kind}\\s*([\\d,]+\\.?\\d*)`, 'i'));
+    if (!m) return 0;
+    const n = parseFloat(m[1].replace(/,/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  };
+  return { cgst: pick('CGST'), sgst: pick('SGST'), igst: pick('IGST') };
+}
+
+/** True when printed footer clearly charges CGST/SGST and not IGST. */
+function footerPrefersCgstSgst(markdown: string | null | undefined): boolean {
+  if (!markdown) return false;
+  const { cgst, sgst, igst } = footerAddGstAmounts(markdown);
+  return (cgst > 0 || sgst > 0) && igst <= 0;
+}
+
+/**
+ * When OCR/LLM parked tax in IGST but the printed footer is CGST+SGST (IGST 0),
+ * clear IGST and apply printed CGST/SGST split by side taxable. No-op for real IGST bills.
+ */
+function reclassifyIgstToCgstSgstFromFooter(
+  t: TotalsAndTaxSummary,
+  markdown?: string | null,
+): void {
+  if (!footerPrefersCgstSgst(markdown)) return;
+  const printed = footerAddGstAmounts(markdown!);
+
+  // Drop mislabeled IGST first (reconcileSideGst would otherwise wipe CGST).
+  const hadIgst =
+    (t.parts_igst_amount ?? 0) > 0 || (t.labour_igst_amount ?? 0) > 0 ||
+    (t.parts_igst_rate ?? 0) > 0 || (t.labour_igst_rate ?? 0) > 0;
+  for (const side of ['parts', 'labour'] as const) {
+    t[`${side}_igst_amount`] = null;
+    t[`${side}_igst_rate`] = null;
+  }
+  if (!hadIgst && (t.parts_cgst_amount ?? 0) + (t.labour_cgst_amount ?? 0) > 0) {
+    // Already CGST — fix rates if footer parser mistook amount for rate (e.g. 995.34).
+    for (const side of ['parts', 'labour'] as const) {
+      if ((t[`${side}_cgst_amount`] ?? 0) > 0 || (t[`${side}_sgst_amount`] ?? 0) > 0) {
+        const cr = t[`${side}_cgst_rate`];
+        const sr = t[`${side}_sgst_rate`];
+        if (cr == null || cr > 14) t[`${side}_cgst_rate`] = 9;
+        if (sr == null || sr > 14) t[`${side}_sgst_rate`] = 9;
+      }
+    }
+    return;
+  }
+
+  const pTax = Math.max(0, (t.parts_total ?? 0) - (t.parts_discount ?? 0) - (t.parts_special_discount ?? 0));
+  const lTax = Math.max(0, (t.labour_total ?? 0) - (t.labour_discount ?? 0) - (t.labour_special_discount ?? 0));
+  const base = pTax + lTax;
+  if (base <= 0 || (printed.cgst <= 0 && printed.sgst <= 0)) return;
+
+  const pShare = pTax / base;
+  t.parts_cgst_amount = roundMoney(printed.cgst * pShare);
+  t.labour_cgst_amount = roundMoney(printed.cgst - (t.parts_cgst_amount ?? 0));
+  t.parts_sgst_amount = roundMoney(printed.sgst * pShare);
+  t.labour_sgst_amount = roundMoney(printed.sgst - (t.parts_sgst_amount ?? 0));
+  // Force half-rates — footer parsers sometimes treat the amount (995.34) as a rate.
+  t.parts_cgst_rate = 9;
+  t.parts_sgst_rate = 9;
+  t.labour_cgst_rate = 9;
+  t.labour_sgst_rate = 9;
+}
+
 function hasIgstSignal(t: TotalsAndTaxSummary, data: ParsedInvoiceData, markdown?: string | null): boolean {
   if ((t.parts_igst_rate ?? 0) > 0 || (t.labour_igst_rate ?? 0) > 0) return true;
   if ((t.parts_igst_amount ?? 0) > 0 || (t.labour_igst_amount ?? 0) > 0) return true;
@@ -160,8 +227,16 @@ function inferGstRates(t: TotalsAndTaxSummary, data: ParsedInvoiceData): void {
 /**
  * When rates exist but amounts are missing (common in Gemini single — no OCR markdown),
  * fill CGST/SGST/IGST from (subtotal − discount) × rate%. Only fills null/undefined — never overwrites.
+ * Propagates CGST/SGST rates across sides when missing (intra-state Indian invoices).
+ * Does NOT propagate IGST rates — single-column IGST footers park the full tax on one side.
  */
 export function fillMissingGstAmounts(t: TotalsAndTaxSummary): void {
+  // Propagate CGST/SGST only — never IGST (combined IGST footers would double-count).
+  if ((t.parts_cgst_rate ?? 0) > 0 && t.labour_cgst_rate == null) t.labour_cgst_rate = t.parts_cgst_rate;
+  if ((t.labour_cgst_rate ?? 0) > 0 && t.parts_cgst_rate == null) t.parts_cgst_rate = t.labour_cgst_rate;
+  if ((t.parts_sgst_rate ?? 0) > 0 && t.labour_sgst_rate == null) t.labour_sgst_rate = t.parts_sgst_rate;
+  if ((t.labour_sgst_rate ?? 0) > 0 && t.parts_sgst_rate == null) t.parts_sgst_rate = t.labour_sgst_rate;
+
   for (const side of ['parts', 'labour'] as const) {
     const sub = t[`${side}_total`];
     if (sub == null || sub <= 0) continue;
@@ -172,7 +247,7 @@ export function fillMissingGstAmounts(t: TotalsAndTaxSummary): void {
     const igstRate = t[`${side}_igst_rate`];
     if (igstRate != null && igstRate > 0 && t[`${side}_igst_amount`] == null) {
       t[`${side}_igst_amount`] = roundMoney(taxable * igstRate / 100);
-      continue; // IGST and CGST+SGST are mutually exclusive
+      continue;
     }
 
     const cgstRate = t[`${side}_cgst_rate`] ?? t[`${side}_sgst_rate`];
@@ -204,9 +279,11 @@ function fillMissingGstFromLineItems(
   );
   if (parts <= 0 && labour <= 0) return;
 
-  // Prefer IGST when signaled, or when footer has no CGST/SGST rates at all
-  // (Gemini single leaves rates null — default to IGST for a single GST bucket).
-  const useIgst = hasIgstSignal(t, data, markdown) || !hasCgstSgstRate(t);
+  // Prefer footer signal when present. Otherwise: IGST when signaled, or default IGST
+  // when rates are missing and there is no markdown (Gemini single — single GST bucket).
+  const useIgst = footerPrefersCgstSgst(markdown)
+    ? false
+    : hasIgstSignal(t, data, markdown) || !hasCgstSgstRate(t);
 
   if (useIgst) {
     if (parts > 0) {
@@ -399,6 +476,9 @@ export function resolveBillSummary(
   inferGstRates(t, data);
   fillMissingGstAmounts(t);
   fillMissingGstFromLineItems(t, data, markdown);
+  // Footer CGST/SGST (IGST 0) wins over LLM mislabeled IGST — must run before reconcileSideGst
+  // which would otherwise drop CGST when IGST amounts are present.
+  reclassifyIgstToCgstSgstFromFooter(t, markdown);
   reconcileSideGst(t);
   stripCalculatedFooterAmounts(t);
   // Refill after stripping gross×rate mistakes → (subtotal − discount) × rate
