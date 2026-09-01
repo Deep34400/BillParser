@@ -136,12 +136,10 @@ describe('listBillsPaginated', () => {
   });
 
   it('excludes needs-review bills from completed when excludeNeedsReview=true', async () => {
-    const clean = makeBill('clean', '2026-07-05T00:00:00Z', 'OCR_COMPLETED');
-    clean.confidence_score = 0.95;
-    const flagged = makeBill('flag', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
-    flagged.confidence_score = 0.5;
-    await createBill(clean);
-    await createBill(flagged);
+    // NEED_REVIEW is now its own status, so it already falls outside a
+    // completed-statuses filter; excludeNeedsReview is belt-and-braces.
+    await createBill(makeBill('clean', '2026-07-05T00:00:00Z', 'OCR_COMPLETED'));
+    await createBill(makeBill('flag', '2026-07-04T00:00:00Z', 'NEED_REVIEW'));
 
     const result = await listBillsPaginated({
       statuses: ['OCR_COMPLETED', 'VERIFIED'],
@@ -152,22 +150,18 @@ describe('listBillsPaginated', () => {
   });
 
   it('returns only bills that need review when needsReview=true', async () => {
-    const low = makeBill('low', '2026-07-05T00:00:00Z', 'OCR_COMPLETED');
-    low.confidence_score = 0.5;
-    const ok = makeBill('ok', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
-    ok.confidence_score = 0.95;
-    const flagged = makeBill('flag', '2026-07-03T00:00:00Z', 'OCR_COMPLETED');
-    flagged.confidence_score = 0.9;
-    flagged.review_reasons = ['Duplicate: INV-1'];
-    const verified = makeBill('ver', '2026-07-02T00:00:00Z', 'VERIFIED');
-    verified.confidence_score = 0.4;
-    await createBill(low);
-    await createBill(ok);
-    await createBill(flagged);
-    await createBill(verified);
+    // Needs-review is the persisted NEED_REVIEW status now — low confidence or
+    // review_reasons alone no longer qualify a bill.
+    await createBill(makeBill('nr1', '2026-07-05T00:00:00Z', 'NEED_REVIEW'));
+    await createBill(makeBill('nr2', '2026-07-03T00:00:00Z', 'NEED_REVIEW'));
+    const lowConf = makeBill('lowconf', '2026-07-04T00:00:00Z', 'OCR_COMPLETED');
+    lowConf.confidence_score = 0.4;
+    lowConf.review_reasons = ['Duplicate: INV-1'];
+    await createBill(lowConf);
+    await createBill(makeBill('ver', '2026-07-02T00:00:00Z', 'VERIFIED'));
 
     const result = await listBillsPaginated({ needsReview: true });
-    expect(result.bills.map((b) => b.bill_id).sort()).toEqual(['flag', 'low']);
+    expect(result.bills.map((b) => b.bill_id).sort()).toEqual(['nr1', 'nr2']);
     expect(result.total).toBe(2);
   });
 
@@ -200,4 +194,14 @@ describe('countBills', () => {
     expect(await countBills('FAILED')).toBe(1);
     expect(await countBills('OCR_COMPLETED')).toBe(2);
   });
+  it('filters by status=NEED_REVIEW', async () => {
+    // Needs-review became a persisted status rather than a runtime heuristic, so
+    // it is now an ordinary indexed status filter.
+    await createBill(makeBill('nr1', '2026-07-05T00:00:00Z', 'NEED_REVIEW'));
+    await createBill(makeBill('ok1', '2026-07-04T00:00:00Z', 'OCR_COMPLETED'));
+    const result = await listBillsPaginated({ status: 'NEED_REVIEW' });
+    expect(result.total).toBe(1);
+    expect(result.bills[0].bill_id).toBe('nr1');
+  });
+
 });

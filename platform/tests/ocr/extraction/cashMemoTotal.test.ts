@@ -44,13 +44,15 @@ describe('AJAY PAL bill totals', () => {
     expect(out.totals_and_tax_summary?.grand_total_invoice).toBe(5700);
   });
 
-  it('flags line sum vs printed total mismatch for review', () => {
+  it('flags NEED_REVIEW reason when GSTIN and PAN are both missing (line-sum rule disabled)', () => {
     const parsed: ParsedInvoiceData = {
       parts_line_items: AJAY_PAL_PARTS,
       labour_service_line_items: [],
       totals_and_tax_summary: { grand_total_invoice: 5700, parts_total: 5700 },
     };
     const reasons = computeReviewReasons(parsed);
-    expect(reasons.some((r) => /verify amounts/i.test(r))).toBe(true);
+    // Current policy: only no GSTIN+PAN — line-sum mismatch is commented out
+    expect(reasons.some((r) => /handwritten|GSTIN or PAN/i.test(r))).toBe(true);
+    expect(reasons.some((r) => /verify amounts/i.test(r))).toBe(false);
   });
 });

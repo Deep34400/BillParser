@@ -1,4 +1,4 @@
-export type InvoiceStatus = 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type InvoiceStatus = 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'NEEDS_REVIEW' | 'FAILED';
 export interface SummaryColumn { label?: string | null; subtotal?: number | null; discount?: number | null; cgst?: number | null; sgst?: number | null; igst?: number | null; total?: number | null; }
 export interface PartsLineItem {
   rate?: number | null; quantity?: number | null; hsn_sac_code?: string | null; tax_percentage?: number | null;
@@ -66,8 +66,61 @@ export interface Invoice {
   extractionLatencyMs?: number | null; structuringLatencyMs?: number | null; totalLatencyMs?: number | null;
   lineItems?: LineItem[]; runs?: ExtractionRun[];
   reviewReasons?: string[] | null;
-  /** Set when single/Gemini failed and pipeline fell back to Mistral split */
+  reviewCodes?: string[] | null;
+  totalReconciliation?: {
+    matched: boolean; calculated_total: number; grand_total_invoice: number | null;
+    difference: number | null; tolerance: 2;
+    parts_base: number; labour_base: number;
+    deductibles: number; salvage: number; reason: string | null;
+  } | null;
+  /** @deprecated Use fallbackHistory instead */
   fallbackReason?: string | null;
+  /** How many fallback levels were attempted */
+  fallbackAttempts?: number | null;
+  /** Audit trail of each fallback level attempted */
+  fallbackHistory?: Array<{
+    level: number;
+    label: string;
+    mode: 'single' | 'split';
+    provider: string;
+    model: string;
+    reconciliation_matched: boolean;
+    difference?: number | null;
+    calculated_total?: number | null;
+    grand_total_invoice?: number | null;
+    error?: string | null;
+    cost_usd: number;
+    latency_ms: number;
+    parsed_snapshot?: ParsedInvoiceData | null;
+    summary?: {
+      company_name?: string | null;
+      invoice_number?: string | null;
+      gstin?: string | null;
+      parts_count: number;
+      labour_count: number;
+      grand_total?: number | null;
+      parts_total?: number | null;
+      labour_total?: number | null;
+    } | null;
+    recon_breakdown?: {
+      matched: boolean;
+      difference: number | null;
+      reason: string | null;
+      parts_base: number;
+      parts_total: number | null;
+      parts_base_diff: number | null;
+      parts_base_ok: boolean;
+      labour_base: number;
+      labour_total: number | null;
+      labour_base_diff: number | null;
+      labour_base_ok: boolean;
+      calculated_total: number;
+      grand_total_invoice: number | null;
+      parts_count: number;
+      labour_count: number;
+      review_codes: string[];
+    } | null;
+  }> | null;
 }
 export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; }
 export interface ProviderInfo { name: string; displayName: string; kind: string; configured: boolean; requiredCredentials?: string[]; masked?: Record<string, string>; }
@@ -92,6 +145,16 @@ export interface AppConfig {
   };
 }
 export interface ModelPrice { inputPer1M: number; outputPer1M: number; }
+export interface FallbackLevel {
+  label: string;
+  mode: 'single' | 'split';
+  provider: string;
+  model: string;
+  structuringProvider?: string;
+  structuringModel?: string;
+  enabled: boolean;
+}
+
 export interface SettingsData {
   pipelineMode: 'split' | 'single';
   extractionProvider: string;
@@ -100,6 +163,7 @@ export interface SettingsData {
   extractionModel?: string;
   singleProvider?: string;
   singleModel?: string;
+  fallbackChain?: FallbackLevel[] | null;
   providers: ProviderInfo[];
   modelPricing?: Record<string, ModelPrice>;
   defaultModelPricing?: Record<string, ModelPrice>;
@@ -124,8 +188,7 @@ export interface OcrCostSummary {
   avg_cost_per_ocr_usd: number;
   avg_tokens_per_ocr: number;
   by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
-  /** Rupee totals summed per bill at the rate frozen when each was processed.
-   *  Optional so older cached payloads still typecheck. */
+  /** Rupee totals summed per bill at the rate frozen when each was processed. */
   total_cost_inr?: number;
   avg_cost_per_ocr_inr?: number;
   by_provider_inr?: Record<string, number>;

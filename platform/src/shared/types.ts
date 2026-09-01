@@ -2,7 +2,7 @@
  * Core domain types — single source of truth.
  *
  * The OCR contract (ParsedInvoiceData) is preserved exactly as-is from the original system.
- * Postgres row shapes (BillDoc, BillPartDoc) are designed around this contract.
+ * Firestore document shapes (BillDoc, BillPartDoc) are designed around this contract.
  */
 
 // ─── OCR contract (immutable — do not rename or restructure) ─────────────────
@@ -94,6 +94,7 @@ export type BillStatus =
   | 'UPLOADED'
   | 'PROCESSING'
   | 'OCR_COMPLETED'
+  | 'NEED_REVIEW'
   | 'VERIFIED'
   | 'FAILED';
 
@@ -114,7 +115,7 @@ export type BillType =
 
 export type LineType = 'PART' | 'LABOUR';
 
-// ─── Postgres row: bills table ───────────────────────────────────────────────
+// ─── Firestore document: bills collection ───────────────────────────────────
 
 export interface BillDoc {
   bill_id: string;
@@ -168,8 +169,17 @@ export interface BillDoc {
   processing_status?: string | null;
   confidence_score?: number | null;
 
-  /** Advisory human-review reasons (missing GSTIN/PAN, unclear vendor, etc.). Not blocking. */
+  /** Advisory human-review reasons (missing GSTIN/PAN, total mismatch, etc.). Not blocking. */
   review_reasons?: string[] | null;
+
+  /**
+   * Stable machine codes for filtering Needs review in UI/API.
+   * e.g. MISSING_TAX_ID | TOTAL_MISMATCH | PARTS_BASE_MISMATCH | LABOUR_BASE_MISMATCH
+   */
+  review_codes?: string[] | null;
+
+  /** Structured total reconciliation result from line-item recomputation. */
+  total_reconciliation?: import('../ocr/transformer/reconcileTotal.js').TotalReconciliation | null;
 
   file_url?: string | null;
   storage_path?: string | null;
@@ -205,6 +215,53 @@ export interface BillDoc {
   structuring_latency_ms?: number | null;
   total_latency_ms?: number | null;
 
+  /** How many fallback levels were attempted during OCR */
+  fallback_attempts?: number | null;
+  /** Audit trail of each fallback level attempted (includes parsed_snapshot + recon_breakdown for compare) */
+  fallback_history?: Array<{
+    level: number;
+    label: string;
+    mode: 'single' | 'split';
+    provider: string;
+    model: string;
+    reconciliation_matched: boolean;
+    difference?: number | null;
+    calculated_total?: number | null;
+    grand_total_invoice?: number | null;
+    error?: string | null;
+    cost_usd: number;
+    latency_ms: number;
+    parsed_snapshot?: ParsedInvoiceData | null;
+    summary?: {
+      company_name?: string | null;
+      invoice_number?: string | null;
+      gstin?: string | null;
+      parts_count: number;
+      labour_count: number;
+      grand_total?: number | null;
+      parts_total?: number | null;
+      labour_total?: number | null;
+    } | null;
+    recon_breakdown?: {
+      matched: boolean;
+      difference: number | null;
+      reason: string | null;
+      parts_base: number;
+      parts_total: number | null;
+      parts_base_diff: number | null;
+      parts_base_ok: boolean;
+      labour_base: number;
+      labour_total: number | null;
+      labour_base_diff: number | null;
+      labour_base_ok: boolean;
+      calculated_total: number;
+      grand_total_invoice: number | null;
+      parts_count: number;
+      labour_count: number;
+      review_codes: string[];
+    } | null;
+  }> | null;
+
   /** Linked vendor from Vendor Registry (set after OCR completion). */
   vendor_id?: string | null;
 
@@ -221,13 +278,14 @@ export interface BillDoc {
    */
   fx_rate_usd_inr?: number | null;
 
+
   schema_version: number;
 
   created_at: string;
   updated_at: string;
 }
 
-// ─── Postgres row: bill_parts table ──────────────────────────────────────────
+// ─── Firestore document: bill_parts collection ──────────────────────────────
 
 export interface BillPartDoc {
   part_id: string;

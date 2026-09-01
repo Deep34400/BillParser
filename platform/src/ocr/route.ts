@@ -5,32 +5,33 @@ import {
   getPartsForBill, deletePartsForBill, extractPartsFromParsed, saveBillParts,
   getSettings, findDuplicateBills, countAllStatuses, type ParsedInvoiceData,
 } from './repository.js';
-import { billToInvoice, toApiParsed, mapParsedToBill } from './mapper.js';
+import { billToInvoice, toApiParsed, mapParsedToBill, toExternalOcrPayload } from './mapper.js';
 import { isPdf, isImage, uploadFile, getStoredFile } from '../shared/storage.js';
 import { env } from '../config/env.js';
 import { deductTokens, trackOcrCost } from '../users/service.js';
-import { enrichParsedInvoice } from './transformer/normalize/index.js';
 import { runPipeline } from './process.js';
 import { cacheInvalidate } from '../shared/cache.js';
 import { upsertVendorFromInvoice } from '../vendor/vendorService.js';
 import { bearerFromRequest } from '../middleware/auth.js';
+import { reconcileBillsInCreatedAtRange } from './service/reconcileRange.js';
 
-/** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill (so UI shows the chosen model, not mistral). */
+/** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill. */
 async function applyPipelineSettingsToBill(bill: import('../shared/types.js').BillDoc): Promise<void> {
+  const { buildFallbackChain } = await import('../shared/settings.js');
   const settings = await getSettings();
-  const mode = settings.pipelineMode ?? 'single';
-  bill.pipeline_mode = mode;
-  if (mode === 'single') {
-    const prov = settings.singleProvider ?? 'gemini';
-    const model = settings.singleModel ?? 'gemini-2.5-flash';
-    bill.extraction_provider = prov;
-    bill.structuring_provider = prov;
-    bill.extraction_model = model;
-    bill.structuring_model = model;
+  const chain = buildFallbackChain(settings);
+  const primary = chain[0];
+  if (!primary) return;
+  bill.pipeline_mode = primary.mode;
+  if (primary.mode === 'single') {
+    bill.extraction_provider = primary.provider;
+    bill.structuring_provider = primary.provider;
+    bill.extraction_model = primary.model;
+    bill.structuring_model = primary.model;
   } else {
     bill.extraction_provider = 'mistral';
-    bill.structuring_provider = settings.structuringProvider ?? 'gemini';
-    bill.structuring_model = settings.structuringModel ?? 'gemini-2.5-flash';
+    bill.structuring_provider = primary.structuringProvider ?? primary.provider;
+    bill.structuring_model = primary.structuringModel ?? primary.model;
     bill.extraction_model = null;
   }
 }
@@ -53,15 +54,13 @@ function processInBackground(
   (async () => {
     try {
       const result = await runPipeline(buf, billId);
-      const { costInfo, rawOcr, providers } = result;
+      const { costInfo, rawOcr, providers, fallbackHistory, fallbackAttempts } = result;
 
-      if (result.fallbackReason) {
-        console.warn(`[OCR] ${billId} — fallback used: ${result.fallbackReason}`);
+      if (fallbackAttempts > 1) {
+        console.warn(`[OCR] ${billId} — used ${fallbackAttempts} fallback attempts`);
       }
 
-      const enriched = enrichParsedInvoice(result.parsed, rawOcr);
-
-      const bill = mapParsedToBill(billId, enriched, {
+      const bill = mapParsedToBill(billId, result.parsed, {
         fileUrl,
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
@@ -69,19 +68,18 @@ function processInBackground(
         pipelineMode: providers.mode,
         fxRateUsdInr: (await getSettings()).usdToInr,
       });
-      bill.ocr_status = 'OCR_COMPLETED';
-      if (result.fallbackReason) {
-        bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
-      }
+      bill.ocr_status = bill.ocr_status === 'NEED_REVIEW' ? 'NEED_REVIEW' : 'OCR_COMPLETED';
+      bill.fallback_attempts = fallbackAttempts;
+      bill.fallback_history = fallbackHistory;
 
-      await updateBillStatus(billId, 'OCR_COMPLETED', bill);
+      await updateBillStatus(billId, bill.ocr_status, bill);
       cacheInvalidate('analytics');
 
-      // Duplicate check — non-blocking warning only
+      // Duplicate check — advisory only (does NOT force NEED_REVIEW while policy is GSTIN/PAN-only)
       try {
-        const dupes = await findDuplicateBills(enriched.invoice_number, enriched.gstin, billId);
+        const dupes = await findDuplicateBills(result.parsed.invoice_number, result.parsed.gstin, billId);
         if (dupes.length > 0) {
-          const dupMsg = `Duplicate: invoice ${enriched.invoice_number} already exists (${dupes.length} match)`;
+          const dupMsg = `Duplicate: invoice ${result.parsed.invoice_number} already exists (${dupes.length} match)`;
           const reasons = bill.review_reasons ?? [];
           if (!reasons.includes(dupMsg)) reasons.push(dupMsg);
           await updateBill(billId, { review_reasons: reasons });
@@ -91,11 +89,11 @@ function processInBackground(
         console.warn(`[OCR] ${billId} — duplicate check failed:`, (e as Error).message);
       }
 
-      const parts = extractPartsFromParsed(billId, enriched);
+      const parts = extractPartsFromParsed(billId, result.parsed);
       await saveBillParts(parts);
 
       // Vendor Registry — fire-and-forget; never blocks or affects OCR pipeline
-      upsertVendorFromInvoice(billId, enriched)
+      upsertVendorFromInvoice(billId, result.parsed)
         .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
         .catch((e) => console.warn(`[vendor] ${billId} — registry update failed:`, (e as Error).message));
 
@@ -142,14 +140,16 @@ export async function billRoutes(app: FastifyInstance) {
       const q = qs.q?.trim().toLowerCase();
       const needsReview = qs.needsReview === '1' || qs.needsReview === 'true';
       const completed = qs.completed === '1' || qs.completed === 'true';
+      const reviewCode = qs.review_code?.trim() || undefined;
 
       const result = await listBillsPaginated({
         page,
         pageSize,
-        status: completed || needsReview ? undefined : status,
+        status: needsReview || reviewCode ? 'NEED_REVIEW' : (completed ? undefined : status),
         statuses: completed ? ['OCR_COMPLETED', 'VERIFIED'] : undefined,
-        needsReview: needsReview || undefined,
-        excludeNeedsReview: completed || undefined,
+        needsReview: undefined,
+        excludeNeedsReview: undefined,
+        reviewCode,
         q,
       });
       const invoices = result.bills.map((b) => billToInvoice(b));
@@ -177,10 +177,71 @@ export async function billRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /api/invoices/reconcile-range
+   *
+   * Re-run total reconciliation + review codes for bills in a created_at window.
+   *
+   * Query/body:
+   *   start_date, end_date  — YYYY-MM-DD (created_at, inclusive)
+   *   mode                  — "check" (default, dry-run) | "update" (persist)
+   *   status                — optional filter: NEED_REVIEW | OCR_COMPLETED | VERIFIED
+   *                           (comma-separated ok). Omit = all eligible.
+   *   include_verified      — "1" to also re-check VERIFIED bills (when status omitted)
+   *
+   * Auth: API key or JWT session.
+   */
+  app.post('/api/invoices/reconcile-range', async (req, reply) => {
+    try {
+      if (!req.appUser) {
+        return reply.status(401).send({ success: false, message: 'API key or session token required' });
+      }
+      const qs = req.query as Record<string, string | undefined>;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const startDate = String(body.start_date ?? qs.start_date ?? '').trim();
+      const endDate = String(body.end_date ?? qs.end_date ?? '').trim();
+      const modeRaw = String(body.mode ?? qs.mode ?? 'check').toLowerCase();
+      const mode = modeRaw === 'update' ? 'update' as const : 'check' as const;
+      const includeVerified = body.include_verified === true
+        || body.include_verified === '1'
+        || qs.include_verified === '1'
+        || qs.include_verified === 'true';
+      const statusRaw = body.status ?? qs.status;
+      const status: string | null = statusRaw == null || statusRaw === ''
+        ? null
+        : Array.isArray(statusRaw)
+          ? statusRaw.map(String).join(',')
+          : String(statusRaw);
+
+      if (!startDate || !endDate) {
+        return reply.code(400).send({
+          success: false,
+          message: 'start_date and end_date are required (YYYY-MM-DD)',
+        });
+      }
+
+      const data = await reconcileBillsInCreatedAtRange({
+        startDate,
+        endDate,
+        mode,
+        includeVerified,
+        status,
+      });
+      return { success: true, data };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/start_date|end_date|Invalid|status filter/i.test(msg)) {
+        return reply.code(400).send({ success: false, message: msg });
+      }
+      req.log.error(err, 'reconcile-range failed');
+      return reply.code(500).send({ success: false, message: msg });
+    }
+  });
+
+  /**
    * GET /api/invoices/:id — single invoice detail.
    *
    * API key (Bearer inv_…): lean OCR payload only
-   *   { success, data: { bill_id, status, parsed_data, review_reasons, fallback_reason } }
+   *   { success, data: { bill_id, status, parsed_data, review_reasons, total_reconciliation, fallback_reason } }
    *
    * JWT / UI session: full FrontendInvoice (camelCase) for the detail page.
    */
@@ -195,13 +256,17 @@ export async function billRoutes(app: FastifyInstance) {
 
       if (isApiKey) {
         const inv = billToInvoice(bill);
+        const ext = toExternalOcrPayload(bill);
         return {
           success: true,
           data: {
             bill_id: bill.bill_id,
-            status: inv.status,
+            status: ext.status,
+            needs_review: ext.needs_review,
             parsedData: toApiParsed(bill.parsed_data),
-            review_reasons: inv.reviewReasons ?? [],
+            review_reasons: ext.review_reasons,
+            review_codes: ext.review_codes,
+            total_reconciliation: inv.totalReconciliation ?? null,
             fallback_reason: inv.fallbackReason ?? null,
           },
         };
@@ -378,17 +443,32 @@ export async function billRoutes(app: FastifyInstance) {
   });
 
   /**
-   * POST /api/invoices/:id/reextract — re-run OCR on existing bill.
+   * POST /api/invoices/:id/reextract — re-run OCR on existing bill using Settings fallback chain.
    */
   app.post('/api/invoices/:id/reextract', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
       const bill = await getBill(id);
       if (!bill) return reply.code(404).send({ error: 'Invoice not found' });
-      await updateBill(id, { ocr_status: 'PROCESSING' });
-      return { ok: true };
+      if (!bill.storage_path) {
+        return reply.code(400).send({ error: 'No file stored for this bill' });
+      }
+
+      const stored = await getStoredFile(bill.storage_path);
+      if (!stored) {
+        return reply.code(400).send({ error: 'Could not retrieve stored file' });
+      }
+
+      await updateBillStatus(id, 'PROCESSING', {});
+      const userId = req.appUser?.user_id;
+      const fileName = (bill as { original_filename?: string }).original_filename
+        ?? bill.storage_path.split('/').pop()
+        ?? `bill-${id}`;
+      processInBackground(id, stored.buf, fileName, bill.file_url ?? '', bill.storage_path, userId);
+      return { ok: true, message: 'Re-extraction started' };
     } catch (err) {
-      return reply.code(500).send({ error: 'Re-extract failed' });
+      const msg = err instanceof Error ? err.message : 'Re-extract failed';
+      return reply.code(500).send({ error: msg });
     }
   });
 
@@ -512,7 +592,15 @@ export async function billRoutes(app: FastifyInstance) {
         cacheInvalidate('analytics');
       } else if (body.action === 'reextract') {
         for (const id of body.ids) {
-          await updateBill(id, { ocr_status: 'PROCESSING' } as any);
+          const bill = await getBill(id);
+          if (!bill?.storage_path) continue;
+          const stored = await getStoredFile(bill.storage_path);
+          if (!stored) continue;
+          await updateBillStatus(id, 'PROCESSING', {});
+          const fileName = (bill as { original_filename?: string }).original_filename
+            ?? bill.storage_path.split('/').pop()
+            ?? `bill-${id}`;
+          processInBackground(id, stored.buf, fileName, bill.file_url ?? '', bill.storage_path, req.appUser?.user_id);
         }
       }
       return { ok: true };
@@ -596,9 +684,8 @@ export async function billRoutes(app: FastifyInstance) {
       if (!buf) return reply.code(400).send({ error: 'provide a PDF file or JSON { "source": "<url>" }' });
 
       const result = await runPipeline(buf, 'parse');
-      const parsed = enrichParsedInvoice(result.parsed, result.rawOcr);
 
-      return { output: { entries: [{ id: uuid(), parsed_data: toApiParsed(parsed) }] } };
+      return { output: { entries: [{ id: uuid(), parsed_data: toApiParsed(result.parsed) }] } };
     } catch (err) {
       return reply.code(502).send({ error: err instanceof Error ? err.message : 'extraction failed' });
     }
@@ -623,9 +710,7 @@ export async function billRoutes(app: FastifyInstance) {
 
       const t0 = Date.now();
       const result = await runPipeline(buf, 'sync');
-      const { costInfo, rawOcr, providers } = result;
-
-      const enriched = enrichParsedInvoice(result.parsed, rawOcr);
+      const { costInfo, rawOcr, providers, fallbackHistory, fallbackAttempts } = result;
 
       const billId = uuid();
       const fileName = 'api-sync-upload';
@@ -634,7 +719,7 @@ export async function billRoutes(app: FastifyInstance) {
         contentType: isPdf(buf) ? 'application/pdf' : 'image/jpeg',
       });
 
-      const bill = mapParsedToBill(billId, enriched, {
+      const bill = mapParsedToBill(billId, result.parsed, {
         fileUrl: publicUrl,
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
@@ -642,16 +727,13 @@ export async function billRoutes(app: FastifyInstance) {
         pipelineMode: providers.mode,
         fxRateUsdInr: (await getSettings()).usdToInr,
       });
-      bill.ocr_status = 'OCR_COMPLETED';
-      if (result.fallbackReason) {
-        bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
-      }
+      bill.fallback_attempts = fallbackAttempts;
+      bill.fallback_history = fallbackHistory;
       await createBill(bill);
-      const parts = extractPartsFromParsed(billId, enriched);
+      const parts = extractPartsFromParsed(billId, result.parsed);
       await saveBillParts(parts);
 
-      // Vendor Registry — fire-and-forget
-      upsertVendorFromInvoice(billId, enriched)
+      upsertVendorFromInvoice(billId, result.parsed)
         .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
         .catch(() => {});
 
@@ -661,12 +743,17 @@ export async function billRoutes(app: FastifyInstance) {
         try { await trackOcrCost(user.user_id, costInfo.total_cost_usd); } catch { /* ignore */ }
       }
 
+      const ext = toExternalOcrPayload(bill);
       return {
         success: true,
         data: {
           bill_id: billId,
-          parsed_data: toApiParsed(enriched),
-          review_reasons: bill.review_reasons ?? [],
+          status: ext.status,
+          needs_review: ext.needs_review,
+          parsed_data: toApiParsed(result.parsed),
+          review_reasons: ext.review_reasons,
+          review_codes: ext.review_codes,
+          total_reconciliation: bill.total_reconciliation ?? null,
           fallback_reason: result.fallbackReason ?? null,
           raw_ocr: rawOcr,
           cost: {
@@ -678,7 +765,7 @@ export async function billRoutes(app: FastifyInstance) {
             structuring_provider: providers.structuring,
             fallback_reason: result.fallbackReason ?? null,
             total_usd: costInfo.total_cost_usd,
-            total_inr: Math.round(costInfo.total_cost_usd * (bill.fx_rate_usd_inr ?? 96) * 100) / 100,
+            total_inr: Math.round(costInfo.total_cost_usd * 83 * 100) / 100,
             input_tokens: costInfo.total_input_tokens ?? 0,
             output_tokens: costInfo.total_output_tokens ?? 0,
             input_cost_usd: costInfo.total_input_cost_usd ?? 0,

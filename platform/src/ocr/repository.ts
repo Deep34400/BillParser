@@ -3,7 +3,7 @@
  * Contains the actual Postgres CRUD. No re-exports — all DB code lives here.
  */
 import { v4 as uuid } from 'uuid';
-import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../config/db.js';
 import { bills, billParts } from '../db/schema.js';
 import { getSettings } from '../shared/settings.js';
@@ -85,6 +85,10 @@ function billRowToDoc(row: typeof bills.$inferSelect): BillDoc {
     structuring_latency_ms: row.structuringLatencyMs,
     total_latency_ms: row.totalLatencyMs,
     vendor_id: row.vendorId,
+    review_codes: row.reviewCodes,
+    total_reconciliation: row.totalReconciliation as BillDoc['total_reconciliation'],
+    fallback_attempts: row.fallbackAttempts,
+    fallback_history: row.fallbackHistory as BillDoc['fallback_history'],
     extraction_pages: row.extractionPages,
     input_rate_per_1m: row.inputRatePer1m,
     output_rate_per_1m: row.outputRatePer1m,
@@ -165,6 +169,10 @@ function billDocToRow(b: BillDoc) {
     structuringLatencyMs: b.structuring_latency_ms ?? null,
     totalLatencyMs: b.total_latency_ms ?? null,
     vendorId: b.vendor_id ?? null,
+    reviewCodes: b.review_codes ?? null,
+    totalReconciliation: b.total_reconciliation ?? null,
+    fallbackAttempts: b.fallback_attempts ?? null,
+    fallbackHistory: b.fallback_history ?? null,
     extractionPages: b.extraction_pages ?? null,
     inputRatePer1m: b.input_rate_per_1m ?? null,
     outputRatePer1m: b.output_rate_per_1m ?? null,
@@ -242,7 +250,9 @@ const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, keyof typeof bills.$inferIns
   labour_igst_rate: 'labourIgstRate', total_tax_amount: 'totalTaxAmount', grand_total_amount: 'grandTotalAmount',
   deductibles: 'deductibles', salvage: 'salvage', odometer_reading: 'odometerReading',
   registration_number: 'registrationNumber', chassis_number: 'chassisNumber', ocr_status: 'ocrStatus',
-  processing_status: 'processingStatus', confidence_score: 'confidenceScore', review_reasons: 'reviewReasons',
+  processing_status: 'processingStatus', confidence_score: 'confidenceScore', review_reasons: 'reviewReasons', review_codes: 'reviewCodes',
+  total_reconciliation: 'totalReconciliation', fallback_attempts: 'fallbackAttempts',
+  fallback_history: 'fallbackHistory',
   file_url: 'fileUrl', storage_path: 'storagePath', raw_ocr_reference: 'rawOcrReference',
   parsed_data: 'parsedData', pipeline_mode: 'pipelineMode', extraction_cost_usd: 'extractionCostUsd',
   structuring_cost_usd: 'structuringCostUsd', total_cost_usd: 'totalCostUsd', extraction_tokens: 'extractionTokens',
@@ -301,12 +311,36 @@ export async function fetchAllBills(opts: { status?: BillStatus } = {}): Promise
   return rows.map(billRowToDoc);
 }
 
+/**
+ * Needs-review is now a persisted status rather than a runtime heuristic on
+ * confidence + review_reasons. That makes it a plain indexed predicate in SQL
+ * instead of something only decidable after loading every row.
+ */
 export function billNeedsReview(b: BillDoc): boolean {
-  if (b.ocr_status === 'VERIFIED') return false;
-  if (b.ocr_status !== 'OCR_COMPLETED') return false;
-  if ((b.confidence_score ?? 1) < 0.75) return true;
-  return (b.review_reasons?.length ?? 0) > 0;
+  return b.ocr_status === 'NEED_REVIEW';
 }
+
+/** Stable codes, persisted where available, inferred from legacy reason text otherwise. */
+export function billReviewCodes(b: BillDoc): string[] {
+  if (b.review_codes?.length) return b.review_codes;
+  const reasons = b.review_reasons ?? [];
+  const codes: string[] = [];
+  for (const r of reasons) {
+    if (/GSTIN or PAN|handwritten/i.test(r)) codes.push('MISSING_TAX_ID');
+    if (/Total mismatch|Grand total missing/i.test(r)) codes.push('TOTAL_MISMATCH');
+    if (/Parts base/i.test(r)) codes.push('PARTS_BASE_MISMATCH');
+    if (/Labour base/i.test(r)) codes.push('LABOUR_BASE_MISMATCH');
+  }
+  return [...new Set(codes)];
+}
+
+export function billHasReviewCode(b: BillDoc, code: string): boolean {
+  return billReviewCodes(b).includes(code);
+}
+
+export const REVIEW_CODE_KEYS = [
+  'MISSING_TAX_ID', 'TOTAL_MISMATCH', 'PARTS_BASE_MISMATCH', 'LABOUR_BASE_MISMATCH',
+] as const;
 
 export interface PaginatedBills {
   bills: BillDoc[];
@@ -316,7 +350,7 @@ export interface PaginatedBills {
   totalPages: number;
 }
 
-const ALL_STATUSES: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'VERIFIED', 'FAILED'];
+const ALL_STATUSES: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'NEED_REVIEW', 'VERIFIED', 'FAILED'];
 
 /** Count bills matching an optional status filter — real COUNT(*), no document reads. */
 export async function countBills(status?: BillStatus): Promise<number> {
@@ -335,12 +369,19 @@ export async function countAllStatuses(): Promise<Record<string, number>> {
     counts.all += row.n;
   }
 
-  // needs_review requires the confidence/review_reasons predicate — cheap in Postgres, no cap needed.
-  const reviewCandidates = await db().select().from(bills).where(eq(bills.ocrStatus, 'OCR_COMPLETED'));
-  const needsReview = reviewCandidates.map(billRowToDoc).filter(billNeedsReview).length;
-  counts.needs_review = needsReview;
-  const completedRaw = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
-  counts.completed_clean = Math.max(0, completedRaw - needsReview);
+  counts.needs_review = counts['NEED_REVIEW'] ?? 0;
+  counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
+
+  // Review-code breakdown. Scoped to NEED_REVIEW rows only, and skipped entirely
+  // when there are none, so the common case costs nothing.
+  for (const code of REVIEW_CODE_KEYS) counts[`review_${code}`] = 0;
+  if (counts.needs_review > 0) {
+    const rows = await db().select().from(bills).where(eq(bills.ocrStatus, 'NEED_REVIEW'));
+    const docs = rows.map(billRowToDoc);
+    for (const code of REVIEW_CODE_KEYS) {
+      counts[`review_${code}`] = docs.filter((b) => billHasReviewCode(b, code)).length;
+    }
+  }
   return counts;
 }
 
@@ -354,8 +395,10 @@ export async function listBillsPaginated(opts: {
   status?: BillStatus;
   /** When set, match any of these statuses (e.g. OCR_COMPLETED + VERIFIED). */
   statuses?: BillStatus[];
-  /** Only bills that need human review (low confidence / review_reasons). */
+  /** Only bills with the persisted NEED_REVIEW status. */
   needsReview?: boolean;
+  /** Narrow Needs review to one stable code (MISSING_TAX_ID, TOTAL_MISMATCH, …). */
+  reviewCode?: string;
   /** When true with statuses=completed, exclude needs-review bills. */
   excludeNeedsReview?: boolean;
   q?: string;
@@ -381,19 +424,19 @@ export async function listBillsPaginated(opts: {
     )!);
   }
 
-  // needsReview / excludeNeedsReview depend on billNeedsReview(), which isn't a simple
-  // column predicate (it combines status + confidence + review_reasons length) — evaluate
-  // it in JS against the already status/search-filtered rows rather than trying to express
-  // it as SQL. Cheap: this only runs when a review filter is actually requested.
-  if (opts.needsReview || opts.excludeNeedsReview) {
-    const candidateConditions = [...conditions];
-    if (!opts.statuses?.length && !opts.status) candidateConditions.push(eq(bills.ocrStatus, 'OCR_COMPLETED'));
+  // needsReview is now the persisted NEED_REVIEW status, so it is an ordinary
+  // indexed predicate rather than something only decidable after loading rows.
+  if (opts.needsReview) conditions.push(eq(bills.ocrStatus, 'NEED_REVIEW'));
+  else if (opts.excludeNeedsReview) conditions.push(ne(bills.ocrStatus, 'NEED_REVIEW'));
+
+  // reviewCode still needs JS: codes may be persisted in review_codes or inferred
+  // from legacy review_reasons text, so it is not a single column predicate. Scoped
+  // to the (small) NEED_REVIEW set by the condition above.
+  if (opts.reviewCode) {
     const rows = await db().select().from(bills)
-      .where(candidateConditions.length ? and(...candidateConditions) : undefined)
+      .where(conditions.length ? and(...conditions) : undefined)
       .orderBy(desc(bills.updatedAt));
-    let docs = rows.map(billRowToDoc);
-    if (opts.needsReview) docs = docs.filter(billNeedsReview);
-    else if (opts.excludeNeedsReview) docs = docs.filter((b) => !billNeedsReview(b));
+    const docs = rows.map(billRowToDoc).filter((b) => billHasReviewCode(b, opts.reviewCode!));
     const total = docs.length;
     return {
       bills: docs.slice(skip, skip + pageSize), total, page, pageSize,
@@ -475,6 +518,26 @@ export function extractPartsFromParsed(billId: string, parsed: ParsedInvoiceData
   }
 
   return parts;
+}
+
+/**
+ * Bills created within an ISO instant range, oldest first.
+ *
+ * created_at is TIMESTAMPTZ here, so this is an indexed range scan
+ * (bills_created_at_idx) rather than the capped document walk it had to be
+ * against Firestore.
+ */
+export async function listBillsByCreatedAtRange(
+  startIso: string,
+  endIso: string,
+  maxDocs = 5_000,
+): Promise<BillDoc[]> {
+  const limit = Math.min(Math.max(maxDocs, 1), 5_000);
+  const rows = await db().select().from(bills)
+    .where(and(gte(bills.createdAt, new Date(startIso)), lte(bills.createdAt, new Date(endIso))))
+    .orderBy(asc(bills.createdAt))
+    .limit(limit);
+  return rows.map(billRowToDoc);
 }
 
 export async function saveBillParts(parts: BillPartDoc[]): Promise<void> {

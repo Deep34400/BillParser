@@ -1,7 +1,7 @@
 /**
  * OCR Data Mapper — all data transformations in one place:
  *
- *   mapParsedToBill()  — ParsedInvoiceData → BillDoc (Postgres storage)
+ *   mapParsedToBill()  — ParsedInvoiceData → BillDoc (Firestore storage)
  *   billToInvoice()    — BillDoc → FrontendInvoice (API response for UI)
  *   toApiParsed()      — ParsedInvoiceData → stable OCR response shape (IMMUTABLE)
  */
@@ -11,7 +11,8 @@ import type {
   ServiceDetails, VehicleDetails,
 } from '../shared/types.js';
 import type { OcrCostInfo } from './types/provider.js';
-import { computeReviewReasons } from './transformer/review.js';
+import { computeReview } from './transformer/review.js';
+import { reconcileInvoiceTotal } from './transformer/reconcileTotal.js';
 
 // ── mapParsedToBill ─────────────────────────────────────────────
 
@@ -50,6 +51,11 @@ export function mapParsedToBill(
     t?.parts_cgst_amount, t?.parts_sgst_amount, t?.parts_igst_amount,
     t?.labour_cgst_amount, t?.labour_sgst_amount, t?.labour_igst_amount,
   );
+
+  const review = hasParsedContent(parsed) ? computeReview(parsed) : null;
+  const reviewReasons = review?.reasons?.length ? review.reasons : null;
+  const reviewCodes = review?.codes?.length ? review.codes : null;
+  const ocrStatus = (reviewCodes && reviewCodes.length > 0) ? 'NEED_REVIEW' : 'OCR_COMPLETED';
 
   return {
     bill_id: billId,
@@ -99,11 +105,13 @@ export function mapParsedToBill(
     registration_number: vd?.registration_number ?? null,
     chassis_number: vd?.chassis_number ?? null,
 
-    ocr_status: 'OCR_COMPLETED',
+    ocr_status: ocrStatus,
     processing_status: null,
     confidence_score: parsed.confidence ?? null,
 
-    review_reasons: hasParsedContent(parsed) ? computeReviewReasons(parsed) : null,
+    review_reasons: reviewReasons,
+    review_codes: reviewCodes,
+    total_reconciliation: review?.total_reconciliation ?? null,
 
     file_url: opts.fileUrl ?? null,
     storage_path: opts.storagePath ?? null,
@@ -233,7 +241,48 @@ export interface FrontendInvoice {
   lineItems?: FrontendLineItem[];
   runs?: unknown[];
   reviewReasons?: string[] | null;
+  reviewCodes?: string[] | null;
+  totalReconciliation?: import('./transformer/reconcileTotal.js').TotalReconciliation | null;
   fallbackReason?: string | null;
+  fallbackAttempts?: number | null;
+  fallbackHistory?: Array<{
+    level: number; label: string; mode: 'single' | 'split';
+    provider: string; model: string; reconciliation_matched: boolean;
+    difference?: number | null;
+    calculated_total?: number | null;
+    grand_total_invoice?: number | null;
+    error?: string | null;
+    cost_usd: number; latency_ms: number;
+    parsed_snapshot?: ParsedInvoiceData | null;
+    summary?: {
+      company_name?: string | null;
+      invoice_number?: string | null;
+      gstin?: string | null;
+      parts_count: number;
+      labour_count: number;
+      grand_total?: number | null;
+      parts_total?: number | null;
+      labour_total?: number | null;
+    } | null;
+    recon_breakdown?: {
+      matched: boolean;
+      difference: number | null;
+      reason: string | null;
+      parts_base: number;
+      parts_total: number | null;
+      parts_base_diff: number | null;
+      parts_base_ok: boolean;
+      labour_base: number;
+      labour_total: number | null;
+      labour_base_diff: number | null;
+      labour_base_ok: boolean;
+      calculated_total: number;
+      grand_total_invoice: number | null;
+      parts_count: number;
+      labour_count: number;
+      review_codes: string[];
+    } | null;
+  }> | null;
 }
 
 const STATUS_MAP: Record<string, string> = {
@@ -241,9 +290,52 @@ const STATUS_MAP: Record<string, string> = {
   UPLOADED: 'PENDING',
   PROCESSING: 'PROCESSING',
   OCR_COMPLETED: 'COMPLETED',
+  NEED_REVIEW: 'NEEDS_REVIEW',
   VERIFIED: 'COMPLETED',
   FAILED: 'FAILED',
 };
+
+/**
+ * Status for sync / async poll (API key consumers like Carrum).
+ * NEED_REVIEW means OCR finished with advisory flags — not a hard failure.
+ * Integrations that only accept COMPLETED|FAILED|PROCESSING would treat
+ * NEEDS_REVIEW as failed; so we return COMPLETED + needs_review=true instead.
+ * UI (JWT billToInvoice) still uses NEEDS_REVIEW.
+ */
+export function toExternalOcrPayload(bill: BillDoc): {
+  status: string;
+  needs_review: boolean;
+  review_reasons: string[];
+  review_codes: string[];
+} {
+  const codes = bill.review_codes
+    ?? (bill.parsed_data ? computeReview(bill.parsed_data).codes : [])
+    ?? [];
+  const reasons = bill.review_reasons ?? [];
+  const needsReview = bill.ocr_status === 'NEED_REVIEW' || codes.length > 0;
+
+  if (bill.ocr_status === 'FAILED') {
+    return { status: 'FAILED', needs_review: false, review_reasons: reasons, review_codes: codes };
+  }
+  if (bill.ocr_status === 'PROCESSING' || bill.ocr_status === 'UPLOADED') {
+    return {
+      status: bill.ocr_status === 'UPLOADED' ? 'PENDING' : 'PROCESSING',
+      needs_review: false,
+      review_reasons: reasons,
+      review_codes: codes,
+    };
+  }
+  if (bill.ocr_status === 'DRAFT') {
+    return { status: 'DRAFT', needs_review: false, review_reasons: reasons, review_codes: codes };
+  }
+  // OCR_COMPLETED | NEED_REVIEW | VERIFIED → pipeline finished
+  return {
+    status: 'COMPLETED',
+    needs_review: needsReview,
+    review_reasons: reasons,
+    review_codes: codes,
+  };
+}
 
 export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInvoice {
   const t = bill.parsed_data?.totals_and_tax_summary;
@@ -339,9 +431,15 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     lineItems: lineItems.length ? lineItems : undefined,
     runs: [],
     reviewReasons: bill.review_reasons ?? null,
+    reviewCodes: bill.review_codes
+      ?? (bill.parsed_data ? computeReview(bill.parsed_data).codes : null),
+    totalReconciliation: bill.total_reconciliation
+      ?? (bill.parsed_data ? reconcileInvoiceTotal(bill.parsed_data) : null),
     fallbackReason: bill.processing_status?.startsWith('FALLBACK:')
       ? bill.processing_status.slice('FALLBACK:'.length).trim()
       : null,
+    fallbackAttempts: bill.fallback_attempts ?? null,
+    fallbackHistory: bill.fallback_history ?? null,
   };
 }
 

@@ -40,41 +40,7 @@ function buildQs(params: Record<string, string | undefined>): string {
   return s ? '?' + s : '';
 }
 
-function needsReview(inv: Invoice): boolean {
-  if (inv.status !== 'COMPLETED' || inv.verified) return false;
-  if ((inv.confidence ?? 1) < 0.75) return true;
-  return (inv.reviewReasons?.length ?? 0) > 0;
-}
-
-function applyClientFilters(invoices: Invoice[], statusFilter: StatusFilter): Invoice[] {
-  if (statusFilter === 'ALL') return invoices;
-  if (statusFilter === 'NEEDS_REVIEW') return invoices.filter(needsReview);
-  if (statusFilter === 'COMPLETED') return invoices.filter((inv) => inv.status === 'COMPLETED' && !needsReview(inv));
-  return invoices.filter((inv) => inv.status === statusFilter);
-}
-
-function countsByStatus(invoices: Invoice[]): Record<StatusFilter, number> {
-  const counts: Record<StatusFilter, number> = {
-    ALL: invoices.length,
-    DRAFT: 0,
-    PENDING: 0,
-    PROCESSING: 0,
-    COMPLETED: 0,
-    FAILED: 0,
-    NEEDS_REVIEW: 0,
-  };
-  for (const inv of invoices) {
-    if (inv.status === 'DRAFT') counts.DRAFT++;
-    else if (inv.status === 'PENDING') counts.PENDING++;
-    else if (inv.status === 'PROCESSING') counts.PROCESSING++;
-    else if (inv.status === 'COMPLETED') {
-      if (needsReview(inv)) counts.NEEDS_REVIEW++;
-      else counts.COMPLETED++;
-    }
-    else if (inv.status === 'FAILED') counts.FAILED++;
-  }
-  return counts;
-}
+// Status comes from API (DB ocr_status) — no runtime needs-review heuristics.
 
 const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'ALL', label: 'All' },
@@ -86,10 +52,15 @@ const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'NEEDS_REVIEW', label: 'Needs review' },
 ];
 
-function rowDisplayStatus(inv: Invoice): string {
-  if (needsReview(inv)) return 'NEEDS_REVIEW';
-  return inv.status;
-}
+type ReviewCodeFilter = '' | 'MISSING_TAX_ID' | 'TOTAL_MISMATCH' | 'PARTS_BASE_MISMATCH' | 'LABOUR_BASE_MISMATCH';
+
+const REVIEW_CODE_CHIPS: { key: ReviewCodeFilter; label: string; countKey: string }[] = [
+  { key: '', label: 'All reasons', countKey: 'NEED_REVIEW' },
+  { key: 'MISSING_TAX_ID', label: 'No GSTIN / PAN', countKey: 'review_MISSING_TAX_ID' },
+  { key: 'TOTAL_MISMATCH', label: 'Total mismatch', countKey: 'review_TOTAL_MISMATCH' },
+  { key: 'PARTS_BASE_MISMATCH', label: 'Parts base ≠ total', countKey: 'review_PARTS_BASE_MISMATCH' },
+  { key: 'LABOUR_BASE_MISMATCH', label: 'Labour base ≠ total', countKey: 'review_LABOUR_BASE_MISMATCH' },
+];
 
 function isDuplicate(inv: Invoice): boolean {
   return (inv.reviewReasons ?? []).some((r) => r.startsWith('Duplicate:'));
@@ -108,9 +79,11 @@ export function InvoicesPage() {
   const [globalCounts, setGlobalCounts] = useState<Record<StatusFilter, number>>({
     ALL: 0, DRAFT: 0, PENDING: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0, NEEDS_REVIEW: 0,
   });
+  const [reviewCodeCounts, setReviewCodeCounts] = useState<Record<string, number>>({});
 
   // Filter / sort state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [reviewCodeFilter, setReviewCodeFilter] = useState<ReviewCodeFilter>('');
   const [q, setQ] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [sort, setSort] = useState<SortKey>('none');
@@ -148,17 +121,24 @@ export function InvoicesPage() {
       case 'PROCESSING': return { status: 'PROCESSING' };
       case 'COMPLETED': return { completed: '1' }; // OCR_COMPLETED + VERIFIED
       case 'FAILED': return { status: 'FAILED' };
-      case 'NEEDS_REVIEW': return { needsReview: '1' };
+      case 'NEEDS_REVIEW': return { status: 'NEED_REVIEW' };
       default: return {};
     }
   };
 
-  const fetchPage = useCallback(async (page: number, size: number, search?: string, status?: StatusFilter) => {
+  const fetchPage = useCallback(async (
+    page: number,
+    size: number,
+    search?: string,
+    status?: StatusFilter,
+    reviewCode?: ReviewCodeFilter,
+  ) => {
     setLoading(true);
     setAllInvoices([]);
     try {
       const statusParams = statusToApiParams(status ?? 'ALL');
-      const cacheKey = `${page}-${size}-${search ?? ''}-${JSON.stringify(statusParams)}`;
+      const code = reviewCode ?? '';
+      const cacheKey = `${page}-${size}-${search ?? ''}-${JSON.stringify(statusParams)}-${code}`;
       if (invCache && Date.now() - invCache.at < INV_CACHE_TTL && invCache.cacheKey === cacheKey) {
         setAllInvoices(invCache.invoices);
         setBatches(invCache.batches);
@@ -173,6 +153,7 @@ export function InvoicesPage() {
         ...statusParams,
       };
       if (search) params.q = search;
+      if (code && (status ?? 'ALL') === 'NEEDS_REVIEW') params.review_code = code;
       const qs = buildQs(params);
       const [inv, bat] = await Promise.all([api.list(qs), api.batches().catch(() => ({ batches: [] }))]);
       invCache = { invoices: inv.invoices, batches: bat.batches, total: inv.total, page: inv.page, pageSize: inv.pageSize, totalPages: inv.totalPages, at: Date.now(), cacheKey };
@@ -204,27 +185,34 @@ export function InvoicesPage() {
   }, []);
 
   const applyCountsToState = useCallback((c: Record<string, number>) => {
-    const completedRaw = (c['OCR_COMPLETED'] ?? 0) + (c['VERIFIED'] ?? 0);
-    const completedClean = c['completed_clean'] ?? completedRaw;
+    // Persisted NEED_REVIEW only — ignore legacy `needs_review` / `completed_clean`
+    // (older API responses used runtime heuristics and inflated the pill to ~6.5k).
     setGlobalCounts({
-      ALL: c['all'] ?? 0,
+      ALL: c['all'] ?? c['ALL'] ?? 0,
       DRAFT: c['DRAFT'] ?? 0,
       PENDING: c['UPLOADED'] ?? 0,
       PROCESSING: c['PROCESSING'] ?? 0,
-      COMPLETED: completedClean,
+      COMPLETED: (c['OCR_COMPLETED'] ?? 0) + (c['VERIFIED'] ?? 0),
       FAILED: c['FAILED'] ?? 0,
-      NEEDS_REVIEW: c['needs_review'] ?? 0,
+      NEEDS_REVIEW: c['NEED_REVIEW'] ?? 0,
+    });
+    setReviewCodeCounts({
+      NEED_REVIEW: c['NEED_REVIEW'] ?? 0,
+      review_MISSING_TAX_ID: c['review_MISSING_TAX_ID'] ?? 0,
+      review_TOTAL_MISMATCH: c['review_TOTAL_MISMATCH'] ?? 0,
+      review_PARTS_BASE_MISMATCH: c['review_PARTS_BASE_MISMATCH'] ?? 0,
+      review_LABOUR_BASE_MISMATCH: c['review_LABOUR_BASE_MISMATCH'] ?? 0,
     });
   }, []);
 
   const refetch = useCallback(async () => {
-    await fetchPage(currentPage, pageSize, q || undefined, statusFilter);
-  }, [fetchPage, currentPage, pageSize, q, statusFilter]);
+    await fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter);
+  }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
 
-  // Fetch when page, pageSize, search, or status changes
+  // Fetch when page, pageSize, search, status, or review code changes
   useEffect(() => {
-    void fetchPage(currentPage, pageSize, q || undefined, statusFilter);
-  }, [fetchPage, currentPage, pageSize, q, statusFilter]);
+    void fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter);
+  }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
 
   // Fetch global counts on mount
   useEffect(() => {
@@ -565,8 +553,8 @@ export function InvoicesPage() {
             {loading && allInvoices.length === 0
               ? 'Loading…'
               : statusFilter === 'ALL'
-                ? `${totalRecords.toLocaleString()} invoice${totalRecords !== 1 ? 's' : ''}`
-                : `${totalRecords.toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${globalCounts.ALL.toLocaleString()} total`}
+                ? `${(globalCounts.ALL || totalRecords).toLocaleString()} invoice${(globalCounts.ALL || totalRecords) !== 1 ? 's' : ''}`
+                : `${(globalCounts[statusFilter] ?? totalRecords).toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${(globalCounts.ALL || totalRecords).toLocaleString()} total`}
           </div>
         </div>
 
@@ -728,7 +716,15 @@ export function InvoicesPage() {
         {STATUS_PILLS.map(({ key, label }) => {
           const active = statusFilter === key;
           return (
-            <button key={key} onClick={() => { setStatusFilter(key); setCurrentPage(1); invalidateInvoiceCache(); }} style={{
+            <button
+              key={key}
+              onClick={() => {
+                setStatusFilter(key);
+                setReviewCodeFilter('');
+                setCurrentPage(1);
+                invalidateInvoiceCache();
+              }}
+              style={{
               padding: '6px 14px', borderRadius: 999,
               border: `1px solid ${active ? T.accent : T.border}`,
               background: active ? T.accent : T.surface,
@@ -749,6 +745,45 @@ export function InvoicesPage() {
           );
         })}
       </div>
+
+      {/* Needs-review reason chips */}
+      {statusFilter === 'NEEDS_REVIEW' && (
+        <div style={{ padding: '8px 28px 0', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: T.inkFaint, marginRight: 4 }}>Why:</span>
+          {REVIEW_CODE_CHIPS.map(({ key, label, countKey }) => {
+            const active = reviewCodeFilter === key;
+            const n = reviewCodeCounts[countKey] ?? 0;
+            return (
+              <button
+                key={key || 'all'}
+                onClick={() => {
+                  setReviewCodeFilter(key);
+                  setCurrentPage(1);
+                  invalidateInvoiceCache();
+                }}
+                style={{
+                  padding: '4px 12px', borderRadius: 999,
+                  border: `1px solid ${active ? T.accent : T.border}`,
+                  background: active ? '#E8F0FE' : T.surface,
+                  color: active ? T.accent : T.inkSoft,
+                  fontSize: 12, fontWeight: active ? 600 : 500, cursor: 'pointer', fontFamily: T.font,
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                {label}
+                <span style={{
+                  fontSize: 10, fontWeight: 600,
+                  color: active ? T.accent : T.inkFaint,
+                  background: active ? 'rgba(26,115,232,0.12)' : '#F0EEE6',
+                  borderRadius: 8, padding: '0 6px',
+                }}>
+                  {n}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {batchFilter && (() => {
         const b = batches.find((x) => x.id === batchFilter);
@@ -879,7 +914,7 @@ export function InvoicesPage() {
                     </td>
                     <td style={tdBase}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <StatusDot status={rowDisplayStatus(row)} />
+                        <StatusDot status={row.status} />
                         {isDuplicate(row) && (
                           <span style={{
                             fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
@@ -924,8 +959,23 @@ export function InvoicesPage() {
                           }}>
                             {row.pipelineMode === 'single' ? 'Single' : 'Split'}
                           </span>
+                          {(row.fallbackAttempts ?? 0) > 1 && (
+                            <span style={{
+                              display: 'inline-block', marginLeft: 4, padding: '2px 6px',
+                              background: T.warnSoft, border: `1px solid ${T.border}`,
+                              borderRadius: 5, fontSize: 10, fontWeight: 700, color: T.amber,
+                            }} title="Primary failed — result from fallback model">
+                              via fallback
+                            </span>
+                          )}
                           <div style={{ fontSize: 10, color: T.inkFaint, marginTop: 2, fontFamily: T.mono }}>
-                            {row.extractionModel ?? row.extractionProvider ?? row.provider ?? '—'}
+                            {(() => {
+                              const prov = row.extractionProvider ?? row.provider;
+                              const model = row.extractionModel ?? row.structuringModel;
+                              if (prov === 'azapi') return 'AzAPI OCR';
+                              if (prov && model && !model.startsWith(prov)) return `${prov} · ${model}`;
+                              return model ?? prov ?? '—';
+                            })()}
                           </div>
                         </div>
                       ) : <span style={{ color: T.inkFaint }}>—</span>}

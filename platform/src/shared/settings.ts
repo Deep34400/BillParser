@@ -1,21 +1,59 @@
 /**
- * Settings storage — Postgres, single-row `app_settings` table + `provider_credentials`.
+ * Settings storage — Postgres: single-row `app_settings` + `provider_credentials`.
  */
 import { eq } from 'drizzle-orm';
 import { db } from '../config/db.js';
 import { appSettings, providerCredentials } from '../db/schema.js';
 import type { ModelPrice } from './modelPricing.js';
 
+const SETTINGS_ID = 1;
+
+export interface FallbackLevel {
+  label: string;
+  mode: 'single' | 'split';
+  provider: string;
+  model: string;
+  structuringProvider?: string;
+  structuringModel?: string;
+  enabled: boolean;
+}
+
 export interface AppSettings {
-  /** 'split' = separate extraction + structuring, 'single' = one provider does both */
+  /** @deprecated Use fallbackChain instead */
   pipelineMode: 'split' | 'single';
+  /** @deprecated Use fallbackChain instead */
   extractionProvider: string;
+  /** @deprecated Use fallbackChain instead */
   structuringProvider: string;
+  /** @deprecated Use fallbackChain instead */
   structuringModel: string;
+  /** @deprecated */
   extractionModel?: string;
-  /** For single mode: which provider handles both extraction + structuring */
+  /** @deprecated Use fallbackChain instead */
   singleProvider?: string;
+  /** @deprecated Use fallbackChain instead */
   singleModel?: string;
+  /** Ordered fallback chain — all model config lives here. Managed from Settings UI. */
+  fallbackChain?: FallbackLevel[];
+  /**
+   * USD→INR rate for rupee display. Stored rather than hardcoded — it sat at 83
+   * long enough to understate every rupee figure by ~13%. The rate in force at
+   * processing time is copied onto each bill (fx_rate_usd_inr), so changing it
+   * never rewrites historical figures.
+   */
+  usdToInr?: number;
+  /**
+   * Cap on Gemini reasoning tokens per call. A ceiling, not an allocation.
+   * Floored above zero deliberately: with thinking disabled the model got invoice
+   * arithmetic wrong every time, and the failure is silent.
+   */
+  thinkingBudget?: number;
+  /**
+   * Mistral OCR price per 1,000 pages — billed per page, not per token, so it
+   * cannot live in the $/1M-token table. $4 is the standard OCR 4.1 rate; 2 is
+   * the /v1/batch price and this client calls the synchronous endpoint.
+   */
+  mistralOcrPricePer1kPages?: number;
   /** Email intake — stored in DB so admin can toggle from UI */
   emailIntakeEnabled?: boolean;
   /** Mailbox address to poll (IMAP user) — set from Admin UI */
@@ -26,35 +64,27 @@ export interface AppSettings {
   emailIntakeAllowedSenders?: string[];
   /** Per-model pricing overrides ($/1M tokens). When set, overrides default pricing. */
   modelPricing?: Record<string, ModelPrice> | null;
-  /**
-   * USD→INR rate used to display costs in rupees. Stored here rather than
-   * hardcoded so it can be corrected without a deploy — it was pinned at 83 for
-   * long enough to understate every rupee figure by ~13%.
-   *
-   * The rate in force at processing time is copied onto each bill
-   * (`fx_rate_usd_inr`), so changing it never rewrites historical figures.
-   */
-  usdToInr?: number;
-  /**
-   * Cap on Gemini reasoning tokens per call. A ceiling, not an allocation —
-   * models use what they need (typically 150–800) and stop, so raising it costs
-   * nothing on ordinary invoices and only affects complex ones.
-   *
-   * Floored well above zero on purpose: with thinking disabled the model got
-   * invoice arithmetic wrong every time (₹8,083 against a correct ₹7,080). That
-   * failure is silent — the number still looks plausible — so the range is
-   * bounded-to-generous, never off.
-   */
-  thinkingBudget?: number;
-  /**
-   * Mistral OCR price per 1,000 pages. Billed per page, not per token, so it
-   * cannot live in the $/1M-token table — it was previously a constant in
-   * providers/mistralOcr.ts and took a deploy to correct.
-   *
-   * $4 = the standard OCR 4.1 rate. Set it to 2 only if you move the client to
-   * the /v1/batch endpoint, which is where Mistral's 50% discount applies.
-   */
-  mistralOcrPricePer1kPages?: number;
+}
+
+function rowToSettings(row: typeof appSettings.$inferSelect): AppSettings {
+  return {
+    pipelineMode: row.pipelineMode as AppSettings['pipelineMode'],
+    extractionProvider: row.extractionProvider,
+    structuringProvider: row.structuringProvider,
+    structuringModel: row.structuringModel,
+    extractionModel: row.extractionModel ?? undefined,
+    singleProvider: row.singleProvider ?? undefined,
+    singleModel: row.singleModel ?? undefined,
+    fallbackChain: (row.fallbackChain as FallbackLevel[] | null) ?? undefined,
+    emailIntakeEnabled: row.emailIntakeEnabled ?? undefined,
+    emailIntakeUser: row.emailIntakeUser ?? undefined,
+    emailIntakePollIntervalSec: row.emailIntakePollIntervalSec ?? undefined,
+    emailIntakeAllowedSenders: row.emailIntakeAllowedSenders ?? undefined,
+    modelPricing: (row.modelPricing as Record<string, ModelPrice> | null) ?? undefined,
+    usdToInr: row.usdToInr ?? undefined,
+    thinkingBudget: row.thinkingBudget ?? undefined,
+    mistralOcrPricePer1kPages: row.mistralOcrPricePer1kPages ?? undefined,
+  };
 }
 
 const DEFAULTS: AppSettings = {
@@ -67,30 +97,9 @@ const DEFAULTS: AppSettings = {
   // ~95.7 as of Aug 2026; override in Settings when it drifts.
   usdToInr: 96,
   thinkingBudget: 2048,
+  // Standard OCR 4.1 rate. 2 is the /v1/batch price; this client is synchronous.
   mistralOcrPricePer1kPages: 4,
 };
-
-const SETTINGS_ID = 1;
-
-function rowToSettings(row: typeof appSettings.$inferSelect): AppSettings {
-  return {
-    pipelineMode: row.pipelineMode as AppSettings['pipelineMode'],
-    extractionProvider: row.extractionProvider,
-    structuringProvider: row.structuringProvider,
-    structuringModel: row.structuringModel,
-    extractionModel: row.extractionModel ?? undefined,
-    singleProvider: row.singleProvider ?? undefined,
-    singleModel: row.singleModel ?? undefined,
-    emailIntakeEnabled: row.emailIntakeEnabled ?? undefined,
-    emailIntakeUser: row.emailIntakeUser ?? undefined,
-    emailIntakePollIntervalSec: row.emailIntakePollIntervalSec ?? undefined,
-    emailIntakeAllowedSenders: row.emailIntakeAllowedSenders ?? undefined,
-    modelPricing: (row.modelPricing as Record<string, ModelPrice> | null) ?? undefined,
-    usdToInr: row.usdToInr ?? undefined,
-    thinkingBudget: row.thinkingBudget ?? undefined,
-    mistralOcrPricePer1kPages: row.mistralOcrPricePer1kPages ?? undefined,
-  };
-}
 
 export async function getSettings(): Promise<AppSettings> {
   const [row] = await db().select().from(appSettings).where(eq(appSettings.id, SETTINGS_ID)).limit(1);
@@ -101,13 +110,37 @@ export async function getSettings(): Promise<AppSettings> {
 export async function saveSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
   const current = await getSettings();
   const merged = { ...current, ...settings };
-
   await db().insert(appSettings).values({ id: SETTINGS_ID, ...merged }).onConflictDoUpdate({
     target: appSettings.id,
     set: merged,
   });
-
   return merged;
+}
+
+export function buildFallbackChain(settings: AppSettings): FallbackLevel[] {
+  if (settings.fallbackChain && settings.fallbackChain.length > 0) {
+    const enabled = settings.fallbackChain.filter((l) => l.enabled);
+    if (enabled.length > 0) return enabled;
+  }
+  const mode = settings.pipelineMode ?? 'single';
+  if (mode === 'single') {
+    return [{
+      label: 'Primary',
+      mode: 'single',
+      provider: settings.singleProvider ?? 'gemini',
+      model: settings.singleModel ?? 'gemini-2.5-flash',
+      enabled: true,
+    }];
+  }
+  return [{
+    label: 'Primary',
+    mode: 'split',
+    provider: 'mistral',
+    model: 'mistral-ocr-latest',
+    structuringProvider: settings.structuringProvider ?? 'gemini',
+    structuringModel: settings.structuringModel ?? 'gemini-2.5-flash',
+    enabled: true,
+  }];
 }
 
 export async function getProviderCredentials(provider: string): Promise<Record<string, string>> {

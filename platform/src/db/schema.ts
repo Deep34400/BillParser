@@ -86,6 +86,16 @@ export const bills = pgTable('bills', {
   confidenceScore: real('confidence_score'),
 
   reviewReasons: text('review_reasons').array(),
+  /** Stable machine codes for filtering Needs review (MISSING_TAX_ID, TOTAL_MISMATCH, …). */
+  reviewCodes: text('review_codes').array(),
+
+  /** Structured line-item reconciliation result. Shape owned by
+      transformer/reconcileTotal.ts, so JSONB rather than typed columns. */
+  totalReconciliation: jsonb('total_reconciliation'),
+
+  /** Fallback chain audit: how many levels were tried, and the trail. */
+  fallbackAttempts: integer('fallback_attempts'),
+  fallbackHistory: jsonb('fallback_history'),
 
   fileUrl: text('file_url'),
   storagePath: text('storage_path'),
@@ -135,7 +145,7 @@ export const bills = pgTable('bills', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 }, (t) => [
   check('bills_type_check', sql`${t.billType} IN ('MAINTENANCE','FUEL','INSURANCE','TYRE','TOLL','ACCIDENT_REPAIR','BATTERY_REPLACEMENT','AMC_CONTRACT','OTHER')`),
-  check('bills_status_check', sql`${t.ocrStatus} IN ('DRAFT','UPLOADED','PROCESSING','OCR_COMPLETED','VERIFIED','FAILED')`),
+  check('bills_status_check', sql`${t.ocrStatus} IN ('DRAFT','UPLOADED','PROCESSING','OCR_COMPLETED','NEED_REVIEW','VERIFIED','FAILED')`),
   index('bills_updated_at_idx').on(t.updatedAt.desc()),
   index('bills_created_at_idx').on(t.createdAt.desc()),
   index('bills_status_updated_idx').on(t.ocrStatus, t.updatedAt.desc()),
@@ -252,6 +262,8 @@ export const appSettings = pgTable('app_settings', {
   emailIntakePollIntervalSec: integer('email_intake_poll_interval_sec'),
   emailIntakeAllowedSenders: text('email_intake_allowed_senders').array(),
   modelPricing: jsonb('model_pricing'),
+  /** Ordered fallback chain (FallbackLevel[]). Variable-length config, so JSONB. */
+  fallbackChain: jsonb('fallback_chain'),
   usdToInr: numeric('usd_to_inr', { mode: 'number', precision: 10, scale: 4 }),
   thinkingBudget: integer('thinking_budget'),
   mistralOcrPricePer1kPages: numeric('mistral_ocr_price_per_1k_pages', { mode: 'number', precision: 10, scale: 4 }),

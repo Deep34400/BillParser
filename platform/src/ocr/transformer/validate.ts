@@ -457,3 +457,4 @@ export function validateParsedInvoice(data: ParsedInvoiceData, markdown?: string
 export function hasValidationErrors(issues: ValidationIssue[]): boolean {
   return issues.some((i) => i.severity === 'error');
 }
+

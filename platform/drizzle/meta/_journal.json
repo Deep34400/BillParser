@@ -50,6 +50,13 @@
       "when": 1787720402743,
       "tag": "0006_sudden_roulette",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788284709367,
+      "tag": "0007_lazy_hitman",
+      "breakpoints": true
     }
   ]
 }

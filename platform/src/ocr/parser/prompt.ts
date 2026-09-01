@@ -47,6 +47,7 @@ export const STRUCTURING_PROMPT =
   '- parts_line_items = physical goods/products/parts; labour_service_line_items = services, subscriptions, labour.\n' +
   '  For SaaS/subscription invoices: put the plan/line items in labour_service_line_items.\n' +
   '- Line items are GROSS (amount BEFORE any discount). taxable_amount = quantity × rate.\n' +
+  '- Exception: when a Taxable Amount column is printed and differs from quantity×rate (including 0 for insurance/body-repair), copy that printed value — do not overwrite with quantity×rate.\n' +
   '- labour_charges = gross charge (before discount).\n' +
   '- hsn_sac_code = HSN/SAC code if printed. Do NOT put tax percentages here.\n' +
   '- tax_percentage = tax % for that line (GST/VAT/Sales Tax); null if not printed.\n' +

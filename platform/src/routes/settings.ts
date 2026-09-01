@@ -18,6 +18,7 @@ const PROVIDERS = [
   { name: 'llamaparse', displayName: 'LlamaParse', kind: 'markdown', requiredCredentials: ['apiKey'] },
   { name: 'textract', displayName: 'AWS Textract', kind: 'structured', requiredCredentials: ['accessKeyId', 'secretAccessKey', 'region'] },
   { name: 'ollama', displayName: 'GLM-OCR (Ollama)', kind: 'markdown', requiredCredentials: ['baseUrl', 'model'] },
+  { name: 'azapi', displayName: 'AzAPI OCR', kind: 'structured', requiredCredentials: ['apiKey', 'endpoint'] },
 ];
 
 export async function settingsRoutes(app: FastifyInstance) {
@@ -51,6 +52,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       extractionModel: settings.extractionModel ?? settings.structuringModel,
       singleProvider: settings.singleProvider ?? 'gemini',
       singleModel: settings.singleModel ?? 'gemini-2.5-flash',
+      fallbackChain: settings.fallbackChain ?? null,
       providers,
       modelPricing: mergedPricing,
       defaultModelPricing: DEFAULT_MODEL_PRICING,
@@ -82,9 +84,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     // Reject junk outright: a zero/NaN rate would silently zero every rupee figure.
     if (body.usdToInr !== undefined) {
       const rate = Number(body.usdToInr);
-      if (!Number.isFinite(rate) || rate <= 0) {
-        throw new Error('usdToInr must be a positive number');
-      }
+      if (!Number.isFinite(rate) || rate <= 0) throw new Error('usdToInr must be a positive number');
       patch.usdToInr = rate;
     }
     if (body.thinkingBudget !== undefined) {
@@ -99,6 +99,9 @@ export async function settingsRoutes(app: FastifyInstance) {
       if (!Number.isFinite(r) || r < 0) throw new Error('mistralOcrPricePer1kPages must be zero or greater');
       patch.mistralOcrPricePer1kPages = r;
     }
+    if (Array.isArray(body.fallbackChain)) {
+      patch.fallbackChain = body.fallbackChain;
+    }
     const saved = await saveSettings(patch);
     return {
       ok: true,
@@ -107,9 +110,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       structuringModel: saved.structuringModel,
       singleProvider: saved.singleProvider,
       singleModel: saved.singleModel,
-      usdToInr: saved.usdToInr,
-      thinkingBudget: saved.thinkingBudget,
-      mistralOcrPricePer1kPages: saved.mistralOcrPricePer1kPages,
+      fallbackChain: saved.fallbackChain ?? null,
     };
   });
 

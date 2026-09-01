@@ -1,6 +1,6 @@
 /**
  * Analytics Service — aggregation and business logic.
- * All data comes through repository.ts. No direct Postgres access.
+ * All data comes through repository.ts. No direct Firestore access.
  */
 import { fetchAllBills, type BillDoc } from './repository.js';
 import { getSettings } from '../shared/settings.js';
@@ -52,8 +52,8 @@ export interface OcrCostSummary {
   avg_tokens_per_ocr: number;
   by_provider: { provider: string; cost_usd: number; tokens: number; count: number }[];
   /**
-   * Rupee totals summed per bill at the rate frozen when each was processed,
-   * so changing the configured rate never restates history. The client must not
+   * Rupee totals summed per bill at the rate frozen when each was processed, so
+   * changing the configured rate never restates history. The client must not
    * re-derive these from the USD figures with a single global rate.
    */
   total_cost_inr: number;
@@ -76,7 +76,7 @@ export async function computeKpis(): Promise<KpiResult> {
     const vid = bill.vehicle_id ?? bill.registration_number;
     if (vid) vehicleIds.add(vid);
 
-    if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
+      if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
       completedCount++;
       const amount = bill.grand_total_amount ?? 0;
       totalSpend += amount;
@@ -84,7 +84,6 @@ export async function computeKpis(): Promise<KpiResult> {
       totalLabour += bill.labour_amount ?? 0;
       totalTax += bill.total_tax_amount ?? 0;
       if (bill.confidence_score != null) confidenceSum += bill.confidence_score;
-      if ((bill.confidence_score ?? 1) < 0.75 && bill.ocr_status !== 'VERIFIED') needsReview++;
 
       const vendor = bill.vendor_name ?? bill.company_name ?? 'Unknown';
       if (!isJunkVendorName(vendor)) {
@@ -96,6 +95,7 @@ export async function computeKpis(): Promise<KpiResult> {
         monthTotals.set(mk, (monthTotals.get(mk) ?? 0) + amount);
       }
     }
+    if (bill.ocr_status === 'NEED_REVIEW') needsReview++;
   }
 
   return {
@@ -184,10 +184,9 @@ export async function getOcrCostSummary(): Promise<OcrCostSummary> {
   let ocrCount = 0;
   const byProvider = new Map<string, { cost_usd: number; tokens: number; count: number }>();
   const byProviderInr = new Map<string, number>();
-  // Bills processed before the rate was frozen per-bill carry no rate; fall back
-  // to the current default rather than dropping them from the rupee total.
-  const settings = await getSettings();
-  const fallbackFx = settings.usdToInr ?? 96;
+  // Bills predating the frozen-rate column carry none; fall back to the current
+  // setting rather than dropping them from the rupee total.
+  const fallbackFx = (await getSettings()).usdToInr ?? 96;
 
   for (const b of completed) {
     if (b.total_cost_usd == null) continue;

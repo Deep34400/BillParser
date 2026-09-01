@@ -165,6 +165,96 @@ Our GSTIN : 27AZFPP2560C1ZJ
 });
 
 /**
+ * JMD/1540/26-27 — same garage, but intra-state (buyer + seller state 27).
+ * Printed footer: CGST 995.34 + SGST 995.34 + IGST 0.
+ * LLM wrongly parks tax in IGST; must reclassify to CGST+SGST without breaking IGST bills.
+ */
+describe('resolveBillSummary — JMD intra-state CGST/SGST (not IGST)', () => {
+  function jmdIntraState(): ParsedInvoiceData {
+    return {
+      company_name: 'J. M. D. AUTO GARAGE',
+      gstin: '27AZFPP2560C1ZJ',
+      pan: 'AZFPP2560C',
+      invoice_number: 'JMD/1540/26-27',
+      invoice_date: '20/08/2026',
+      parts_line_items: [
+        { item_name_description: 'FRONT BUMPER SERVICEABLE', taxable_amount: 1000, tax_percentage: 18 },
+        { item_name_description: 'L.H.S HEAD LIGHT NEW', taxable_amount: 2309.32, tax_percentage: 18 },
+        { item_name_description: 'FULE', taxable_amount: 200, tax_percentage: 0 },
+      ],
+      labour_service_line_items: [
+        { labour_description: 'FRONT BUMPER SERVICEABLE', labour_charges: 200, tax_percentage: 18 },
+        { labour_description: 'FRONT BUMPER PAINTING', labour_charges: 1000, tax_percentage: 18 },
+        { labour_description: 'L.H.S FENDER PAINTING', labour_charges: 1000, tax_percentage: 18 },
+        { labour_description: 'DICKEY PAINTING', labour_charges: 1000, tax_percentage: 18 },
+        { labour_description: 'DICKEY REPAIRING', labour_charges: 400, tax_percentage: 18 },
+        { labour_description: 'OTHER LABOUR', labour_charges: 4150, tax_percentage: 18 },
+      ],
+      totals_and_tax_summary: {
+        parts_total: 3509.32,
+        labour_total: 7750,
+        parts_discount: 0,
+        labour_discount: 0,
+        // LLM wrongly filled IGST (same total as CGST+SGST)
+        parts_cgst_rate: null,
+        parts_sgst_rate: null,
+        parts_igst_rate: 18,
+        labour_cgst_rate: null,
+        labour_sgst_rate: null,
+        labour_igst_rate: 18,
+        parts_cgst_amount: null,
+        parts_sgst_amount: null,
+        parts_igst_amount: 595.68,
+        labour_cgst_amount: null,
+        labour_sgst_amount: null,
+        labour_igst_amount: 1395,
+        grand_total_invoice: 13250,
+      },
+      confidence: 0.95,
+    };
+  }
+
+  const INTRA_MD = `
+Total Amt. Before Tax 11,259.32
+Add : CGST 995.34
+Add : SGST 995.34
+Add : IGST 0.00
+Tax Amt. : 1,990.68
+Total Invoice Amount 13,250.00
+Buyer GSTIN : 27AALCC8489R1ZD
+Our GSTIN : 27AZFPP2560C1ZJ
+`;
+
+  it('reclassifies LLM IGST → CGST+SGST when footer shows Add : CGST/SGST and IGST 0', () => {
+    const t = resolveBillSummary(jmdIntraState(), INTRA_MD);
+    expect((t.parts_igst_amount ?? 0) + (t.labour_igst_amount ?? 0)).toBe(0);
+    expect(t.parts_igst_rate ?? 0).toBe(0);
+    expect(t.labour_igst_rate ?? 0).toBe(0);
+    const cgst = (t.parts_cgst_amount ?? 0) + (t.labour_cgst_amount ?? 0);
+    const sgst = (t.parts_sgst_amount ?? 0) + (t.labour_sgst_amount ?? 0);
+    expect(cgst).toBeCloseTo(995.34, 1);
+    expect(sgst).toBeCloseTo(995.34, 1);
+    expect(t.parts_cgst_rate).toBe(9);
+    expect(t.parts_sgst_rate).toBe(9);
+  });
+
+  it('fills CGST/SGST from line items when footer is CGST and amounts were null', () => {
+    const data = jmdIntraState();
+    data.totals_and_tax_summary = {
+      ...data.totals_and_tax_summary!,
+      parts_igst_rate: null,
+      labour_igst_rate: null,
+      parts_igst_amount: null,
+      labour_igst_amount: null,
+    };
+    const t = resolveBillSummary(data, INTRA_MD);
+    expect((t.parts_igst_amount ?? 0) + (t.labour_igst_amount ?? 0)).toBe(0);
+    expect((t.parts_cgst_amount ?? 0) + (t.labour_cgst_amount ?? 0)).toBeGreaterThan(0);
+    expect((t.parts_sgst_amount ?? 0) + (t.labour_sgst_amount ?? 0)).toBeGreaterThan(0);
+  });
+});
+
+/**
  * JSB Mobility / Chevrolet-style: LLM returns labour_total already post-discount
  * (lineSum − discount) plus the same discount again. GST is correctly on the
  * post-discount taxable. UI must not subtract discount twice.
