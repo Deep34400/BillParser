@@ -959,6 +959,15 @@ export function InvoicesPage() {
                           }}>
                             {row.pipelineMode === 'single' ? 'Single' : 'Split'}
                           </span>
+                          {(row.fallbackAttempts ?? 0) > 1 && (
+                            <span style={{
+                              display: 'inline-block', marginLeft: 4, padding: '2px 6px',
+                              background: T.warnSoft, border: `1px solid ${T.border}`,
+                              borderRadius: 5, fontSize: 10, fontWeight: 700, color: T.amber,
+                            }} title="Primary failed — result from fallback model">
+                              via fallback
+                            </span>
+                          )}
                           <div style={{ fontSize: 10, color: T.inkFaint, marginTop: 2, fontFamily: T.mono }}>
                             {row.extractionModel ?? row.extractionProvider ?? row.provider ?? '—'}
                           </div>

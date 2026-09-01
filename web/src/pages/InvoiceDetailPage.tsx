@@ -583,53 +583,68 @@ export function InvoiceDetailPage() {
         </div>
       )}
 
-      {/* Fallback chain history */}
-      {inv.fallbackHistory && inv.fallbackHistory.length > 1 && (
-        <div style={{
-          margin: '12px 30px 0',
-          padding: '14px 18px',
-          background: '#fff8ec',
-          borderLeft: `4px solid ${T.amber}`,
-          borderRadius: 6,
-          fontSize: 13,
-          color: T.text,
-          fontFamily: T.font,
-        }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>
-            Fallback Chain — {inv.fallbackHistory.length} attempt{inv.fallbackHistory.length > 1 ? 's' : ''}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {inv.fallbackHistory.map((h, i) => (
-              <div key={i} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '6px 10px', borderRadius: 6, fontSize: 12,
-                background: h.reconciliation_matched ? '#e5f3ec' : h.error ? '#fae9e8' : '#fbf0e1',
-              }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
-                  background: h.reconciliation_matched ? T.green : h.error ? T.red : T.amber,
-                  color: '#fff', minWidth: 60, textAlign: 'center',
-                }}>
-                  {h.label}
-                </span>
-                <span style={{ fontWeight: 600 }}>{h.mode}/{h.provider}/{h.model}</span>
+      {/* Fallback chain history — show when more than one model was tried */}
+      {inv.fallbackHistory && inv.fallbackHistory.length > 1 && (() => {
+        const winner = [...inv.fallbackHistory].reverse().find((h) => h.reconciliation_matched)
+          ?? inv.fallbackHistory[inv.fallbackHistory.length - 1];
+        const primaryAttempt = inv.fallbackHistory[0];
+        return (
+          <div style={{
+            margin: '12px 30px 0',
+            padding: '14px 18px',
+            background: '#fff8ec',
+            borderLeft: `4px solid ${T.amber}`,
+            borderRadius: 6,
+            fontSize: 13,
+            color: T.text,
+            fontFamily: T.font,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+              Fallback used — result from {winner?.label ?? 'later model'}
+            </div>
+            <div style={{ fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
+              <strong style={{ color: T.green }}>{winner?.model}</strong>
+              {' '}({winner?.provider}, {winner?.mode}) was used.
+              {primaryAttempt && primaryAttempt.model !== winner?.model && (
                 <span style={{ color: T.muted }}>
-                  {h.error
-                    ? `Error: ${h.error.slice(0, 80)}`
-                    : h.reconciliation_matched
-                      ? 'Reconciliation matched'
-                      : `Diff: ${h.difference != null ? `₹${h.difference}` : 'N/A'}`}
+                  {' '}Primary <strong>{primaryAttempt.model}</strong> did not pass
+                  {primaryAttempt.error ? ' (API error)' : ' (totals mismatch)'}.
                 </span>
-                {h.cost_usd > 0 && (
-                  <span style={{ marginLeft: 'auto', fontFamily: T.mono, fontSize: 11, color: T.muted }}>
-                    ${h.cost_usd.toFixed(4)}
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {inv.fallbackHistory.map((h, i) => (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '6px 10px', borderRadius: 6, fontSize: 12,
+                  background: h.reconciliation_matched ? '#e5f3ec' : h.error ? '#fae9e8' : '#fbf0e1',
+                }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+                    background: h.reconciliation_matched ? T.green : h.error ? T.red : T.amber,
+                    color: '#fff', minWidth: 70, textAlign: 'center',
+                  }}>
+                    {h.label}
                   </span>
-                )}
-              </div>
-            ))}
+                  <span style={{ fontWeight: 600 }}>{h.provider} / {h.model}</span>
+                  <span style={{ color: T.muted }}>
+                    {h.error
+                      ? `Failed: ${h.error.slice(0, 80)}`
+                      : h.reconciliation_matched
+                        ? '✓ Used — totals matched'
+                        : `Skipped — diff ₹${h.difference != null ? h.difference : 'N/A'}`}
+                  </span>
+                  {h.cost_usd > 0 && (
+                    <span style={{ marginLeft: 'auto', fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+                      ${h.cost_usd.toFixed(4)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Failed error box */}
       {inv.status === 'FAILED' && inv.error && (
@@ -759,6 +774,11 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
   const isSingle = inv.pipelineMode === 'single';
   const model = inv.extractionModel ?? inv.structuringModel ?? '—';
   const latency = ((inv.totalLatencyMs ?? 0) / 1000).toFixed(1);
+  const usedFallback = (inv.fallbackAttempts ?? 0) > 1;
+  const winner = usedFallback && inv.fallbackHistory
+    ? [...inv.fallbackHistory].reverse().find((h) => h.reconciliation_matched)
+      ?? inv.fallbackHistory[inv.fallbackHistory.length - 1]
+    : null;
 
   const hasBreakdown = inv.totalInputTokens != null && inv.totalOutputTokens != null;
   const inputTokens = inv.totalInputTokens ?? 0;
@@ -799,6 +819,9 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
         <span>Cost Breakdown</span>
         <span style={{ fontSize: 10, fontWeight: 600, color: T.text, textTransform: 'none', letterSpacing: 0 }}>
           {isSingle ? 'Single' : 'Split'} · {model} · {latency}s
+          {usedFallback && winner && (
+            <span style={{ marginLeft: 6, color: T.amber }}>via {winner.label}</span>
+          )}
         </span>
       </div>
 
@@ -868,6 +891,19 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
 // ---------------------------------------------------------------------------
 function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
   const isSingle = inv.pipelineMode === 'single';
+  const usedFallback = (inv.fallbackAttempts ?? 0) > 1;
+  const winner = usedFallback && inv.fallbackHistory
+    ? [...inv.fallbackHistory].reverse().find((h) => h.reconciliation_matched)
+      ?? inv.fallbackHistory[inv.fallbackHistory.length - 1]
+    : null;
+  const primaryAttempt = usedFallback ? inv.fallbackHistory?.[0] : null;
+
+  const pipelineValue = isSingle
+    ? `Single — ${inv.extractionProvider ?? inv.provider ?? '—'} (${inv.extractionModel ?? '—'})`
+    : (inv.extractionProvider || inv.structuringProvider)
+      ? `Split — ${inv.extractionProvider ?? '—'} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)`
+      : (inv.provider ?? '—');
+
   const fields: { label: string; value: React.ReactNode }[] = [
     { label: 'Invoice #', value: inv.invoiceNumber ?? '—' },
     { label: 'PO #', value: inv.poNumber ?? '—' },
@@ -876,13 +912,25 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
     { label: 'Currency', value: inv.currency ?? '—' },
     {
       label: 'Pipeline',
-      value: isSingle
-        ? `Single — ${inv.extractionProvider ?? inv.provider ?? '—'} (${inv.extractionModel ?? '—'})`
-        : (inv.extractionProvider || inv.structuringProvider)
-          ? `Split — ${inv.extractionProvider ?? '—'} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)`
-          : (inv.provider ?? '—'),
+      value: usedFallback && winner ? (
+        <span>
+          {pipelineValue}
+          <span style={{
+            display: 'inline-block', marginLeft: 8, fontSize: 10, fontWeight: 700,
+            padding: '2px 8px', borderRadius: 10, background: T.warnSoft, color: T.amber,
+          }}>
+            VIA {winner.label.toUpperCase()}
+          </span>
+        </span>
+      ) : pipelineValue,
     },
-    ...(inv.fallbackAttempts && inv.fallbackAttempts > 1
+    ...(usedFallback && winner
+      ? [{
+          label: 'Result model',
+          value: `${winner.model} (${winner.label}) — Primary was ${primaryAttempt?.model ?? '—'}`,
+        }]
+      : []),
+    ...(usedFallback
       ? [{ label: 'Fallback attempts', value: `${inv.fallbackAttempts} models tried` }]
       : inv.fallbackReason
         ? [{ label: 'Fallback', value: inv.fallbackReason }]
