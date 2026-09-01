@@ -9,16 +9,33 @@ import type { ModelPrice } from './modelPricing.js';
 const SETTINGS_DOC = 'app_settings';
 const CREDS_COLLECTION = 'provider_credentials';
 
+export interface FallbackLevel {
+  label: string;
+  mode: 'single' | 'split';
+  provider: string;
+  model: string;
+  structuringProvider?: string;
+  structuringModel?: string;
+  enabled: boolean;
+}
+
 export interface AppSettings {
-  /** 'split' = separate extraction + structuring, 'single' = one provider does both */
+  /** @deprecated Use fallbackChain instead */
   pipelineMode: 'split' | 'single';
+  /** @deprecated Use fallbackChain instead */
   extractionProvider: string;
+  /** @deprecated Use fallbackChain instead */
   structuringProvider: string;
+  /** @deprecated Use fallbackChain instead */
   structuringModel: string;
+  /** @deprecated */
   extractionModel?: string;
-  /** For single mode: which provider handles both extraction + structuring */
+  /** @deprecated Use fallbackChain instead */
   singleProvider?: string;
+  /** @deprecated Use fallbackChain instead */
   singleModel?: string;
+  /** Ordered fallback chain — all model config lives here. Managed from Settings UI. */
+  fallbackChain?: FallbackLevel[];
   /** Email intake — stored in DB so admin can toggle from UI */
   emailIntakeEnabled?: boolean;
   /** Mailbox address to poll (IMAP user) — set from Admin UI */
@@ -53,6 +70,36 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<AppS
   const merged = { ...current, ...settings };
   await db().collection(col('settings')).doc(SETTINGS_DOC).set(merged);
   return merged;
+}
+
+/**
+ * Build fallback chain from settings. If fallbackChain exists and has enabled levels, use it.
+ * Otherwise construct a 1-level chain from legacy pipelineMode/singleProvider/singleModel fields.
+ */
+export function buildFallbackChain(settings: AppSettings): FallbackLevel[] {
+  if (settings.fallbackChain && settings.fallbackChain.length > 0) {
+    const enabled = settings.fallbackChain.filter((l) => l.enabled);
+    if (enabled.length > 0) return enabled;
+  }
+  const mode = settings.pipelineMode ?? 'single';
+  if (mode === 'single') {
+    return [{
+      label: 'Primary',
+      mode: 'single',
+      provider: settings.singleProvider ?? 'gemini',
+      model: settings.singleModel ?? 'gemini-2.5-flash',
+      enabled: true,
+    }];
+  }
+  return [{
+    label: 'Primary',
+    mode: 'split',
+    provider: 'mistral',
+    model: 'mistral-ocr-latest',
+    structuringProvider: settings.structuringProvider ?? 'gemini',
+    structuringModel: settings.structuringModel ?? 'gemini-2.5-flash',
+    enabled: true,
+  }];
 }
 
 export async function getProviderCredentials(provider: string): Promise<Record<string, string>> {

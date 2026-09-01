@@ -235,6 +235,13 @@ export interface FrontendInvoice {
   reviewCodes?: string[] | null;
   totalReconciliation?: import('./transformer/reconcileTotal.js').TotalReconciliation | null;
   fallbackReason?: string | null;
+  fallbackAttempts?: number | null;
+  fallbackHistory?: Array<{
+    level: number; label: string; mode: 'single' | 'split';
+    provider: string; model: string; reconciliation_matched: boolean;
+    difference?: number | null; error?: string | null;
+    cost_usd: number; latency_ms: number;
+  }> | null;
 }
 
 const STATUS_MAP: Record<string, string> = {
@@ -387,6 +394,8 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     fallbackReason: bill.processing_status?.startsWith('FALLBACK:')
       ? bill.processing_status.slice('FALLBACK:'.length).trim()
       : null,
+    fallbackAttempts: bill.fallback_attempts ?? null,
+    fallbackHistory: bill.fallback_history ?? null,
   };
 }
 

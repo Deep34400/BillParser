@@ -1,19 +1,12 @@
 /**
  * OCR pipeline entry point.
- * Reads settings from DB to decide pipeline mode and providers.
- *
- * Modes:
- *   SINGLE — one multimodal API call (extract + structure together). Preferred.
- *   SPLIT  — Mistral OCR (markdown) then a second LLM call to structure JSON.
- *
- * Fallback (both modes): if the Settings model fails → gemini-2.5-flash SINGLE.
- * Never falls back to Mistral split when the user chose Single.
+ * Reads settings from DB, builds fallback chain, and delegates to the chain orchestrator.
+ * All model/provider config comes from Settings UI — no hardcoded models.
  */
-import { getSettings } from '../shared/settings.js';
+import { getSettings, buildFallbackChain, type FallbackLevel } from '../shared/settings.js';
 import type { ParsedInvoiceData } from './types/invoice.js';
 import type { OcrCostInfo } from './types/provider.js';
-import { runSingleMode, GEMINI_SINGLE_FALLBACK_MODEL } from './pipeline/single.js';
-import { runSplitMode } from './pipeline/split.js';
+import { runFallbackChain, type FallbackChainResult } from './pipeline/fallbackChain.js';
 import { SUPPORTED_PROVIDERS } from './providers/llmNormalize.js';
 import { SINGLE_PROVIDERS } from './providers/llmSingle.js';
 
@@ -26,34 +19,19 @@ export interface PipelineResult {
 }
 
 /**
- * Run the full OCR pipeline based on DB settings.
- * - single: one multimodal LLM (Gemini / Claude / OpenAI / Mistral) does both
- * - split: Mistral OCR → any LLM for structuring
- * On failure of either path → retry with Gemini 2.5 Flash single (never Mistral-only split fallback).
+ * Run the full OCR pipeline using the fallback chain from DB settings.
+ * Each level is tried in order; moves to next on API error or reconciliation mismatch.
  */
-export async function runPipeline(buf: Buffer, contextId = 'ocr'): Promise<PipelineResult> {
+export async function runPipeline(buf: Buffer, contextId = 'ocr'): Promise<FallbackChainResult> {
   const settings = await getSettings();
-  const mode = settings.pipelineMode ?? 'single';
+  const chain = buildFallbackChain(settings);
+
   console.log(
-    `[OCR] ${contextId} — settings: mode=${mode}, structProv=${settings.structuringProvider}, ` +
-    `structModel=${settings.structuringModel}, singleProv=${settings.singleProvider}, singleModel=${settings.singleModel}`,
+    `[OCR] ${contextId} — fallback chain: ${chain.map((l) => `${l.label}(${l.mode}/${l.provider}/${l.model})`).join(' → ')}`,
   );
 
-  if (mode === 'single') {
-    return runSingleMode(
-      buf,
-      settings.singleProvider ?? 'gemini',
-      settings.singleModel,
-      contextId,
-    );
-  }
-
-  return runSplitMode(
-    buf,
-    settings.structuringProvider ?? 'mistral',
-    settings.structuringModel,
-    contextId,
-  );
+  return runFallbackChain(buf, chain, contextId);
 }
 
-export { GEMINI_SINGLE_FALLBACK_MODEL, SUPPORTED_PROVIDERS, SINGLE_PROVIDERS };
+export { SUPPORTED_PROVIDERS, SINGLE_PROVIDERS };
+export type { FallbackLevel, FallbackChainResult };

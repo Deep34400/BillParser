@@ -50,6 +50,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       extractionModel: settings.extractionModel ?? settings.structuringModel,
       singleProvider: settings.singleProvider ?? 'gemini',
       singleModel: settings.singleModel ?? 'gemini-2.5-flash',
+      fallbackChain: settings.fallbackChain ?? null,
       providers,
       modelPricing: mergedPricing,
       defaultModelPricing: DEFAULT_MODEL_PRICING,
@@ -74,6 +75,9 @@ export async function settingsRoutes(app: FastifyInstance) {
     if (body.modelPricing && typeof body.modelPricing === 'object') {
       patch.modelPricing = body.modelPricing;
     }
+    if (Array.isArray(body.fallbackChain)) {
+      patch.fallbackChain = body.fallbackChain;
+    }
     const saved = await saveSettings(patch);
     return {
       ok: true,
@@ -82,6 +86,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       structuringModel: saved.structuringModel,
       singleProvider: saved.singleProvider,
       singleModel: saved.singleModel,
+      fallbackChain: saved.fallbackChain ?? null,
     };
   });
 

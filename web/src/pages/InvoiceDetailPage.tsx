@@ -583,8 +583,8 @@ export function InvoiceDetailPage() {
         </div>
       )}
 
-      {/* Pipeline fallback (e.g. Gemini ADC 403 → Mistral split) */}
-      {inv.fallbackReason && (
+      {/* Fallback chain history */}
+      {inv.fallbackHistory && inv.fallbackHistory.length > 1 && (
         <div style={{
           margin: '12px 30px 0',
           padding: '14px 18px',
@@ -592,17 +592,41 @@ export function InvoiceDetailPage() {
           borderLeft: `4px solid ${T.amber}`,
           borderRadius: 6,
           fontSize: 13,
-          color: '#7a5a00',
+          color: T.text,
           fontFamily: T.font,
         }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>
-            Settings use Single + Gemini, but this run fell back to Split (Mistral)
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>
+            Fallback Chain — {inv.fallbackHistory.length} attempt{inv.fallbackHistory.length > 1 ? 's' : ''}
           </div>
-          <div style={{ fontFamily: T.mono, fontSize: 12, wordBreak: 'break-word' }}>
-            {inv.fallbackReason}
-          </div>
-          <div style={{ marginTop: 8, fontSize: 12, color: T.muted }}>
-            Grant your Google account <code>roles/aiplatform.user</code> on the GCP project, then re-extract.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {inv.fallbackHistory.map((h, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '6px 10px', borderRadius: 6, fontSize: 12,
+                background: h.reconciliation_matched ? '#e5f3ec' : h.error ? '#fae9e8' : '#fbf0e1',
+              }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+                  background: h.reconciliation_matched ? T.green : h.error ? T.red : T.amber,
+                  color: '#fff', minWidth: 60, textAlign: 'center',
+                }}>
+                  {h.label}
+                </span>
+                <span style={{ fontWeight: 600 }}>{h.mode}/{h.provider}/{h.model}</span>
+                <span style={{ color: T.muted }}>
+                  {h.error
+                    ? `Error: ${h.error.slice(0, 80)}`
+                    : h.reconciliation_matched
+                      ? 'Reconciliation matched'
+                      : `Diff: ${h.difference != null ? `₹${h.difference}` : 'N/A'}`}
+                </span>
+                {h.cost_usd > 0 && (
+                  <span style={{ marginLeft: 'auto', fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+                    ${h.cost_usd.toFixed(4)}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -858,9 +882,11 @@ function FieldGrid({ inv, currency }: { inv: Invoice; currency: string }) {
           ? `Split — ${inv.extractionProvider ?? '—'} (OCR) + ${inv.structuringProvider ?? inv.provider ?? '—'} (parse)`
           : (inv.provider ?? '—'),
     },
-    ...(inv.fallbackReason
-      ? [{ label: 'Fallback', value: inv.fallbackReason }]
-      : []),
+    ...(inv.fallbackAttempts && inv.fallbackAttempts > 1
+      ? [{ label: 'Fallback attempts', value: `${inv.fallbackAttempts} models tried` }]
+      : inv.fallbackReason
+        ? [{ label: 'Fallback', value: inv.fallbackReason }]
+        : []),
     ...(isSingle ? [] : [
       {
         label: 'Extraction cost',

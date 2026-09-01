@@ -1,16 +1,13 @@
 /**
  * Single OCR mode — one multimodal API call (extract + structure together).
- * On failure → gemini-2.5-flash single retry (never falls back to split).
+ * Single-attempt only. Fallback logic lives in fallbackChain.ts.
  */
 import { llmSingle } from '../providers/llmSingle.js';
 import type { PipelineResult } from '../process.js';
 
-export const GEMINI_SINGLE_FALLBACK_MODEL = 'gemini-2.5-flash';
-
 function toSingleResult(
   r: Awaited<ReturnType<typeof llmSingle>>,
   provider: string,
-  fallbackReason?: string,
 ): PipelineResult {
   return {
     parsed: r.parsed,
@@ -27,7 +24,6 @@ function toSingleResult(
       total_output_cost_usd: r.cost.output_cost_usd,
     },
     providers: { extraction: provider, structuring: provider, mode: 'single' },
-    fallbackReason,
   };
 }
 
@@ -37,35 +33,12 @@ export async function runSingleMode(
   model: string | undefined,
   contextId: string,
 ): Promise<PipelineResult> {
-  const effectiveModel = model ?? (provider === 'gemini' ? GEMINI_SINGLE_FALLBACK_MODEL : undefined);
-  console.log(`[OCR] ${contextId} — single mode using ${provider} (model=${effectiveModel ?? 'default'})...`);
+  console.log(`[OCR] ${contextId} — single mode using ${provider} (model=${model ?? 'default'})...`);
 
-  try {
-    const r = await llmSingle(buf, provider, effectiveModel);
-    console.log(
-      `[OCR] ${contextId} — ${provider} single done (${r.cost.latency_ms}ms, ` +
-      `${r.cost.usage.total_tokens} tokens, $${r.cost.cost_usd.toFixed(4)})`,
-    );
-    return toSingleResult(r, provider);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[OCR] ${contextId} — ${provider} single FAILED: ${msg}`);
-
-    const alreadyFallback =
-      provider === 'gemini' &&
-      (effectiveModel === GEMINI_SINGLE_FALLBACK_MODEL || !effectiveModel);
-
-    if (alreadyFallback) {
-      throw err;
-    }
-
-    console.warn(
-      `[OCR] ${contextId} — retrying with Gemini single (${GEMINI_SINGLE_FALLBACK_MODEL}) — not split...`,
-    );
-    const r = await llmSingle(buf, 'gemini', GEMINI_SINGLE_FALLBACK_MODEL);
-    console.log(
-      `[OCR] ${contextId} — gemini single fallback done (${r.cost.latency_ms}ms, $${r.cost.cost_usd.toFixed(4)})`,
-    );
-    return toSingleResult(r, 'gemini', `${provider}/${effectiveModel} failed → ${GEMINI_SINGLE_FALLBACK_MODEL} single: ${msg}`);
-  }
+  const r = await llmSingle(buf, provider, model);
+  console.log(
+    `[OCR] ${contextId} — ${provider} single done (${r.cost.latency_ms}ms, ` +
+    `${r.cost.usage.total_tokens} tokens, $${r.cost.cost_usd.toFixed(4)})`,
+  );
+  return toSingleResult(r, provider);
 }

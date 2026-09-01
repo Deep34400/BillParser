@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { devStore } from '../../../src/shared/devStore.js';
-import { GEMINI_SINGLE_FALLBACK_MODEL } from '../../../src/ocr/process.js';
+import { buildFallbackChain } from '../../../src/shared/settings.js';
 
 describe('pipeline settings from devStore', () => {
   it('default pipelineMode is single', () => {
@@ -20,8 +20,11 @@ describe('pipeline settings from devStore', () => {
     expect(s.singleModel).toBe('gemini-2.5-flash');
   });
 
-  it('fallback model is gemini-2.5-flash single (never split)', () => {
-    expect(GEMINI_SINGLE_FALLBACK_MODEL).toBe('gemini-2.5-flash');
+  it('default fallback chain has one level from legacy settings', () => {
+    const s = devStore.getSettings();
+    const chain = buildFallbackChain(s);
+    expect(chain).toHaveLength(1);
+    expect(chain[0]).toMatchObject({ mode: 'single', provider: 'gemini', model: 'gemini-2.5-flash' });
   });
 
   it('saveSettings updates pipelineMode', () => {

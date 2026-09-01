@@ -69,8 +69,23 @@ export interface Invoice {
     parts_base: number; labour_base: number;
     deductibles: number; salvage: number; reason: string | null;
   } | null;
-  /** Set when single/Gemini failed and pipeline fell back to Mistral split */
+  /** @deprecated Use fallbackHistory instead */
   fallbackReason?: string | null;
+  /** How many fallback levels were attempted */
+  fallbackAttempts?: number | null;
+  /** Audit trail of each fallback level attempted */
+  fallbackHistory?: Array<{
+    level: number;
+    label: string;
+    mode: 'single' | 'split';
+    provider: string;
+    model: string;
+    reconciliation_matched: boolean;
+    difference?: number | null;
+    error?: string | null;
+    cost_usd: number;
+    latency_ms: number;
+  }> | null;
 }
 export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; }
 export interface ProviderInfo { name: string; displayName: string; kind: string; configured: boolean; requiredCredentials?: string[]; masked?: Record<string, string>; }
@@ -95,6 +110,16 @@ export interface AppConfig {
   };
 }
 export interface ModelPrice { inputPer1M: number; outputPer1M: number; }
+export interface FallbackLevel {
+  label: string;
+  mode: 'single' | 'split';
+  provider: string;
+  model: string;
+  structuringProvider?: string;
+  structuringModel?: string;
+  enabled: boolean;
+}
+
 export interface SettingsData {
   pipelineMode: 'split' | 'single';
   extractionProvider: string;
@@ -103,6 +128,7 @@ export interface SettingsData {
   extractionModel?: string;
   singleProvider?: string;
   singleModel?: string;
+  fallbackChain?: FallbackLevel[] | null;
   providers: ProviderInfo[];
   modelPricing?: Record<string, ModelPrice>;
   defaultModelPricing?: Record<string, ModelPrice>;

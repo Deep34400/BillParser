@@ -9,29 +9,29 @@ import { billToInvoice, toApiParsed, mapParsedToBill, toExternalOcrPayload } fro
 import { isPdf, isImage, uploadFile, getStoredFile } from '../shared/storage.js';
 import { env } from '../config/env.js';
 import { deductTokens, trackOcrCost } from '../users/service.js';
-import { enrichParsedInvoice } from './transformer/normalize/index.js';
 import { runPipeline } from './process.js';
 import { cacheInvalidate } from '../shared/cache.js';
 import { upsertVendorFromInvoice } from '../vendor/vendorService.js';
 import { bearerFromRequest } from '../middleware/auth.js';
 import { reconcileBillsInCreatedAtRange } from './service/reconcileRange.js';
 
-/** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill (so UI shows the chosen model, not mistral). */
+/** Stamp pipeline/provider from Settings onto a newly created PROCESSING bill. */
 async function applyPipelineSettingsToBill(bill: import('../shared/types.js').BillDoc): Promise<void> {
+  const { buildFallbackChain } = await import('../shared/settings.js');
   const settings = await getSettings();
-  const mode = settings.pipelineMode ?? 'single';
-  bill.pipeline_mode = mode;
-  if (mode === 'single') {
-    const prov = settings.singleProvider ?? 'gemini';
-    const model = settings.singleModel ?? 'gemini-2.5-flash';
-    bill.extraction_provider = prov;
-    bill.structuring_provider = prov;
-    bill.extraction_model = model;
-    bill.structuring_model = model;
+  const chain = buildFallbackChain(settings);
+  const primary = chain[0];
+  if (!primary) return;
+  bill.pipeline_mode = primary.mode;
+  if (primary.mode === 'single') {
+    bill.extraction_provider = primary.provider;
+    bill.structuring_provider = primary.provider;
+    bill.extraction_model = primary.model;
+    bill.structuring_model = primary.model;
   } else {
     bill.extraction_provider = 'mistral';
-    bill.structuring_provider = settings.structuringProvider ?? 'gemini';
-    bill.structuring_model = settings.structuringModel ?? 'gemini-2.5-flash';
+    bill.structuring_provider = primary.structuringProvider ?? primary.provider;
+    bill.structuring_model = primary.structuringModel ?? primary.model;
     bill.extraction_model = null;
   }
 }
@@ -54,15 +54,13 @@ function processInBackground(
   (async () => {
     try {
       const result = await runPipeline(buf, billId);
-      const { costInfo, rawOcr, providers } = result;
+      const { costInfo, rawOcr, providers, fallbackHistory, fallbackAttempts } = result;
 
-      if (result.fallbackReason) {
-        console.warn(`[OCR] ${billId} — fallback used: ${result.fallbackReason}`);
+      if (fallbackAttempts > 1) {
+        console.warn(`[OCR] ${billId} — used ${fallbackAttempts} fallback attempts`);
       }
 
-      const enriched = enrichParsedInvoice(result.parsed, rawOcr);
-
-      const bill = mapParsedToBill(billId, enriched, {
+      const bill = mapParsedToBill(billId, result.parsed, {
         fileUrl,
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
@@ -70,18 +68,17 @@ function processInBackground(
         pipelineMode: providers.mode,
       });
       bill.ocr_status = bill.ocr_status === 'NEED_REVIEW' ? 'NEED_REVIEW' : 'OCR_COMPLETED';
-      if (result.fallbackReason) {
-        bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
-      }
+      bill.fallback_attempts = fallbackAttempts;
+      bill.fallback_history = fallbackHistory;
 
       await updateBillStatus(billId, bill.ocr_status, bill);
       cacheInvalidate('analytics');
 
       // Duplicate check — advisory only (does NOT force NEED_REVIEW while policy is GSTIN/PAN-only)
       try {
-        const dupes = await findDuplicateBills(enriched.invoice_number, enriched.gstin, billId);
+        const dupes = await findDuplicateBills(result.parsed.invoice_number, result.parsed.gstin, billId);
         if (dupes.length > 0) {
-          const dupMsg = `Duplicate: invoice ${enriched.invoice_number} already exists (${dupes.length} match)`;
+          const dupMsg = `Duplicate: invoice ${result.parsed.invoice_number} already exists (${dupes.length} match)`;
           const reasons = bill.review_reasons ?? [];
           if (!reasons.includes(dupMsg)) reasons.push(dupMsg);
           await updateBill(billId, { review_reasons: reasons });
@@ -91,11 +88,11 @@ function processInBackground(
         console.warn(`[OCR] ${billId} — duplicate check failed:`, (e as Error).message);
       }
 
-      const parts = extractPartsFromParsed(billId, enriched);
+      const parts = extractPartsFromParsed(billId, result.parsed);
       await saveBillParts(parts);
 
       // Vendor Registry — fire-and-forget; never blocks or affects OCR pipeline
-      upsertVendorFromInvoice(billId, enriched)
+      upsertVendorFromInvoice(billId, result.parsed)
         .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
         .catch((e) => console.warn(`[vendor] ${billId} — registry update failed:`, (e as Error).message));
 
@@ -208,10 +205,10 @@ export async function billRoutes(app: FastifyInstance) {
         || qs.include_verified === '1'
         || qs.include_verified === 'true';
       const statusRaw = body.status ?? qs.status;
-      const status = statusRaw == null || statusRaw === ''
+      const status: string | null = statusRaw == null || statusRaw === ''
         ? null
         : Array.isArray(statusRaw)
-          ? statusRaw.map(String)
+          ? statusRaw.map(String).join(',')
           : String(statusRaw);
 
       if (!startDate || !endDate) {
@@ -663,9 +660,8 @@ export async function billRoutes(app: FastifyInstance) {
       if (!buf) return reply.code(400).send({ error: 'provide a PDF file or JSON { "source": "<url>" }' });
 
       const result = await runPipeline(buf, 'parse');
-      const parsed = enrichParsedInvoice(result.parsed, result.rawOcr);
 
-      return { output: { entries: [{ id: uuid(), parsed_data: toApiParsed(parsed) }] } };
+      return { output: { entries: [{ id: uuid(), parsed_data: toApiParsed(result.parsed) }] } };
     } catch (err) {
       return reply.code(502).send({ error: err instanceof Error ? err.message : 'extraction failed' });
     }
@@ -690,9 +686,7 @@ export async function billRoutes(app: FastifyInstance) {
 
       const t0 = Date.now();
       const result = await runPipeline(buf, 'sync');
-      const { costInfo, rawOcr, providers } = result;
-
-      const enriched = enrichParsedInvoice(result.parsed, rawOcr);
+      const { costInfo, rawOcr, providers, fallbackHistory, fallbackAttempts } = result;
 
       const billId = uuid();
       const fileName = 'api-sync-upload';
@@ -701,23 +695,20 @@ export async function billRoutes(app: FastifyInstance) {
         contentType: isPdf(buf) ? 'application/pdf' : 'image/jpeg',
       });
 
-      const bill = mapParsedToBill(billId, enriched, {
+      const bill = mapParsedToBill(billId, result.parsed, {
         fileUrl: publicUrl,
         storagePath,
         rawOcrReference: rawOcr.length > 10_000 ? rawOcr.slice(0, 10_000) : rawOcr,
         costInfo,
         pipelineMode: providers.mode,
       });
-      // Keep mapper status (OCR_COMPLETED or NEED_REVIEW) — do not force COMPLETED
-      if (result.fallbackReason) {
-        bill.processing_status = `FALLBACK: ${result.fallbackReason}`;
-      }
+      bill.fallback_attempts = fallbackAttempts;
+      bill.fallback_history = fallbackHistory;
       await createBill(bill);
-      const parts = extractPartsFromParsed(billId, enriched);
+      const parts = extractPartsFromParsed(billId, result.parsed);
       await saveBillParts(parts);
 
-      // Vendor Registry — fire-and-forget
-      upsertVendorFromInvoice(billId, enriched)
+      upsertVendorFromInvoice(billId, result.parsed)
         .then((vid) => { if (vid) updateBill(billId, { vendor_id: vid }).catch(() => {}); })
         .catch(() => {});
 
@@ -734,7 +725,7 @@ export async function billRoutes(app: FastifyInstance) {
           bill_id: billId,
           status: ext.status,
           needs_review: ext.needs_review,
-          parsed_data: toApiParsed(enriched),
+          parsed_data: toApiParsed(result.parsed),
           review_reasons: ext.review_reasons,
           review_codes: ext.review_codes,
           total_reconciliation: bill.total_reconciliation ?? null,

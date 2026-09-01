@@ -215,6 +215,22 @@ export interface BillDoc {
   structuring_latency_ms?: number | null;
   total_latency_ms?: number | null;
 
+  /** How many fallback levels were attempted during OCR */
+  fallback_attempts?: number | null;
+  /** Audit trail of each fallback level attempted */
+  fallback_history?: Array<{
+    level: number;
+    label: string;
+    mode: 'single' | 'split';
+    provider: string;
+    model: string;
+    reconciliation_matched: boolean;
+    difference?: number | null;
+    error?: string | null;
+    cost_usd: number;
+    latency_ms: number;
+  }> | null;
+
   /** Linked vendor from Vendor Registry (set after OCR completion). */
   vendor_id?: string | null;
 
