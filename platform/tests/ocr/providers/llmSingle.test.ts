@@ -3,7 +3,7 @@ import { SINGLE_PROVIDERS, llmSingle } from '../../../src/ocr/providers/llmSingl
 
 describe('llmSingle providers', () => {
   it('supports gemini, claude, openai, mistral', () => {
-    expect(SINGLE_PROVIDERS).toEqual(['gemini', 'claude', 'openai', 'mistral']);
+    expect(SINGLE_PROVIDERS).toEqual(['gemini', 'claude', 'openai', 'mistral', 'azapi']);
   });
 
   it('rejects unknown provider', async () => {

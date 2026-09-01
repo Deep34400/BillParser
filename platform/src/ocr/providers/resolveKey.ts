@@ -12,6 +12,7 @@ const ENV_KEY_MAP: Record<string, string> = {
   gemini: 'GEMINI_API_KEY',
   claude: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
+  azapi: 'AZAPI_OCR_API_TOKEN',
 };
 
 const DEFAULT_MODELS: Record<string, string> = {
@@ -19,6 +20,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   gemini: 'gemini-2.5-flash',
   claude: 'claude-sonnet-4-20250514',
   openai: 'gpt-4o',
+  azapi: 'azapi-ocr',
 };
 
 const ENV_TO_PROP: Record<string, keyof typeof env> = {

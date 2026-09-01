@@ -17,6 +17,7 @@ const PROVIDERS = [
   { name: 'llamaparse', displayName: 'LlamaParse', kind: 'markdown', requiredCredentials: ['apiKey'] },
   { name: 'textract', displayName: 'AWS Textract', kind: 'structured', requiredCredentials: ['accessKeyId', 'secretAccessKey', 'region'] },
   { name: 'ollama', displayName: 'GLM-OCR (Ollama)', kind: 'markdown', requiredCredentials: ['baseUrl', 'model'] },
+  { name: 'azapi', displayName: 'AzAPI OCR', kind: 'structured', requiredCredentials: ['apiKey', 'endpoint'] },
 ];
 
 export async function settingsRoutes(app: FastifyInstance) {

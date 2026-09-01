@@ -969,7 +969,13 @@ export function InvoicesPage() {
                             </span>
                           )}
                           <div style={{ fontSize: 10, color: T.inkFaint, marginTop: 2, fontFamily: T.mono }}>
-                            {row.extractionModel ?? row.extractionProvider ?? row.provider ?? '—'}
+                            {(() => {
+                              const prov = row.extractionProvider ?? row.provider;
+                              const model = row.extractionModel ?? row.structuringModel;
+                              if (prov === 'azapi') return 'AzAPI OCR';
+                              if (prov && model && !model.startsWith(prov)) return `${prov} · ${model}`;
+                              return model ?? prov ?? '—';
+                            })()}
                           </div>
                         </div>
                       ) : <span style={{ color: T.inkFaint }}>—</span>}

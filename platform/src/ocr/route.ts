@@ -442,17 +442,32 @@ export async function billRoutes(app: FastifyInstance) {
   });
 
   /**
-   * POST /api/invoices/:id/reextract — re-run OCR on existing bill.
+   * POST /api/invoices/:id/reextract — re-run OCR on existing bill using Settings fallback chain.
    */
   app.post('/api/invoices/:id/reextract', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
       const bill = await getBill(id);
       if (!bill) return reply.code(404).send({ error: 'Invoice not found' });
-      await updateBill(id, { ocr_status: 'PROCESSING' });
-      return { ok: true };
+      if (!bill.storage_path) {
+        return reply.code(400).send({ error: 'No file stored for this bill' });
+      }
+
+      const stored = await getStoredFile(bill.storage_path);
+      if (!stored) {
+        return reply.code(400).send({ error: 'Could not retrieve stored file' });
+      }
+
+      await updateBillStatus(id, 'PROCESSING', {});
+      const userId = req.appUser?.user_id;
+      const fileName = (bill as { original_filename?: string }).original_filename
+        ?? bill.storage_path.split('/').pop()
+        ?? `bill-${id}`;
+      processInBackground(id, stored.buf, fileName, bill.file_url ?? '', bill.storage_path, userId);
+      return { ok: true, message: 'Re-extraction started' };
     } catch (err) {
-      return reply.code(500).send({ error: 'Re-extract failed' });
+      const msg = err instanceof Error ? err.message : 'Re-extract failed';
+      return reply.code(500).send({ error: msg });
     }
   });
 
@@ -576,7 +591,15 @@ export async function billRoutes(app: FastifyInstance) {
         cacheInvalidate('analytics');
       } else if (body.action === 'reextract') {
         for (const id of body.ids) {
-          await updateBill(id, { ocr_status: 'PROCESSING' } as any);
+          const bill = await getBill(id);
+          if (!bill?.storage_path) continue;
+          const stored = await getStoredFile(bill.storage_path);
+          if (!stored) continue;
+          await updateBillStatus(id, 'PROCESSING', {});
+          const fileName = (bill as { original_filename?: string }).original_filename
+            ?? bill.storage_path.split('/').pop()
+            ?? `bill-${id}`;
+          processInBackground(id, stored.buf, fileName, bill.file_url ?? '', bill.storage_path, req.appUser?.user_id);
         }
       }
       return { ok: true };

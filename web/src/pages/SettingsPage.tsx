@@ -84,6 +84,7 @@ const ALL_PROVIDERS: ProvDef[] = [
   { id: 'gemini', label: 'Google Gemini', models: ['gemini-flash-latest', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], canStructure: true, canSingle: true, desc: 'Vertex AI + ADC (no API key needed)' },
   { id: 'claude', label: 'Anthropic Claude', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'], canStructure: true, canSingle: true, desc: 'PDF/image structuring or single call' },
   { id: 'openai', label: 'OpenAI GPT', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], canStructure: true, canSingle: true, desc: 'Image call (PDF: use Split or Gemini/Claude)' },
+  { id: 'azapi', label: 'AzAPI OCR', models: ['azapi-ocr'], canStructure: false, canSingle: true, desc: 'Third-party structured OCR (URL + Token)' },
 ];
 
 const LEVEL_LABELS = ['Primary', 'Secondary', 'Tertiary'];
@@ -237,6 +238,7 @@ export function SettingsPage() {
         const cv: Record<string, string> = {};
         for (const p of ALL_PROVIDERS) {
           if (credentials[p.id]?.apiKey) cv[`${p.id}.apiKey`] = credentials[p.id].apiKey;
+          if (credentials[p.id]?.endpoint) cv[`${p.id}.endpoint`] = credentials[p.id].endpoint;
         }
         setCreds(cv);
       } catch { /* no reveal */ }
@@ -278,12 +280,19 @@ export function SettingsPage() {
 
   const handleSaveCreds = async (provId: string) => {
     const val = creds[`${provId}.apiKey`];
-    if (!val) { flash('Enter an API key first'); return; }
-    try { await api.saveCreds(provId, { apiKey: val }); await load(); flash(`${provId} key saved`); }
+    if (!val) { flash('Enter an API key / token first'); return; }
+    const payload: Record<string, string> = { apiKey: val };
+    const ep = creds[`${provId}.endpoint`];
+    if (ep) payload.endpoint = ep;
+    try { await api.saveCreds(provId, payload); await load(); flash(`${provId} credentials saved`); }
     catch (e) { flash(`Error: ${(e as Error).message}`); }
   };
   const handleClearCreds = async (provId: string) => {
-    try { await api.clearCreds(provId); setCreds((p) => { const n = { ...p }; delete n[`${provId}.apiKey`]; return n; }); await load(); flash(`${provId} key cleared`); }
+    try {
+      await api.clearCreds(provId);
+      setCreds((p) => { const n = { ...p }; delete n[`${provId}.apiKey`]; delete n[`${provId}.endpoint`]; return n; });
+      await load(); flash(`${provId} credentials cleared`);
+    }
     catch (e) { flash(`Error: ${(e as Error).message}`); }
   };
 
@@ -556,6 +565,8 @@ export function SettingsPage() {
         </p>
         {ALL_PROVIDERS.map((prov) => {
           const keyField = `${prov.id}.apiKey`;
+          const epField = `${prov.id}.endpoint`;
+          const needsEndpoint = prov.id === 'azapi';
           const shown = !!revealed[keyField];
           const hasKey = !!(creds[keyField]);
           const isActive = chain.some((l) => l.enabled && (
@@ -586,19 +597,27 @@ export function SettingsPage() {
               </div>
               <div style={{ fontSize: 11, color: T.muted, marginTop: 4, marginBottom: isGeminiAdc ? 0 : 10 }}>{prov.desc}</div>
               {!isGeminiAdc && (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input type={shown ? 'text' : 'password'} style={{ ...inp, flex: 1 }}
-                    placeholder={`${prov.label} API key`} autoComplete="off"
-                    value={creds[keyField] ?? ''}
-                    onChange={(e) => setCreds((p) => ({ ...p, [keyField]: e.target.value }))} />
-                  <button type="button" style={{ ...btnS, padding: '8px 12px', fontSize: 11 }} onClick={() => toggle(keyField)}>
-                    {shown ? 'Hide' : 'Show'}
-                  </button>
-                  <button style={{ ...btnP, padding: '8px 14px', fontSize: 11 }} onClick={() => void handleSaveCreds(prov.id)}>Save</button>
-                  {hasKey && (
-                    <button style={{ ...btnS, padding: '8px 12px', fontSize: 11, color: T.red, borderColor: T.red }}
-                      onClick={() => void handleClearCreds(prov.id)}>Clear</button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {needsEndpoint && (
+                    <input type="text" style={{ ...inp }}
+                      placeholder={`${prov.label} endpoint URL`} autoComplete="off"
+                      value={creds[epField] ?? ''}
+                      onChange={(e) => setCreds((p) => ({ ...p, [epField]: e.target.value }))} />
                   )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input type={shown ? 'text' : 'password'} style={{ ...inp, flex: 1 }}
+                      placeholder={needsEndpoint ? `${prov.label} token` : `${prov.label} API key`} autoComplete="off"
+                      value={creds[keyField] ?? ''}
+                      onChange={(e) => setCreds((p) => ({ ...p, [keyField]: e.target.value }))} />
+                    <button type="button" style={{ ...btnS, padding: '8px 12px', fontSize: 11 }} onClick={() => toggle(keyField)}>
+                      {shown ? 'Hide' : 'Show'}
+                    </button>
+                    <button style={{ ...btnP, padding: '8px 14px', fontSize: 11 }} onClick={() => void handleSaveCreds(prov.id)}>Save</button>
+                    {hasKey && (
+                      <button style={{ ...btnS, padding: '8px 12px', fontSize: 11, color: T.red, borderColor: T.red }}
+                        onClick={() => void handleClearCreds(prov.id)}>Clear</button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -8,6 +8,8 @@ import { structureFromLlmResponse } from '../parser/parser.js';
 import type { ParsedInvoiceData } from '../types/invoice.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { resolveProviderKey } from './resolveKey.js';
+import { getProviderCredentials } from '../../shared/settings.js';
+import { azapiSingle } from './azapiOcr.js';
 import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
 import { isPdf } from '../../shared/storage.js';
 import { getSettings } from '../../shared/settings.js';
@@ -21,7 +23,7 @@ export interface SingleResult {
   cost: OcrStepCost;
 }
 
-export const SINGLE_PROVIDERS = ['gemini', 'claude', 'openai', 'mistral'] as const;
+export const SINGLE_PROVIDERS = ['gemini', 'claude', 'openai', 'mistral', 'azapi'] as const;
 export type SingleProvider = (typeof SINGLE_PROVIDERS)[number];
 
 function detectMime(buf: Buffer): string {
@@ -302,6 +304,13 @@ export async function llmSingle(buf: Buffer, provider: string, model?: string): 
       return openaiSingle(buf, model);
     case 'mistral':
       return mistralSingle(buf, model);
+    case 'azapi': {
+      const creds = await getProviderCredentials('azapi');
+      const url = (creds.endpoint || creds.url || '').trim();
+      const token = (creds.apiKey || '').trim();
+      if (!url || !token) throw new Error('AzAPI not configured — set URL and Token in Settings');
+      return azapiSingle(buf, url, token);
+    }
     default:
       throw new Error(`Single mode does not support provider "${provider}". Use: ${SINGLE_PROVIDERS.join(', ')}`);
   }
