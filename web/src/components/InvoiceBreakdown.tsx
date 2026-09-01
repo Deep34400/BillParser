@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Invoice, ParsedInvoiceData, PartsLineItem, LabourServiceLineItem, TotalsAndTaxSummary } from '../types/index.js';
 import { enrichInvoiceSummary, columnNet } from '../lib/summaryFromMarkdown.js';
 import { T } from '../theme.js';
@@ -180,6 +181,7 @@ function gstRowLabel(kind: 'CGST' | 'SGST' | 'IGST', partsRate?: number | null, 
 }
 
 function BillSummaryTable({ data, inv }: { data: ParsedInvoiceData; inv: Invoice }) {
+  const [showExtras, setShowExtras] = useState(false);
   const t = data.totals_and_tax_summary;
   if (!t) return null;
 
@@ -239,8 +241,13 @@ function BillSummaryTable({ data, inv }: { data: ParsedInvoiceData; inv: Invoice
 
   rows.push({ label: 'Sub Total (after discount & tax)', parts: colNet(t, 'parts'), labour: colNet(t, 'labour') });
 
+  const hasDeductibles = t.deductibles != null && t.deductibles !== 0;
+  const hasSalvage = t.salvage != null && t.salvage !== 0;
+  const hasExtras = hasDeductibles || hasSalvage;
+
   const labelCell: React.CSSProperties = { padding: '8px 16px', fontSize: 13, textAlign: 'left', color: T.muted, borderBottom: `1px solid ${T.border}` };
   const cell: React.CSSProperties = { padding: '8px 16px', fontSize: 13, textAlign: 'right', fontFamily: T.mono, color: T.text, borderBottom: `1px solid ${T.border}`, whiteSpace: 'nowrap' };
+  const colSpan = (hasPartsCol ? 1 : 0) + (hasLabourCol ? 1 : 0);
 
   return (
     <div style={{ overflowX: 'auto', padding: '4px 0 12px' }}>
@@ -267,24 +274,26 @@ function BillSummaryTable({ data, inv }: { data: ParsedInvoiceData; inv: Invoice
               </tr>
             );
           })}
-          {(t.deductibles != null || t.salvage != null) && (
-            <tr>
-              <td style={{ ...labelCell, color: T.muted }}>Adjustments</td>
-              {hasPartsCol && <td style={cell}>—</td>}
-              {hasLabourCol && <td style={cell}>—</td>}
-            </tr>
-          )}
-          {t.deductibles != null && t.deductibles !== 0 && (
-            <tr>
-              <td style={labelCell}>Deductibles</td>
-              <td colSpan={(hasPartsCol ? 1 : 0) + (hasLabourCol ? 1 : 0)} style={{ ...cell, textAlign: 'right' }}>{fmt(t.deductibles)}</td>
-            </tr>
-          )}
-          {t.salvage != null && t.salvage !== 0 && (
-            <tr>
-              <td style={labelCell}>Salvage</td>
-              <td colSpan={(hasPartsCol ? 1 : 0) + (hasLabourCol ? 1 : 0)} style={{ ...cell, textAlign: 'right' }}>{fmt(t.salvage)}</td>
-            </tr>
+          {hasExtras && showExtras && (
+            <>
+              <tr>
+                <td style={{ ...labelCell, color: T.muted }}>Adjustments</td>
+                {hasPartsCol && <td style={cell}>—</td>}
+                {hasLabourCol && <td style={cell}>—</td>}
+              </tr>
+              {hasDeductibles && (
+                <tr>
+                  <td style={labelCell}>Deductibles</td>
+                  <td colSpan={colSpan} style={{ ...cell, textAlign: 'right' }}>{fmt(t.deductibles)}</td>
+                </tr>
+              )}
+              {hasSalvage && (
+                <tr>
+                  <td style={labelCell}>Salvage</td>
+                  <td colSpan={colSpan} style={{ ...cell, textAlign: 'right' }}>{fmt(t.salvage)}</td>
+                </tr>
+              )}
+            </>
           )}
           {t.grand_total_invoice != null && (
             <tr>
@@ -292,7 +301,7 @@ function BillSummaryTable({ data, inv }: { data: ParsedInvoiceData; inv: Invoice
                 Net Bill Amount (Rounded)
               </td>
               <td
-                colSpan={(hasPartsCol ? 1 : 0) + (hasLabourCol ? 1 : 0)}
+                colSpan={colSpan}
                 style={{ ...cell, fontSize: 15, fontWeight: 700, color: T.accent, borderTop: `2px solid ${T.border}`, borderBottom: 'none', paddingTop: 12 }}
               >
                 {fmt(t.grand_total_invoice)}
@@ -301,6 +310,20 @@ function BillSummaryTable({ data, inv }: { data: ParsedInvoiceData; inv: Invoice
           )}
         </tbody>
       </table>
+      {hasExtras && (
+        <div style={{ textAlign: 'right', marginTop: 6 }}>
+          <button
+            type="button"
+            onClick={() => setShowExtras((v) => !v)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', fontFamily: T.font,
+              fontSize: 11, fontWeight: 600, color: T.muted, textDecoration: 'underline',
+            }}
+          >
+            {showExtras ? 'Hide deductibles / salvage' : 'Show deductibles / salvage'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

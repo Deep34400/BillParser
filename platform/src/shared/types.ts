@@ -217,7 +217,7 @@ export interface BillDoc {
 
   /** How many fallback levels were attempted during OCR */
   fallback_attempts?: number | null;
-  /** Audit trail of each fallback level attempted */
+  /** Audit trail of each fallback level attempted (includes parsed_snapshot + recon_breakdown for compare) */
   fallback_history?: Array<{
     level: number;
     label: string;
@@ -226,9 +226,40 @@ export interface BillDoc {
     model: string;
     reconciliation_matched: boolean;
     difference?: number | null;
+    calculated_total?: number | null;
+    grand_total_invoice?: number | null;
     error?: string | null;
     cost_usd: number;
     latency_ms: number;
+    parsed_snapshot?: ParsedInvoiceData | null;
+    summary?: {
+      company_name?: string | null;
+      invoice_number?: string | null;
+      gstin?: string | null;
+      parts_count: number;
+      labour_count: number;
+      grand_total?: number | null;
+      parts_total?: number | null;
+      labour_total?: number | null;
+    } | null;
+    recon_breakdown?: {
+      matched: boolean;
+      difference: number | null;
+      reason: string | null;
+      parts_base: number;
+      parts_total: number | null;
+      parts_base_diff: number | null;
+      parts_base_ok: boolean;
+      labour_base: number;
+      labour_total: number | null;
+      labour_base_diff: number | null;
+      labour_base_ok: boolean;
+      calculated_total: number;
+      grand_total_invoice: number | null;
+      parts_count: number;
+      labour_count: number;
+      review_codes: string[];
+    } | null;
   }> | null;
 
   /** Linked vendor from Vendor Registry (set after OCR completion). */
