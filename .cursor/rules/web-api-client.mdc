@@ -1,0 +1,12 @@
+---
+description: Frontend API client conventions
+globs:
+  - web/src/**
+---
+
+# Frontend Rules
+
+- All HTTP calls must go through `web/src/api/client.ts`. Do not create duplicate API clients.
+- Prefer backend-provided authoritative values for invoice totals and derived data.
+- Do not duplicate backend business calculations in the frontend.
+- If frontend intentionally mirrors backend logic, add tests and document the reason.

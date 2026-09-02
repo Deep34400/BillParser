@@ -1,0 +1,46 @@
+---
+description: Safety rules for OCR/GST calculation changes
+globs:
+  - platform/src/ocr/**
+  - platform/tests/ocr/**
+---
+
+# OCR / GST Safety Rules
+
+## Test-First (Mandatory)
+
+Before implementing any change to OCR parsing, normalization, enrichment, GST calculation, invoice totals, reconciliation, Free/FOC handling, labour-only GST, fallback model selection, provider selection, deductibles, or rate inheritance:
+
+1. Write a **failing regression test** first.
+2. Implement the minimal fix.
+3. Verify the test passes.
+4. Run the full relevant test suite.
+
+Never weaken or delete an existing test to make a new implementation pass.
+
+## Non-Regression Matrix
+
+Every OCR/GST change must verify non-regression across:
+
+- IGST invoices
+- CGST + SGST invoices
+- Free / FOC items (taxable_amount = 0)
+- Fuel 0% items (taxable_amount > 0, tax = 0)
+- Labour-only GST (parts tax = 0)
+- Parts-only invoices
+- Parts + labour invoices
+- Deductibles / salvage
+- Mixed taxable / non-taxable items
+- OCR provider fallback behavior
+
+## Prefer Narrow Fixes
+
+Do not rewrite the calculation pipeline to fix a localized bug. Prefer the smallest safe change. If a broader rewrite is needed, justify it in the OpenSpec design.
+
+## ParsedInvoiceData Contract
+
+Never rename, remove, or change semantics of fields in `ParsedInvoiceData` (platform/src/shared/types.ts) without a dedicated OpenSpec change including impact analysis and migration plan.
+
+## Numerical Verification
+
+OpenSpec specs for calculation changes must include at least one concrete example with input numbers and expected output.

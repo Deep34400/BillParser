@@ -1,0 +1,37 @@
+---
+description: Testing conventions
+globs:
+  - platform/tests/**
+  - web/tests/**
+---
+
+# Testing Rules
+
+## Framework
+
+Vitest for both platform and web.
+
+## Test Placement
+
+Place tests close to the behavior being changed:
+
+- OCR extraction/normalization → `platform/tests/ocr/`
+- Transformer/reconciliation → `platform/tests/ocr/transformer/`  
+- Parser → `platform/tests/ocr/parsing/`
+- Providers → `platform/tests/ocr/providers/`
+- Pipeline → `platform/tests/ocr/pipeline/`
+- Fraud → `platform/tests/fraud/`
+- Vendor → `platform/tests/vendor/`
+- Shared utilities → `platform/tests/shared/`
+- Frontend → `web/tests/`
+
+## Bug Fixes
+
+Follow: failing regression test → minimal implementation → test passes → full suite.
+
+## Rules
+
+- Never delete or weaken an existing test to make new code pass.
+- Do not claim tests passed unless actually executed.
+- For OCR/GST changes, automated regression tests are **mandatory**.
+- Determine appropriate level: unit, integration, API, component, or e2e.

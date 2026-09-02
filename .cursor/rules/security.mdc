@@ -1,0 +1,15 @@
+---
+description: Security rules for all code changes
+alwaysApply: true
+---
+
+# Security Rules
+
+- Never expose secrets or commit `.env` files.
+- Never hardcode API keys or credentials.
+- Never weaken authentication or authorization.
+- Never disable security checks to make tests pass.
+- Never bypass input validation.
+- Never log credentials, tokens, or sensitive customer/invoice data.
+- Never introduce unsafe dynamic code execution (eval, Function constructor).
+- Security-sensitive changes require explicit human review.

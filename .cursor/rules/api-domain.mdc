@@ -1,0 +1,13 @@
+---
+description: API route handler conventions
+globs:
+  - platform/src/*/route*
+---
+
+# API Route Rules
+
+- Route handlers must be **thin**: validate input, call service, return response.
+- **No business logic** in route handlers — delegate to services.
+- Validate inputs at the route boundary (use schemas/validation).
+- Preserve existing error handling patterns unless intentionally changed.
+- Preserve existing authentication/authorization checks.

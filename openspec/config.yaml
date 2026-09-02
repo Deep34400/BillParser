@@ -1,0 +1,73 @@
+schema: spec-driven
+
+project:
+  name: praya-invoice-analyser
+  description: Invoice OCR extraction, GST calculation, reconciliation, and analytics platform.
+  stack:
+    - Fastify (backend, platform/)
+    - React + Vite (frontend, web/)
+    - Vitest (testing)
+    - Firestore / GCS (persistence, with in-memory fallback for LOCAL_DEV)
+    - Mistral OCR, Gemini, Claude (OCR/LLM providers)
+    - TypeScript throughout
+
+  architecture: |
+    platform/src/ocr/          – invoice OCR pipeline (providers, parser, transformer, pipeline, repository)
+    platform/src/ocr/transformer/ – enrichment, GST, totals, reconciliation, review
+    platform/src/shared/       – types (ParsedInvoiceData), settings, storage, utilities
+    platform/src/analytics/    – analytics module
+    platform/src/fraud/        – fraud detection
+    platform/src/users/        – user management
+    platform/src/vendor/       – vendor management
+    platform/src/email-intake/ – email intake processing
+    web/src/                   – React frontend (api/client.ts for HTTP calls)
+
+    Pattern: route → service → repository
+    Business logic in services. Database logic in repositories. Routes are thin.
+
+  critical_contracts:
+    - path: platform/src/shared/types.ts
+      type: ParsedInvoiceData
+      rule: >
+        Never rename, remove, or change field semantics without a dedicated OpenSpec
+        change including impact analysis, migration plan, consumer audit, and human approval.
+
+context: |
+  OCR/GST calculation changes are high risk. Prefer smallest safe change.
+  Protect: IGST, CGST+SGST, Free/FOC, fuel 0%, labour-only GST, parts-only,
+  parts+labour, deductibles, mixed taxable/non-taxable, provider fallback.
+  Tests-first for OCR/GST changes. Non-regression matrix mandatory.
+
+artifacts:
+  proposal:
+    guidance: |
+      Explain why the change is needed, what changes, new/modified capabilities, and impact.
+      For OCR/GST: include current vs desired behavior and root cause if bug fix.
+  specs:
+    guidance: |
+      Use ## ADDED/MODIFIED/REMOVED Requirements with ### Requirement: headers.
+      Each requirement must have #### Scenario: blocks with Given/When/Then.
+      For OCR/GST: include numerical expectations and non-regression scenarios.
+  design:
+    guidance: |
+      Context, goals, non-goals, decisions with rationale, risks, migration plan.
+      For OCR/GST: justify why a narrow fix suffices or why broader change is needed.
+  tasks:
+    guidance: |
+      Each task: what, where, tests required, acceptance criteria, verification.
+      Concrete enough for another developer/agent to execute without guessing.
+
+operations:
+  apply:
+    guidance:
+      - Read the complete OpenSpec change before implementing.
+      - Follow tasks in order. Do not expand scope.
+      - Do not modify unrelated files.
+      - Prefer minimal, backward-compatible changes.
+      - Never hardcode secrets. Never log sensitive data.
+      - Preserve existing APIs, error handling, fallback, cost/balance, LOCAL_DEV behavior.
+      - If implementation requires uncovered behavior, update OpenSpec first.
+  archive:
+    guidance:
+      - Only archive after implementation AND verification are complete.
+      - Verify tests pass, typecheck passes, build passes, git diff is scoped.

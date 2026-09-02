@@ -1,0 +1,43 @@
+---
+description: Project architecture and module boundaries
+alwaysApply: true
+---
+
+# Architecture Rules
+
+## Pattern: route → service → repository
+
+- Business logic belongs in **services**, not route handlers.
+- Database/persistence logic belongs in **repositories**.
+- Route handlers: validate input, call service, return response. Keep them thin.
+
+## Module Boundaries
+
+```
+platform/src/
+├── ocr/              # Invoice OCR pipeline
+│   ├── providers/    # Mistral, Gemini, Claude integrations
+│   ├── parser/       # Parsed invoice JSON handling
+│   ├── transformer/  # Enrichment, GST, totals, reconciliation
+│   ├── pipeline/     # OCR pipeline orchestration, fallback
+│   └── repository.ts # Bill persistence
+├── shared/           # Types (ParsedInvoiceData), settings, storage, utils
+├── analytics/        # Analytics module
+├── fraud/            # Fraud detection
+├── users/            # User management
+├── vendor/           # Vendor management
+└── email-intake/     # Email intake processing
+
+web/src/              # React/Vite frontend
+└── api/client.ts     # Single HTTP client — all API calls go through here
+```
+
+## Persistence
+
+- Firestore + GCS in production; in-memory fallback for `LOCAL_DEV`.
+- Never silently change the shape of stored `parsed_data`.
+
+## Critical Contract
+
+- `ParsedInvoiceData` in `platform/src/shared/types.ts` is an immutable contract.
+- Never rename, remove, or change field semantics without a dedicated OpenSpec change.
