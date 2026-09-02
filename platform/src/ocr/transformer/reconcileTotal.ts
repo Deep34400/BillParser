@@ -43,6 +43,15 @@ function taxRatePct(t: TotalsAndTaxSummary, side: 'parts' | 'labour'): number {
   const igst = side === 'parts' ? t.parts_igst_rate : t.labour_igst_rate;
   if (igst != null) return igst;
 
+  // Explicit zero GST amounts on this side (e.g. estimate with tax only on labour)
+  // — do not inherit the other side's rate.
+  const cAmt = side === 'parts' ? t.parts_cgst_amount : t.labour_cgst_amount;
+  const sAmt = side === 'parts' ? t.parts_sgst_amount : t.labour_sgst_amount;
+  const iAmt = side === 'parts' ? t.parts_igst_amount : t.labour_igst_amount;
+  const anyPositive = (cAmt ?? 0) > 0 || (sAmt ?? 0) > 0 || (iAmt ?? 0) > 0;
+  const anyExplicitZero = cAmt === 0 || sAmt === 0 || iAmt === 0;
+  if (anyExplicitZero && !anyPositive) return 0;
+
   // Indian invoices apply the same GST rate to both parts and labour.
   // If this side has no rate but the other side does, inherit it.
   const otherCgst = side === 'parts' ? t.labour_cgst_rate : t.parts_cgst_rate;
@@ -136,7 +145,7 @@ export function reconcileInvoiceTotal(parsed: ParsedInvoiceData): TotalReconcili
   const deductibles = t.deductibles ?? 0;
   const salvage = t.salvage ?? 0;
 
-  const calculated = roundMoney(
+  let calculated = roundMoney(
     partsTaxable + labourTaxable + partsTax + labourTax + deductibles + salvage,
   );
 
@@ -149,8 +158,31 @@ export function reconcileInvoiceTotal(parsed: ParsedInvoiceData): TotalReconcili
     };
   }
 
-  const diff = roundMoney(Math.abs(calculated - grand));
-  const matched = diff <= TOLERANCE;
+  let diff = roundMoney(Math.abs(calculated - grand));
+  let matched = diff <= TOLERANCE;
+
+  // Service estimates etc.: GST only on one side. LLM may copy rates onto the other.
+  // If no line on that side has a positive tax_percentage, try dropping that side's tax.
+  if (!matched) {
+    const partsHaveLineTax = parts.some((p) => (p.tax_percentage ?? 0) > 0);
+    const labourHaveLineTax = labour.some((l) => (l.tax_percentage ?? 0) > 0);
+    if (!partsHaveLineTax && partsTax > 0) {
+      const alt = roundMoney(partsTaxable + labourTaxable + labourTax + deductibles + salvage);
+      if (roundMoney(Math.abs(alt - grand)) <= TOLERANCE) {
+        calculated = alt;
+        diff = roundMoney(Math.abs(alt - grand));
+        matched = true;
+      }
+    }
+    if (!matched && !labourHaveLineTax && labourTax > 0) {
+      const alt = roundMoney(partsTaxable + labourTaxable + partsTax + deductibles + salvage);
+      if (roundMoney(Math.abs(alt - grand)) <= TOLERANCE) {
+        calculated = alt;
+        diff = roundMoney(Math.abs(alt - grand));
+        matched = true;
+      }
+    }
+  }
 
   return {
     matched, calculated_total: calculated, grand_total_invoice: grand,
