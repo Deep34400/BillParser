@@ -20,11 +20,15 @@ function roundMoney(n: number): number {
 
 /**
  * Parts line amount for reconciliation:
- * - If taxable_amount is 0 → 0 (insurance 100% covered).
- * - Otherwise → qty × rate.
+ * - taxable_amount 0 + tax_percentage 0 → qty × rate (Free/FOC; discount absorbs it)
+ * - taxable_amount 0 otherwise → 0 (insurance write-off)
+ * - otherwise → qty × rate
  */
 export function partsLineAmount(p: PartsLineItem): number {
-  if (p.taxable_amount === 0) return 0;
+  if (p.taxable_amount === 0) {
+    if (p.tax_percentage === 0) return (p.quantity ?? 0) * (p.rate ?? 0);
+    return 0;
+  }
   return (p.quantity ?? 0) * (p.rate ?? 0);
 }
 
@@ -72,11 +76,20 @@ function sideTax(
     return roundMoney(Math.max(0, gross - discount) * footerRatePct / 100);
   }
 
+  // Mixed rates: 0% items never contribute tax. Absorb discount into 0% items
+  // first (covers "Free"/100%-discount items), remainder goes to positive-rate items.
+  const zeroGross = roundMoney(
+    lines.filter((l) => (l.tax_percentage ?? footerRatePct) <= 0).reduce((s, l) => s + l.amount, 0),
+  );
+  const positiveDiscount = Math.max(0, discount - zeroGross);
+  const positiveGross = roundMoney(gross - zeroGross);
+
   let tax = 0;
   for (const l of lines) {
-    const share = l.amount / gross;
-    const taxable = Math.max(0, l.amount - discount * share);
     const rate = l.tax_percentage ?? footerRatePct;
+    if (rate <= 0) continue;
+    const share = positiveGross > 0 ? l.amount / positiveGross : 0;
+    const taxable = Math.max(0, l.amount - positiveDiscount * share);
     tax += taxable * rate / 100;
   }
   return roundMoney(tax);
