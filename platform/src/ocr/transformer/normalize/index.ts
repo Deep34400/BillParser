@@ -74,7 +74,11 @@ export function normalizePartsLineItem(li: PartsLineItem): PartsLineItem {
   let taxable = li.taxable_amount;
   if (qty != null && rate != null) {
     const expected = roundMoney(qty * rate);
-    if (taxable == null) return { ...li, taxable_amount: expected };
+    if (taxable == null) {
+      // 0% tax + null taxable → "Free" item (100% discount); don't inflate to qty×rate
+      if (li.tax_percentage === 0) return { ...li, taxable_amount: 0 };
+      return { ...li, taxable_amount: expected };
+    }
     if (Math.abs(taxable - expected) <= taxableTolerance(expected)) {
       return { ...li, taxable_amount: expected };
     }
@@ -94,11 +98,75 @@ function alignPartsTaxableToGross(parts: PartsLineItem[], partsTotal?: number | 
   }, 0));
   if (Math.abs(grossSum - partsTotal) > 2) return parts;
   return parts.map((p) => {
+    // Keep Free / 0% write-off taxable at 0 — do not inflate back to qty×rate
+    if (p.tax_percentage === 0 && p.taxable_amount === 0) return p;
     if (p.quantity != null && p.rate != null) {
       return { ...p, taxable_amount: roundMoney(p.quantity * p.rate) };
     }
     return p;
   });
+}
+
+/**
+ * "Free" parts (printed taxable = Free, tax 0%): LLM often copies qty×rate into taxable_amount.
+ * When parts_discount covers those 0% lines, force taxable_amount → 0 for the response.
+ * Does not change parts_discount (printed total still includes the FOC amount).
+ * Does NOT touch genuine 0% items with real value (e.g. fuel) when discount does not cover them.
+ */
+export function zeroFullyDiscountedZeroTaxParts(
+  parts: PartsLineItem[],
+  partsDiscount: number | null | undefined,
+): PartsLineItem[] {
+  const disc = partsDiscount ?? 0;
+  if (disc <= 0 || !parts.length) return parts;
+
+  let freeGross = 0;
+  for (const p of parts) {
+    if (p.tax_percentage !== 0) continue;
+    const gross = (p.quantity != null && p.rate != null)
+      ? roundMoney(p.quantity * p.rate)
+      : (p.taxable_amount ?? 0);
+    if (gross > 0) freeGross = roundMoney(freeGross + gross);
+  }
+  if (freeGross <= 0 || disc + 0.05 < freeGross) return parts;
+
+  return parts.map((p) => {
+    if (p.tax_percentage !== 0) return p;
+    const gross = (p.quantity != null && p.rate != null)
+      ? roundMoney(p.quantity * p.rate)
+      : (p.taxable_amount ?? 0);
+    if (gross <= 0) return p;
+    return { ...p, taxable_amount: 0 };
+  });
+}
+
+/**
+ * Same for labour: 0% tax lines fully covered by labour_discount → labour_charges = 0,
+ * and shrink labour_discount so reconciliation base stays consistent (labour has no qty×rate).
+ */
+export function zeroFullyDiscountedZeroTaxLabour(
+  items: LabourServiceLineItem[],
+  labourDiscount: number | null | undefined,
+): { items: LabourServiceLineItem[]; discount: number | null | undefined } {
+  const disc = labourDiscount ?? 0;
+  if (disc <= 0 || !items.length) return { items, discount: labourDiscount };
+
+  let freeGross = 0;
+  for (const l of items) {
+    if (l.tax_percentage !== 0) continue;
+    const amt = l.labour_charges ?? 0;
+    if (amt > 0) freeGross = roundMoney(freeGross + amt);
+  }
+  if (freeGross <= 0 || disc + 0.05 < freeGross) return { items, discount: labourDiscount };
+
+  return {
+    items: items.map((l) => {
+      if (l.tax_percentage !== 0) return l;
+      if ((l.labour_charges ?? 0) <= 0) return l;
+      return { ...l, labour_charges: 0 };
+    }),
+    discount: roundMoney(disc - freeGross),
+  };
 }
 
 function alignLabourChargesToGross(
@@ -175,14 +243,27 @@ export function enrichParsedInvoice(data: ParsedInvoiceData, markdown?: string):
     (withDates.labour_service_line_items ?? []).map(normalizeLabourLineItem),
   );
   const summary = resolveBillSummary(withDates, ocrMarkdown);
-  const parts = alignPartsTaxableToGross(
+  let parts = alignPartsTaxableToGross(
     (withDates.parts_line_items ?? []).map(normalizePartsLineItem),
     summary.parts_total,
   );
-  const labour = alignLabourChargesToGross(labourRaw, summary.labour_total, summary.labour_discount);
-  const enriched = { ...withDates, parts_line_items: parts, labour_service_line_items: labour };
+  parts = zeroFullyDiscountedZeroTaxParts(parts, summary.parts_discount);
+
+  let labour = alignLabourChargesToGross(labourRaw, summary.labour_total, summary.labour_discount);
+  const labourZeroed = zeroFullyDiscountedZeroTaxLabour(labour, summary.labour_discount);
+  labour = labourZeroed.items;
+
+  const withLines: ParsedInvoiceData = {
+    ...withDates,
+    parts_line_items: parts,
+    labour_service_line_items: labour,
+    totals_and_tax_summary: {
+      ...summary,
+      labour_discount: labourZeroed.discount,
+    },
+  };
   return {
-    ...enriched,
-    totals_and_tax_summary: resolveBillSummary(enriched, ocrMarkdown),
+    ...withLines,
+    totals_and_tax_summary: resolveBillSummary(withLines, ocrMarkdown),
   };
 }

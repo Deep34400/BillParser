@@ -315,4 +315,44 @@ describe('reconcileInvoiceTotal', () => {
     expect(r.matched).toBe(false);
     expect(r.reason).toMatch(/grand total missing/i);
   });
+
+  /**
+   * Popular Vehicles Service Estimate: Tax Paid on parts = 0; GST only on labour.
+   * LLM wrongly applies 9%+9% to parts too → +₹502.56 mismatch.
+   * Parts lines have no tax_percentage — drop parts tax when that matches grand.
+   */
+  it('ignores spurious parts GST when parts lines have no tax and grand matches labour-tax only', () => {
+    const r = reconcileInvoiceTotal({
+      company_name: 'POPULAR VEHICLES & SERVICES LTD.',
+      invoice_number: 'ES26000512',
+      parts_line_items: [
+        { quantity: 1, rate: 12, taxable_amount: 12 },
+        { quantity: 1, rate: 49, taxable_amount: 49 },
+        { quantity: 1, rate: 715, taxable_amount: 715 },
+        { quantity: 1, rate: 105, taxable_amount: 105 },
+        { quantity: 1, rate: 399, taxable_amount: 399 },
+        { quantity: 2.8, rate: 540, taxable_amount: 1512 },
+      ],
+      labour_service_line_items: [
+        { labour_code: 'ZE25L0P', labour_charges: 2000 },
+      ],
+      totals_and_tax_summary: {
+        parts_total: 2792,
+        labour_total: 2000,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        labour_cgst_rate: 9,
+        labour_sgst_rate: 9,
+        parts_cgst_amount: 251.28,
+        parts_sgst_amount: 251.28,
+        labour_cgst_amount: 180,
+        labour_sgst_amount: 180,
+        grand_total_invoice: 5152,
+      },
+      confidence: 0.9,
+    });
+    expect(r.calculated_total).toBe(5152);
+    expect(r.matched).toBe(true);
+    expect(r.difference).toBe(0);
+  });
 });

@@ -310,3 +310,61 @@ describe('resolveBillSummary — post-discount labour_total (JSB Mobility)', () 
     expect(netSum).toBeCloseTo(20187.14, 1);
   });
 });
+
+/**
+ * Popular Vehicles Service Estimate — GST only on labour (SGST+CGST 360).
+ * Parts Tax Paid = 0. LLM wrongly fills parts 9%+9%. Clear parts GST.
+ */
+describe('resolveBillSummary — GST only on labour (Popular Vehicles estimate)', () => {
+  function popularEstimate(): ParsedInvoiceData {
+    return {
+      company_name: 'POPULAR VEHICLES & SERVICES LTD.',
+      invoice_number: 'ES26000512',
+      parts_line_items: [
+        { quantity: 1, rate: 12, taxable_amount: 12 },
+        { quantity: 2.8, rate: 540, taxable_amount: 1512 },
+      ],
+      labour_service_line_items: [
+        { labour_charges: 2000 },
+      ],
+      totals_and_tax_summary: {
+        parts_total: 2792,
+        labour_total: 2000,
+        parts_cgst_rate: 9,
+        parts_sgst_rate: 9,
+        labour_cgst_rate: 9,
+        labour_sgst_rate: 9,
+        parts_cgst_amount: 251.28,
+        parts_sgst_amount: 251.28,
+        labour_cgst_amount: 180,
+        labour_sgst_amount: 180,
+        grand_total_invoice: 5152,
+      },
+      confidence: 0.9,
+    };
+  }
+
+  it('clears spurious parts CGST/SGST when grand matches without parts tax', () => {
+    const t = resolveBillSummary(popularEstimate());
+    expect((t.parts_cgst_amount ?? 0) + (t.parts_sgst_amount ?? 0)).toBe(0);
+    expect(t.parts_cgst_rate ?? 0).toBe(0);
+    expect(t.parts_sgst_rate ?? 0).toBe(0);
+    expect(t.labour_cgst_amount).toBeCloseTo(180, 1);
+    expect(t.labour_sgst_amount).toBeCloseTo(180, 1);
+    const net = (columnNet(t, 'parts') ?? 0) + (columnNet(t, 'labour') ?? 0);
+    expect(net).toBeCloseTo(5152, 1);
+  });
+
+  it('keeps parts rates null after second resolveBillSummary (enrich double-pass)', () => {
+    const first = resolveBillSummary(popularEstimate());
+    const second = resolveBillSummary({
+      ...popularEstimate(),
+      totals_and_tax_summary: first,
+    });
+    expect(second.parts_cgst_amount).toBe(0);
+    expect(second.parts_sgst_amount).toBe(0);
+    expect(second.parts_cgst_rate ?? 0).toBe(0);
+    expect(second.parts_sgst_rate ?? 0).toBe(0);
+    expect(second.labour_cgst_rate).toBe(9);
+  });
+});

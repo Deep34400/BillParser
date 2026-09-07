@@ -231,11 +231,29 @@ function inferGstRates(t: TotalsAndTaxSummary, data: ParsedInvoiceData): void {
  * Does NOT propagate IGST rates — single-column IGST footers park the full tax on one side.
  */
 export function fillMissingGstAmounts(t: TotalsAndTaxSummary): void {
+  const sideExplicitZeroGst = (side: 'parts' | 'labour'): boolean => {
+    const c = t[`${side}_cgst_amount`];
+    const s = t[`${side}_sgst_amount`];
+    const i = t[`${side}_igst_amount`];
+    const anyPositive = (c ?? 0) > 0 || (s ?? 0) > 0 || (i ?? 0) > 0;
+    // Explicit 0 amounts mean this side was cleared (e.g. estimate tax-on-labour-only)
+    return !anyPositive && (c === 0 || s === 0 || i === 0);
+  };
+
   // Propagate CGST/SGST only — never IGST (combined IGST footers would double-count).
-  if ((t.parts_cgst_rate ?? 0) > 0 && t.labour_cgst_rate == null) t.labour_cgst_rate = t.parts_cgst_rate;
-  if ((t.labour_cgst_rate ?? 0) > 0 && t.parts_cgst_rate == null) t.parts_cgst_rate = t.labour_cgst_rate;
-  if ((t.parts_sgst_rate ?? 0) > 0 && t.labour_sgst_rate == null) t.labour_sgst_rate = t.parts_sgst_rate;
-  if ((t.labour_sgst_rate ?? 0) > 0 && t.parts_sgst_rate == null) t.parts_sgst_rate = t.labour_sgst_rate;
+  // Do not re-apply rates onto a side whose GST amounts were explicitly zeroed.
+  if ((t.parts_cgst_rate ?? 0) > 0 && t.labour_cgst_rate == null && !sideExplicitZeroGst('labour')) {
+    t.labour_cgst_rate = t.parts_cgst_rate;
+  }
+  if ((t.labour_cgst_rate ?? 0) > 0 && t.parts_cgst_rate == null && !sideExplicitZeroGst('parts')) {
+    t.parts_cgst_rate = t.labour_cgst_rate;
+  }
+  if ((t.parts_sgst_rate ?? 0) > 0 && t.labour_sgst_rate == null && !sideExplicitZeroGst('labour')) {
+    t.labour_sgst_rate = t.parts_sgst_rate;
+  }
+  if ((t.labour_sgst_rate ?? 0) > 0 && t.parts_sgst_rate == null && !sideExplicitZeroGst('parts')) {
+    t.parts_sgst_rate = t.labour_sgst_rate;
+  }
 
   for (const side of ['parts', 'labour'] as const) {
     const sub = t[`${side}_total`];
@@ -496,6 +514,11 @@ export function resolveBillSummary(
   // (e.g. "Less Discount … | 157.71 | 0.00 | 925.00 |" with labour_discount left as 0).
   inferFullyDiscountedColumn(t);
 
+  // Estimates where Tax Paid on parts = 0 but LLM copied labour CGST/SGST onto parts.
+  clearSpuriousSideGst(t);
+  // Drop leftover rates on a side whose amounts are explicitly 0 (enrich double-pass).
+  clearOrphanGstRates(t);
+
   const pNet = columnNet(t, 'parts');
   const lNet = columnNet(t, 'labour');
   if (pNet != null && lNet != null && t.grand_total_invoice != null) {
@@ -536,4 +559,80 @@ function inferFullyDiscountedColumn(t: TotalsAndTaxSummary): void {
 
   trySide('labour');
   trySide('parts');
+}
+
+/**
+ * Clear GST on one side when including it breaks the grand total but excluding it matches.
+ * Common on service estimates: Tax Paid on parts = 0, GST only on labour.
+ * Only runs for two-column bills (both sides have a positive base) so parts-only
+ * invoices with deductibles/credits (e.g. old-battery) are untouched.
+ */
+function clearSpuriousSideGst(t: TotalsAndTaxSummary): void {
+  const grand = t.grand_total_invoice;
+  if (grand == null) return;
+
+  const sideBaseNet = (side: 'parts' | 'labour'): number => {
+    const sub = side === 'parts' ? t.parts_total : t.labour_total;
+    if (sub == null) return 0;
+    const disc = side === 'parts'
+      ? (t.parts_discount ?? 0) + (t.parts_special_discount ?? 0)
+      : (t.labour_discount ?? 0) + (t.labour_special_discount ?? 0);
+    return roundMoney(sub - disc);
+  };
+
+  const gstSum = (side: 'parts' | 'labour'): number => {
+    const cgst = side === 'parts' ? (t.parts_cgst_amount ?? 0) : (t.labour_cgst_amount ?? 0);
+    const sgst = side === 'parts' ? (t.parts_sgst_amount ?? 0) : (t.labour_sgst_amount ?? 0);
+    const igst = side === 'parts' ? (t.parts_igst_amount ?? 0) : (t.labour_igst_amount ?? 0);
+    return cgst + sgst + igst;
+  };
+
+  const pBase = sideBaseNet('parts');
+  const lBase = sideBaseNet('labour');
+  // Need both columns — otherwise deductibles/credits on a single-side bill can false-match.
+  if (pBase <= 0 || lBase <= 0) return;
+
+  const pNet = columnNet(t, 'parts');
+  const lNet = columnNet(t, 'labour');
+  if (pNet == null || lNet == null) return;
+
+  const withBoth = roundMoney(pNet + lNet);
+  if (Math.abs(withBoth - grand) <= 2 || Math.round(withBoth) === Math.round(grand)) return;
+
+  const clear = (side: 'parts' | 'labour') => {
+    t[`${side}_cgst_amount`] = 0;
+    t[`${side}_sgst_amount`] = 0;
+    t[`${side}_igst_amount`] = 0;
+    t[`${side}_cgst_rate`] = null;
+    t[`${side}_sgst_rate`] = null;
+    t[`${side}_igst_rate`] = null;
+  };
+
+  for (const side of ['parts', 'labour'] as const) {
+    if (gstSum(side) <= 0.05) continue;
+    const other = side === 'parts' ? 'labour' : 'parts';
+    // Other side must actually carry GST (estimate pattern: tax on labour only).
+    if (gstSum(other) <= 0.05) continue;
+
+    const without = roundMoney(sideBaseNet(side) + (columnNet(t, other) ?? 0));
+    if (Math.abs(without - grand) <= 2 || Math.round(without) === Math.round(grand)) {
+      clear(side);
+      return;
+    }
+  }
+}
+
+/** When GST amounts are explicitly 0, drop leftover % rates so UI/API don't show 9% with ₹0. */
+function clearOrphanGstRates(t: TotalsAndTaxSummary): void {
+  for (const side of ['parts', 'labour'] as const) {
+    const c = t[`${side}_cgst_amount`];
+    const s = t[`${side}_sgst_amount`];
+    const i = t[`${side}_igst_amount`];
+    const anyPositive = (c ?? 0) > 0 || (s ?? 0) > 0 || (i ?? 0) > 0;
+    if (anyPositive) continue;
+    if (!(c === 0 || s === 0 || i === 0)) continue;
+    t[`${side}_cgst_rate`] = null;
+    t[`${side}_sgst_rate`] = null;
+    t[`${side}_igst_rate`] = null;
+  }
 }
