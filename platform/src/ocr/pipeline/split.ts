@@ -40,6 +40,7 @@ export async function runSplitMode(
   return {
     parsed: structResult.parsed,
     rawOcr,
+    ocrMarkdown: rawOcr,
     costInfo,
     providers: { extraction: 'mistral', structuring: structuringProvider, mode: 'split' },
   };

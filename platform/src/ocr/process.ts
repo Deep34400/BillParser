@@ -13,6 +13,8 @@ import { SINGLE_PROVIDERS } from './providers/llmSingle.js';
 export interface PipelineResult {
   parsed: ParsedInvoiceData;
   rawOcr: string;
+  /** Real OCR markdown (when available). Single-mode rawOcr is LLM JSON — use this for vendor correction. */
+  ocrMarkdown?: string;
   costInfo: OcrCostInfo;
   providers: { extraction: string; structuring: string; mode: 'split' | 'single' };
   fallbackReason?: string;
