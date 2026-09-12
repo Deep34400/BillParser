@@ -20,6 +20,8 @@ const TIMEOUT_MS = 120_000;
 export interface SingleResult {
   parsed: ParsedInvoiceData;
   rawOcr: string;
+  /** Real OCR markdown when available (Mistral PDF path). */
+  ocrMarkdown?: string;
   cost: OcrStepCost;
 }
 
@@ -227,7 +229,7 @@ async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<Singl
       output_cost_usd: (ocr.cost.output_cost_usd ?? 0) + (structured.cost.output_cost_usd ?? 0),
       latency_ms,
     };
-    return { parsed: structured.parsed, rawOcr: ocr.markdown, cost };
+    return { parsed: structured.parsed, rawOcr: ocr.markdown, ocrMarkdown: ocr.markdown, cost };
   }
 
   const { apiKey, model } = await resolveProviderKey('mistral', modelOverride ?? 'pixtral-12b-2409');

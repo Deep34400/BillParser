@@ -33,8 +33,6 @@ export async function runSplitMode(
     total_input_tokens: extractionCost.usage.prompt_tokens + structResult.cost.usage.prompt_tokens,
     total_output_tokens: extractionCost.usage.completion_tokens + structResult.cost.usage.completion_tokens,
     total_thinking_tokens: (extractionCost.usage.thinking_tokens ?? 0) + (structResult.cost.usage.thinking_tokens ?? 0),
-    // Rates come from the structuring step: extraction is Mistral OCR, billed per
-    // page, so it has no $/1M rate to record. Its page count is kept separately.
     input_rate_per_1m: structResult.cost.input_rate_per_1m,
     output_rate_per_1m: structResult.cost.output_rate_per_1m,
     extraction_pages: extractionCost.pages,
@@ -45,6 +43,7 @@ export async function runSplitMode(
   return {
     parsed: structResult.parsed,
     rawOcr,
+    ocrMarkdown: rawOcr,
     costInfo,
     providers: { extraction: 'mistral', structuring: structuringProvider, mode: 'split' },
   };

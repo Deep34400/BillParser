@@ -337,6 +337,30 @@ describe('resolveVendorFromMarkdown — SAI SERVICE (Dealer GSTIN at bottom)', (
   });
 });
 
+describe('enrichParsedInvoice — single-mode GSTIN correction via ocrMarkdown', () => {
+  // Simulates the fix: when ocrMarkdown (real OCR text) is passed instead of LLM JSON,
+  // enrichParsedInvoice should correct the buyer GSTIN to the seller's.
+  it('corrects buyer GSTIN when real OCR markdown is provided (single-mode scenario)', async () => {
+    const { enrichParsedInvoice } = await import('../../../src/ocr/transformer/normalize/index.js');
+
+    const parsed = baseParsed({
+      company_name: 'CARRUM MOBILITY SOLUTIONS PRIVATE LIMITED',
+      gstin: '36AALCC8489R1ZE',   // buyer
+      pan: 'AALCC8489R',
+    });
+
+    // When single mode passes LLM JSON as markdown, correction is skipped
+    const llmJson = '{"output":{"entries":[{"parsed_data":{"gstin":"36AALCC8489R1ZE"}}]}}';
+    const notFixed = enrichParsedInvoice(parsed, llmJson);
+    expect(notFixed.gstin).toBe('36AALCC8489R1ZE'); // still buyer — bug
+
+    // When real OCR markdown is passed, correction works
+    const fixed = enrichParsedInvoice(parsed, SAI_SERVICE_MARKDOWN);
+    expect(fixed.gstin).toBe('36AABCS4998M1ZK'); // seller — fixed
+    expect(fixed.company_name).toBe('SAI SERVICE PRIVATE LIMITED');
+  });
+});
+
 describe('isJunkVendorName', () => {
   it('flags bare document titles like Invoice', () => {
     expect(isJunkVendorName('Invoice')).toBe(true);

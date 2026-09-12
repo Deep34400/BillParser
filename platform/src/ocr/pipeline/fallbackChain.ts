@@ -153,7 +153,7 @@ export async function runFallbackChain(
             contextId,
           );
 
-      const enriched = enrichParsedInvoice(result.parsed, result.rawOcr);
+      const enriched = enrichParsedInvoice(result.parsed, result.ocrMarkdown ?? result.rawOcr);
       const recon = reconcileInvoiceTotal(enriched);
       const breakdown = buildReconBreakdown(enriched, recon);
       const latency = result.costInfo.extraction?.latency_ms ?? 0;

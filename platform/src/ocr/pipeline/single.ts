@@ -12,6 +12,7 @@ function toSingleResult(
   return {
     parsed: r.parsed,
     rawOcr: r.rawOcr,
+    ocrMarkdown: r.ocrMarkdown,
     costInfo: {
       extraction: r.cost,
       structuring: null,
