@@ -1435,14 +1435,16 @@ function CostBreakdown({ inv }: { inv: Invoice }) {
   const outputRate = inv.outputRatePer1m ?? null;
   // Prices read wrong unpadded ($0.3/1M), but blindly padding to 2 dp would round
   // away a finer rate, so keep the raw value when 2 dp would lose precision.
-  const fmtRate = (r: number) => {
-    const two = r.toFixed(2);
-    return Number(two) === r ? two : String(r);
+  const fmtRate = (r: number | string | null | undefined) => {
+    const n = Number(r);
+    if (!Number.isFinite(n)) return '0';
+    const two = n.toFixed(2);
+    return Number(two) === n ? two : String(n);
   };
-  const rateLabel = (r: number | null) => (r == null ? '' : ` × $${fmtRate(r)}/1M`);
+  const rateLabel = (r: number | string | null | undefined) => (r == null ? '' : ` × $${fmtRate(r)}/1M`);
   // Costs here are fractions of a rupee and the rates behind them are quoted in
   // USD, so showing only ₹ makes the line unverifiable.
-  const usdFmt = (v: number) => `$${v.toFixed(4)}`;
+  const usdFmt = (v: number | string | null | undefined) => `$${Number(v || 0).toFixed(4)}`;
   const inputCost = inv.totalInputCostUsd ?? 0;
   const outputCost = inv.totalOutputCostUsd ?? 0;
   const totalCost = inv.costEstimate ?? 0;

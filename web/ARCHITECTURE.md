@@ -21,7 +21,6 @@ web/
 │   │   ├── format.ts          # Money, date, confidence formatting
 │   │   ├── structuringModels.ts  # LLM model suggestions per provider
 │   │   └── summaryFromMarkdown.ts # Client-side bill summary parser
-│   │                             (mirrors api/src/billing/)
 │   │
 │   ├── components/            # Reusable UI components
 │   │   ├── Shell.tsx          # App shell (sidebar + header)
@@ -67,7 +66,7 @@ web/
 ## Key Design Decisions
 
 - **`api/client.ts`** is the single point of contact with the backend — all HTTP calls go through this module. Easy to mock in tests.
-- **`lib/summaryFromMarkdown.ts`** mirrors the API's `billing/` logic so the UI can show real-time bill breakdowns from raw OCR markdown without a backend round-trip.
+- **`lib/summaryFromMarkdown.ts`** parses OCR markdown on the client for a live breakdown without an extra API call.
 - **`types/index.ts`** centralizes all TypeScript interfaces shared across the app.
 - **`lib/`** keeps formatting and model utilities separate from React components — pure functions, easy to test.
 - **Pages** are route-level; **components** are reusable within pages; **overlays** are modal UIs that appear over pages.
@@ -86,7 +85,7 @@ web/
 - Switching between tabs/chips uses cached data if fresh
 - Each sub-view (Vehicles, Months, Cost/km, API Costs) is lazy-loaded — only fetched on first click
 
-**Server-side** (`platform/src/lib/cache.ts`):
+**Server-side** (`platform/src/shared/cache.ts`):
 - In-memory TTL cache (30s) per analytics endpoint
 - Invalidated when bills are created, deleted, or bulk-modified
 - Prevents repeated DB scans across concurrent requests
