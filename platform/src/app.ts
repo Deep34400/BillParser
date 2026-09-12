@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import jwt from '@fastify/jwt';
 import { authPlugin } from './middleware/auth.js';
+import { tenantPlugin } from './middleware/tenantContext.js';
+import { errorHandler } from './middleware/errorHandler.js';
 import { userRoutes } from './users/route.js';
 import { billRoutes } from './ocr/route.js';
 import { analyticsRoutes } from './analytics/route.js';
@@ -11,6 +13,7 @@ import { vendorRoutes } from './vendor/route.js';
 import { configRoutes } from './routes/config.js';
 import { settingsRoutes } from './routes/settings.js';
 import { odometerRoutes } from './odometerOcr/route.js';
+import { tenantRoutes } from './tenant/route.js';
 
 const DEV_JWT_SECRET = 'dev-secret-change-in-production';
 
@@ -62,6 +65,8 @@ export async function buildApp() {
   await app.register(jwt, { secret: JWT_SECRET });
 
   await app.register(authPlugin);
+  await app.register(tenantPlugin);
+  app.setErrorHandler(errorHandler);
 
   await app.register(userRoutes);
   await app.register(billRoutes);
@@ -71,6 +76,7 @@ export async function buildApp() {
   await app.register(configRoutes);
   await app.register(settingsRoutes);
   await app.register(odometerRoutes);
+  await app.register(tenantRoutes);
 
   app.get('/api/health', async () => ({
     success: true,

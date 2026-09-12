@@ -13,6 +13,8 @@ export { TokenTransaction, type TokenTransactionAttributes } from '../users/mode
 export { Vendor, type VendorAttributes } from '../vendor/models/index.js';
 export { AppSettingsModel as AppSettings, type AppSettingsAttributes } from '../shared/models/index.js';
 export { ProviderCredential, type ProviderCredentialAttributes } from '../shared/models/index.js';
+export { Organization, type OrganizationAttributes } from '../tenant/models/index.js';
+export { OrgMember, type OrgMemberAttributes } from '../tenant/models/index.js';
 
 // Init functions
 import { initBillModel, initBillPartModel, Bill, BillPart } from '../ocr/models/index.js';
@@ -20,11 +22,14 @@ import { initUserModel, initApiKeyModel, initTokenTransactionModel, User, ApiKey
 import { initVendorModel, Vendor } from '../vendor/models/index.js';
 import { initAppSettingsModel } from '../shared/models/index.js';
 import { initProviderCredentialModel } from '../shared/models/index.js';
+import { initOrganizationModel, initOrgMemberModel, Organization, OrgMember } from '../tenant/models/index.js';
 
 export function initModels(seq: Sequelize): void {
   // Order matters: referenced tables first
+  initOrganizationModel(seq);
   initVendorModel(seq);
   initUserModel(seq);
+  initOrgMemberModel(seq);
   initBillModel(seq);
   initBillPartModel(seq);
   initApiKeyModel(seq);
@@ -33,6 +38,18 @@ export function initModels(seq: Sequelize): void {
   initProviderCredentialModel(seq);
 
   // ─── Associations ─────────────────────────────────────────────────────
+
+  // Org ↔ Members ↔ Users
+  Organization.hasMany(OrgMember, { foreignKey: 'orgId', as: 'members', onDelete: 'CASCADE' });
+  OrgMember.belongsTo(Organization, { foreignKey: 'orgId', as: 'organization' });
+  User.hasMany(OrgMember, { foreignKey: 'userId', as: 'orgMemberships', onDelete: 'CASCADE' });
+  OrgMember.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+  // Org ↔ Bills (tenant isolation)
+  Organization.hasMany(Bill, { foreignKey: 'orgId', as: 'bills' });
+  Bill.belongsTo(Organization, { foreignKey: 'orgId', as: 'organization' });
+
+  // Existing associations (unchanged)
   Bill.belongsTo(Vendor, { foreignKey: 'vendorId', as: 'vendor' });
   Vendor.hasMany(Bill, { foreignKey: 'vendorId', as: 'bills' });
   Bill.hasMany(BillPart, { foreignKey: 'billId', as: 'parts', onDelete: 'CASCADE' });

@@ -18,6 +18,7 @@ export { getSettings };
 function billRowToDoc(row: Bill): BillDoc {
   return {
     bill_id: row.billId,
+    org_id: row.orgId,
     fleet_id: row.fleetId,
     vehicle_id: row.vehicleId,
     bill_type: row.billType as BillType,
@@ -102,6 +103,7 @@ function billRowToDoc(row: Bill): BillDoc {
 function billDocToRow(b: BillDoc): Record<string, unknown> {
   return {
     billId: b.bill_id,
+    orgId: b.org_id ?? null,
     fleetId: b.fleet_id ?? null,
     vehicleId: b.vehicle_id ?? null,
     billType: b.bill_type,
@@ -239,7 +241,7 @@ export async function getBill(billId: string): Promise<BillDoc | null> {
 
 /** BillDoc (snake_case) key -> Bill model (camelCase) attribute key. */
 const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, string>> = {
-  fleet_id: 'fleetId', vehicle_id: 'vehicleId', bill_type: 'billType', bill_category: 'billCategory',
+  org_id: 'orgId', fleet_id: 'fleetId', vehicle_id: 'vehicleId', bill_type: 'billType', bill_category: 'billCategory',
   vendor_name: 'vendorName', vendor_gstin: 'vendorGstin', company_name: 'companyName', gstin: 'gstin',
   pan: 'pan', irn: 'irn', invoice_number: 'invoiceNumber', invoice_date: 'invoiceDate',
   invoice_time: 'invoiceTime', subtotal_amount: 'subtotalAmount', parts_amount: 'partsAmount',
@@ -287,10 +289,12 @@ export async function updateBillStatus(billId: string, status: BillStatus, extra
 export async function listBills(opts: {
   status?: BillStatus;
   vehicleId?: string;
+  orgId?: string;
   limit?: number;
   offset?: number;
 } = {}): Promise<BillDoc[]> {
   const where: Record<string, unknown> = {};
+  if (opts.orgId) where.orgId = opts.orgId;
   if (opts.status) where.ocrStatus = opts.status;
   if (opts.vehicleId) where.vehicleId = opts.vehicleId;
 
@@ -303,8 +307,9 @@ export async function listBills(opts: {
   return rows.map(billRowToDoc);
 }
 
-export async function fetchAllBills(opts: { status?: BillStatus } = {}): Promise<BillDoc[]> {
+export async function fetchAllBills(opts: { status?: BillStatus; orgId?: string } = {}): Promise<BillDoc[]> {
   const where: Record<string, unknown> = {};
+  if (opts.orgId) where.orgId = opts.orgId;
   if (opts.status) where.ocrStatus = opts.status;
 
   const rows = await Bill.findAll({ where, order: [['createdAt', 'DESC']] });
@@ -345,8 +350,9 @@ export interface PaginatedBills {
 
 const ALL_STATUSES: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'NEED_REVIEW', 'VERIFIED', 'FAILED'];
 
-export async function countBills(status?: BillStatus): Promise<number> {
+export async function countBills(status?: BillStatus, orgId?: string): Promise<number> {
   const where: Record<string, unknown> = {};
+  if (orgId) where.orgId = orgId;
   if (status) where.ocrStatus = status;
   return Bill.count({ where });
 }
@@ -387,6 +393,7 @@ export async function listBillsPaginated(opts: {
   needsReview?: boolean;
   reviewCode?: string;
   excludeNeedsReview?: boolean;
+  orgId?: string;
   q?: string;
 } = {}): Promise<PaginatedBills> {
   const pageSize = Math.min(Math.max(opts.pageSize ?? 10, 1), 100);
@@ -395,6 +402,7 @@ export async function listBillsPaginated(opts: {
   const searchTerm = opts.q?.trim();
 
   const where: any = {};
+  if (opts.orgId) where.orgId = opts.orgId;
 
   if (opts.statuses?.length) {
     where.ocrStatus = { [Op.in]: opts.statuses };
