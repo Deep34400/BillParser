@@ -1,0 +1,76 @@
+/**
+ * Webhook Repository — CRUD for webhook endpoints.
+ */
+import { WebhookEndpoint } from './models/index.js';
+
+export interface WebhookEndpointDoc {
+  endpoint_id: string;
+  org_id: string;
+  url: string;
+  events: string[];
+  secret: string;
+  active: boolean;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToDoc(row: WebhookEndpoint): WebhookEndpointDoc {
+  return {
+    endpoint_id: row.endpointId,
+    org_id: row.orgId,
+    url: row.url,
+    events: row.events,
+    secret: row.secret,
+    active: row.active,
+    description: row.description,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+export async function createWebhook(doc: WebhookEndpointDoc): Promise<WebhookEndpointDoc> {
+  await WebhookEndpoint.create({
+    endpointId: doc.endpoint_id,
+    orgId: doc.org_id,
+    url: doc.url,
+    events: doc.events,
+    secret: doc.secret,
+    active: doc.active,
+    description: doc.description,
+    createdAt: new Date(doc.created_at),
+    updatedAt: new Date(doc.updated_at),
+  });
+  return doc;
+}
+
+export async function listWebhooks(orgId: string): Promise<WebhookEndpointDoc[]> {
+  const rows = await WebhookEndpoint.findAll({ where: { orgId }, order: [['createdAt', 'DESC']] });
+  return rows.map(rowToDoc);
+}
+
+export async function getWebhook(endpointId: string): Promise<WebhookEndpointDoc | null> {
+  const row = await WebhookEndpoint.findByPk(endpointId);
+  return row ? rowToDoc(row) : null;
+}
+
+export async function updateWebhook(endpointId: string, updates: Partial<WebhookEndpointDoc>): Promise<void> {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (updates.url !== undefined) patch.url = updates.url;
+  if (updates.events !== undefined) patch.events = updates.events;
+  if (updates.active !== undefined) patch.active = updates.active;
+  if (updates.description !== undefined) patch.description = updates.description;
+  await WebhookEndpoint.update(patch, { where: { endpointId } });
+}
+
+export async function deleteWebhook(endpointId: string): Promise<void> {
+  await WebhookEndpoint.destroy({ where: { endpointId } });
+}
+
+/** Find all active endpoints subscribed to a specific event for an org. */
+export async function findActiveWebhooksForEvent(orgId: string, event: string): Promise<WebhookEndpointDoc[]> {
+  const rows = await WebhookEndpoint.findAll({
+    where: { orgId, active: true },
+  });
+  return rows.filter((r) => r.events.includes(event)).map(rowToDoc);
+}

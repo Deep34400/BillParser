@@ -5,6 +5,7 @@ import jwt from '@fastify/jwt';
 import { authPlugin } from './middleware/auth.js';
 import { tenantPlugin } from './middleware/tenantContext.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { rateLimitPlugin } from './middleware/rateLimit.js';
 import { userRoutes } from './users/route.js';
 import { billRoutes } from './ocr/route.js';
 import { analyticsRoutes } from './analytics/route.js';
@@ -14,6 +15,8 @@ import { configRoutes } from './routes/config.js';
 import { settingsRoutes } from './routes/settings.js';
 import { odometerRoutes } from './odometerOcr/route.js';
 import { tenantRoutes } from './tenant/route.js';
+import { auditRoutes } from './audit/route.js';
+import { webhookRoutes } from './webhook/route.js';
 
 const DEV_JWT_SECRET = 'dev-secret-change-in-production';
 
@@ -66,6 +69,7 @@ export async function buildApp() {
 
   await app.register(authPlugin);
   await app.register(tenantPlugin);
+  await app.register(rateLimitPlugin);
   app.setErrorHandler(errorHandler);
 
   await app.register(userRoutes);
@@ -77,6 +81,8 @@ export async function buildApp() {
   await app.register(settingsRoutes);
   await app.register(odometerRoutes);
   await app.register(tenantRoutes);
+  await app.register(auditRoutes);
+  await app.register(webhookRoutes);
 
   app.get('/api/health', async () => ({
     success: true,

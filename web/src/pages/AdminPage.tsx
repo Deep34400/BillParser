@@ -1,32 +1,92 @@
-import { useState, useEffect, useCallback } from 'react';
-import { api, type UserInfo, type TokenTransaction } from '../api/client.js';
-import { T } from '../theme.js';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Users, Building2, Mail, Shield, Plus, UserPlus, Crown, Eye, Bot,
+  Trash2, ShieldCheck, CircleSlash, Lock, Power, PowerOff,
+} from 'lucide-react';
+import {
+  api, type UserInfo, type TokenTransaction, type OrgInfo, type OrgMemberInfo,
+  type OrgRole, type AuditLogEntry,
+} from '../api/client.js';
 import { costFmt } from '../lib/format.js';
 import { formatBalance } from '../lib/balance.js';
+import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
+import { Label } from '@/components/ui/label.js';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card.js';
+import { Badge } from '@/components/ui/badge.js';
+import {
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+} from '@/components/ui/table.js';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select.js';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog.js';
+import { Separator } from '@/components/ui/separator.js';
 
-const card: React.CSSProperties = {
-  background: T.panel, border: `1px solid ${T.border}`,
-  borderRadius: 12, padding: '20px 24px', marginBottom: 18,
+/* ── Helpers ─────────────────────────────────────────────────────────────── */
+
+const ROLE_META: Record<string, { label: string; icon: React.ElementType; variant: 'default' | 'success' | 'warning' | 'info' | 'muted' }> = {
+  owner:    { label: 'Owner',    icon: Crown,  variant: 'warning' },
+  admin:    { label: 'Admin',    icon: Shield, variant: 'info' },
+  reviewer: { label: 'Reviewer', icon: Eye,    variant: 'success' },
+  viewer:   { label: 'Viewer',   icon: Eye,    variant: 'muted' },
+  api_user: { label: 'API User', icon: Bot,    variant: 'default' },
 };
-const btn = (bg = T.accent, color = '#fff'): React.CSSProperties => ({
-  padding: '7px 16px', border: 'none', borderRadius: 7, background: bg, color,
-  fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
-  transition: 'opacity 0.15s',
-});
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8,
-  fontSize: 13, fontFamily: T.font, outline: 'none',
+
+const PLAN_META: Record<string, { label: string; variant: 'muted' | 'info' | 'success' | 'warning' }> = {
+  free:       { label: 'Free',       variant: 'muted' },
+  starter:    { label: 'Starter',    variant: 'info' },
+  business:   { label: 'Business',   variant: 'success' },
+  enterprise: { label: 'Enterprise', variant: 'warning' },
 };
+
+type AdminTab = 'users' | 'orgs' | 'email-intake';
+
+function FlashMsg({ msg, type }: { msg: string; type: 'ok' | 'err' }) {
+  if (!msg) return null;
+  return (
+    <div className={cn(
+      'mb-4 rounded-lg border px-4 py-2.5 text-sm',
+      type === 'ok' ? 'bg-success-soft text-success border-success/20' : 'bg-danger-soft text-danger border-danger/20',
+    )}>{msg}</div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
 
 export function AdminPage() {
-  const [users, setUsers] = useState<UserInfo[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [txs, setTxs] = useState<TokenTransaction[]>([]);
-  const [tab, setTab] = useState<'users' | 'create' | 'email-intake'>('users');
-  const [msg, setMsg] = useState('');
-  const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
+  const [tab, setTab] = useState<AdminTab>('users');
 
-  // Email intake service toggle + mailbox creds
+  // ─── Data ──────────────────────────────────────────────────────────────
+  const [users, setUsers] = useState<UserInfo[]>([]);
+  const [allOrgs, setAllOrgs] = useState<(OrgInfo & { member_count: number })[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+
+  // ─── User management ──────────────────────────────────────────────────
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [txs, setTxs] = useState<TokenTransaction[]>([]);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [cEmail, setCEmail] = useState('');
+  const [cName, setCName] = useState('');
+  const [cPass, setCPass] = useState('');
+  const [cRole, setCRole] = useState<'user' | 'admin'>('user');
+  const [cBalance, setCBalance] = useState('');
+  const [cIntakeEmail, setCIntakeEmail] = useState('');
+  const [addAmt, setAddAmt] = useState('');
+  const [addDesc, setAddDesc] = useState('');
+
+  // ─── Org management ───────────────────────────────────────────────────
+  const [showCreateOrg, setShowCreateOrg] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [newOrgOwner, setNewOrgOwner] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
+  const [selectedOrgMembers, setSelectedOrgMembers] = useState<OrgMemberInfo[]>([]);
+
+  // ─── Email intake ─────────────────────────────────────────────────────
   const [intakeEnabled, setIntakeEnabled] = useState(false);
   const [intakeAddress, setIntakeAddress] = useState<string | null>(null);
   const [intakeRunning, setIntakeRunning] = useState(false);
@@ -36,35 +96,29 @@ export function AdminPage() {
   const [mailboxPassword, setMailboxPassword] = useState('');
   const [pollIntervalSec, setPollIntervalSec] = useState('90');
   const [savingMailbox, setSavingMailbox] = useState(false);
-
-  // Per-user intake email edits (userId → draft value)
   const [intakeDrafts, setIntakeDrafts] = useState<Record<string, string>>({});
 
-  // Create form
-  const [cEmail, setCEmail] = useState('');
-  const [cName, setCName] = useState('');
-  const [cPass, setCPass] = useState('');
-  const [cRole, setCRole] = useState<'user' | 'admin'>('user');
-  const [cBalance, setCBalance] = useState('');
-  const [cIntakeEmail, setCIntakeEmail] = useState('');
-
-  // Token form
-  const [addAmt, setAddAmt] = useState('');
-  const [addDesc, setAddDesc] = useState('');
-
+  // ─── Feedback ─────────────────────────────────────────────────────────
+  const [msg, setMsg] = useState('');
+  const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
   const flash = (text: string, type: 'ok' | 'err' = 'ok') => {
-    setMsg(text); setMsgType(type);
-    setTimeout(() => setMsg(''), 4000);
+    setMsg(text); setMsgType(type); setTimeout(() => setMsg(''), 4000);
   };
 
-  const load = useCallback(async () => {
+  // ─── Loaders ──────────────────────────────────────────────────────────
+
+  const loadUsers = useCallback(async () => {
     try {
       const r = await api.adminUsers();
       setUsers(r.data);
       const drafts: Record<string, string> = {};
       for (const u of r.data) drafts[u.user_id] = u.intake_email ?? '';
       setIntakeDrafts(drafts);
-    } catch (e) { flash((e as Error).message, 'err'); }
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadOrgs = useCallback(async () => {
+    try { const r = await api.adminListOrgs(); setAllOrgs(r.data ?? []); } catch { setAllOrgs([]); }
   }, []);
 
   const loadIntakeConfig = useCallback(async () => {
@@ -82,88 +136,98 @@ export function AdminPage() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { void load(); void loadIntakeConfig(); }, [load, loadIntakeConfig]);
+  const loadAll = useCallback(async () => {
+    await Promise.allSettled([loadUsers(), loadOrgs(), loadIntakeConfig()]);
+  }, [loadUsers, loadOrgs, loadIntakeConfig]);
+
+  useEffect(() => { void loadAll(); }, [loadAll]);
+
+  // ─── User actions ─────────────────────────────────────────────────────
 
   const selectUser = async (id: string) => {
-    setSelected(id);
-    try {
-      const r = await api.adminUserTransactions(id);
-      setTxs(r.data);
-    } catch { setTxs([]); }
+    setSelectedUser(selectedUser === id ? null : id);
+    if (selectedUser !== id) {
+      try { const r = await api.adminUserTransactions(id); setTxs(r.data); } catch { setTxs([]); }
+    }
   };
 
-  const handleCreate = async () => {
+  const handleCreateUser = async () => {
     if (!cEmail || !cName || !cPass) return flash('Fill all required fields', 'err');
-    if (cPass.length < 6) return flash('Password must be at least 6 characters', 'err');
+    if (cPass.length < 6) return flash('Password min 6 characters', 'err');
     try {
       await api.adminCreateUser(cEmail, cName, cPass, cRole, cBalance ? Number(cBalance) : undefined, cIntakeEmail || undefined);
       setCEmail(''); setCName(''); setCPass(''); setCBalance(''); setCIntakeEmail('');
-      flash('User created successfully');
-      setTab('users');
-      void load();
+      flash('User created!'); setShowCreateUser(false);
+      await loadUsers();
     } catch (e) { flash((e as Error).message, 'err'); }
   };
 
-  const handleBlock = async (id: string) => { await api.adminBlockUser(id); void load(); };
-  const handleUnblock = async (id: string) => { await api.adminUnblockUser(id); void load(); };
-
-  const handleAddTokens = async () => {
-    if (!selected || !addAmt) return;
-    try {
-      await api.adminAddTokens(selected, Number(addAmt), addDesc || undefined);
-      setAddAmt(''); setAddDesc('');
-      flash('Balance added');
-      void load(); void selectUser(selected);
-    } catch (e) { flash((e as Error).message, 'err'); }
-  };
-
+  const handleBlock = async (id: string) => { await api.adminBlockUser(id); flash('User blocked'); await loadUsers(); };
+  const handleUnblock = async (id: string) => { await api.adminUnblockUser(id); flash('User unblocked'); await loadUsers(); };
   const handleResetPassword = async (id: string) => {
     const pw = prompt('Enter new password (min 6 chars):');
     if (!pw || pw.length < 6) return flash('Password must be at least 6 characters', 'err');
+    try { await api.adminResetPassword(id, pw); flash('Password reset'); } catch (e) { flash((e as Error).message, 'err'); }
+  };
+
+  const handleAddTokens = async () => {
+    if (!selectedUser || !addAmt) return;
     try {
-      await api.adminResetPassword(id, pw);
-      flash('Password reset');
+      await api.adminAddTokens(selectedUser, Number(addAmt), addDesc || undefined);
+      setAddAmt(''); setAddDesc(''); flash('Balance added');
+      await loadUsers(); const r = await api.adminUserTransactions(selectedUser); setTxs(r.data);
     } catch (e) { flash((e as Error).message, 'err'); }
   };
+
+  // ─── Org actions ──────────────────────────────────────────────────────
+
+  const handleCreateOrg = async () => {
+    if (!newOrgName.trim()) return flash('Enter org name', 'err');
+    if (!newOrgOwner) return flash('Select an owner', 'err');
+    setCreating(true);
+    try {
+      await api.createOrg(newOrgName.trim(), newOrgOwner);
+      flash('Organization created!'); setNewOrgName(''); setNewOrgOwner(''); setShowCreateOrg(false);
+      await loadOrgs();
+    } catch (e) { flash((e as Error).message, 'err'); }
+    finally { setCreating(false); }
+  };
+
+  const handleSelectOrg = async (orgId: string) => {
+    if (selectedOrg === orgId) { setSelectedOrg(null); return; }
+    setSelectedOrg(orgId);
+    try { const r = await api.adminOrgMembers(orgId); setSelectedOrgMembers(r.data ?? []); }
+    catch { setSelectedOrgMembers([]); }
+  };
+
+  // ─── Email intake actions ─────────────────────────────────────────────
 
   const handleToggleIntake = async () => {
     try {
       const res = await api.updateEmailIntake({ enabled: !intakeEnabled });
       setIntakeEnabled(res.emailIntake.enabled);
       setIntakeRunning(!!res.emailIntake.running);
-      if (res.emailIntake.address !== undefined) setIntakeAddress(res.emailIntake.address ?? null);
-      flash(
-        res.emailIntake.enabled
-          ? (res.emailIntake.running ? 'Email intake ENABLED and polling' : 'Email intake enabled (starting…)')
-          : 'Email intake DISABLED — polling stopped',
-      );
+      flash(res.emailIntake.enabled ? 'Email intake ENABLED' : 'Email intake DISABLED');
     } catch (e) { flash((e as Error).message, 'err'); }
   };
 
   const handleSaveMailbox = async () => {
     const user = mailboxUser.trim().toLowerCase();
     if (!user || !user.includes('@')) return flash('Enter a valid mailbox email', 'err');
-    if (!mailboxPassword.trim() && !intakeHasPassword) {
-      return flash('Enter the Gmail app password', 'err');
-    }
+    if (!mailboxPassword.trim() && !intakeHasPassword) return flash('Enter the app password', 'err');
     const poll = Number(pollIntervalSec);
-    if (!Number.isFinite(poll) || poll < 10) return flash('Poll interval must be ≥ 10 seconds', 'err');
+    if (!Number.isFinite(poll) || poll < 10) return flash('Poll interval must be ≥ 10s', 'err');
     setSavingMailbox(true);
     try {
-      const body: { user: string; password?: string; pollIntervalSec: number } = {
-        user,
-        pollIntervalSec: Math.round(poll),
-      };
+      const body: { user: string; password?: string; pollIntervalSec: number } = { user, pollIntervalSec: Math.round(poll) };
       if (mailboxPassword.trim()) body.password = mailboxPassword;
       const res = await api.updateEmailIntake(body);
       setIntakeAddress(res.emailIntake.address ?? user);
       setIntakeHasPassword(!!res.emailIntake.hasPassword);
       setIntakePasswordHint(res.emailIntake.passwordHint ?? null);
       setIntakeRunning(!!res.emailIntake.running);
-      setIntakeEnabled(res.emailIntake.enabled);
-      if (res.emailIntake.pollIntervalSec) setPollIntervalSec(String(res.emailIntake.pollIntervalSec));
       setMailboxPassword('');
-      flash('Mailbox credentials saved' + (res.emailIntake.running ? ' — poller restarted' : ''));
+      flash('Mailbox credentials saved');
     } catch (e) { flash((e as Error).message, 'err'); }
     finally { setSavingMailbox(false); }
   };
@@ -174,354 +238,448 @@ export function AdminPage() {
       const res = await api.adminSetIntakeEmail(userId, value);
       setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, ...res.data } : u)));
       setIntakeDrafts((prev) => ({ ...prev, [userId]: res.data.intake_email ?? '' }));
-      flash(value ? `Allowed sender saved for user` : 'Allowed sender cleared');
+      flash(value ? 'Allowed sender saved' : 'Allowed sender cleared');
     } catch (e) { flash((e as Error).message, 'err'); }
   };
 
-  const selUser = users.find((u) => u.user_id === selected);
-  const usersWithSender = users.filter((u) => !!u.intake_email);
+  // ─── Derived ──────────────────────────────────────────────────────────
+
+  const selUser = users.find((u) => u.user_id === selectedUser);
+  const activeUsers = users.filter((u) => u.status === 'active');
+  const blockedUsers = users.filter((u) => u.status === 'blocked');
+  const usersWithoutOrg = activeUsers; // simplified — all active users shown as potential owners
+  const userMap = new Map(users.map((u) => [u.user_id, u]));
+
+  // ─── Tab button ───────────────────────────────────────────────────────
+
+  const TabBtn = ({ id, icon: Icon, label, count }: { id: AdminTab; icon: React.ElementType; label: string; count?: number }) => (
+    <button
+      onClick={() => setTab(id)}
+      className={cn(
+        'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+        tab === id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-secondary hover:text-foreground',
+      )}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+      {count !== undefined && <span className="ml-1 rounded-full bg-background/20 px-1.5 text-[10px] font-bold">{count}</span>}
+    </button>
+  );
 
   return (
-    <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 1100 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Admin Panel</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setTab('users')} style={{ ...btn(tab === 'users' ? T.accent : '#e5e5e5', tab === 'users' ? '#fff' : T.text) }}>Users</button>
-          <button onClick={() => setTab('create')} style={{ ...btn(tab === 'create' ? T.accent : '#e5e5e5', tab === 'create' ? '#fff' : T.text) }}>+ Create User</button>
-          <button onClick={() => setTab('email-intake')} style={{ ...btn(tab === 'email-intake' ? T.accent : '#e5e5e5', tab === 'email-intake' ? '#fff' : T.text) }}>Email Intake</button>
+    <div className="max-w-6xl px-7 py-6 font-sans">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="font-heading text-xl font-bold flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-primary" /> Platform Admin
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage users, organizations, billing, and platform settings.</p>
         </div>
+        <Badge variant="warning" className="gap-1"><Crown className="h-3 w-3" /> Super Admin</Badge>
       </div>
 
-      {msg && (
-        <div style={{
-          padding: '10px 16px', borderRadius: 8, fontSize: 13, marginBottom: 14,
-          background: msgType === 'ok' ? '#e6f7ef' : '#fef2f2',
-          color: msgType === 'ok' ? T.green : T.red,
-          border: `1px solid ${msgType === 'ok' ? '#b7e8cf' : '#fecaca'}`,
-        }}>{msg}</div>
-      )}
+      <FlashMsg msg={msg} type={msgType} />
 
-      {/* Create User Form */}
-      {tab === 'create' && (
-        <div style={card}>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Create New User</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Email *</label>
-              <input type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="user@company.com" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Name *</label>
-              <input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="John Doe" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Password *</label>
-              <input type="password" value={cPass} onChange={(e) => setCPass(e.target.value)} placeholder="Min 6 characters" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Role</label>
-              <select value={cRole} onChange={(e) => setCRole(e.target.value as 'user' | 'admin')} style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}>
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Initial Balance (₹)</label>
-              <input type="number" step="0.01" value={cBalance} onChange={(e) => setCBalance(e.target.value)} placeholder="0.00" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Allowed Sender Email</label>
-              <input type="email" value={cIntakeEmail} onChange={(e) => setCIntakeEmail(e.target.value)} placeholder="deepak.chauhan@carrum.co.in" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
-              <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>Email this user may send invoices FROM (to system intake mailbox)</div>
-            </div>
-          </div>
-          <button onClick={() => void handleCreate()} style={btn()}>Create User</button>
-        </div>
-      )}
-
-      {/* Email Intake Settings — enable/disable + per-user allowed senders */}
-      {tab === 'email-intake' && (
-        <>
-          <div style={card}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Email Intake Service</div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Service Status:</span>
-              <button onClick={() => void handleToggleIntake()}
-                style={{ ...btn(intakeEnabled ? T.red : T.green), padding: '6px 16px' }}>
-                {intakeEnabled ? 'Disable' : 'Enable'}
-              </button>
-              <span style={{
-                fontSize: 12, fontWeight: 700,
-                color: intakeEnabled ? T.green : T.red,
-              }}>{intakeEnabled ? (intakeRunning ? 'ACTIVE (polling)' : 'ACTIVE') : 'DISABLED'}</span>
-            </div>
-
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Mailbox credentials (IMAP)</div>
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 12 }}>
-              All mail settings are stored in DB from this screen — nothing in .env. Host is fixed: imap.gmail.com:993.
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Intake mailbox email</label>
-                <input
-                  type="email"
-                  value={mailboxUser}
-                  onChange={(e) => setMailboxUser(e.target.value)}
-                  placeholder="techcarrum@gmail.com"
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                />
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 mb-5">
+        {[
+          { label: 'Users', value: users.length, icon: Users },
+          { label: 'Active', value: activeUsers.length, icon: ShieldCheck },
+          { label: 'Blocked', value: blockedUsers.length, icon: CircleSlash },
+          { label: 'Organizations', value: allOrgs.length, icon: Building2 },
+          { label: 'Email Intake', value: intakeEnabled ? 'ON' : 'OFF', icon: Mail },
+        ].map(({ label, value, icon: Icon }) => (
+          <Card key={label}>
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-muted p-2"><Icon className="h-4 w-4 text-muted-foreground" /></div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider">{label}</p>
+                  <p className="text-lg font-bold text-primary font-mono">{value}</p>
+                </div>
               </div>
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>
-                  App password {intakeHasPassword ? `(saved ${intakePasswordHint ?? '••••'})` : ''}
-                </label>
-                <input
-                  type="password"
-                  value={mailboxPassword}
-                  onChange={(e) => setMailboxPassword(e.target.value)}
-                  placeholder={intakeHasPassword ? 'Leave blank to keep current' : 'xxxx xxxx xxxx xxxx'}
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                  autoComplete="new-password"
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Poll interval (seconds)</label>
-                <input
-                  type="number"
-                  min={10}
-                  max={3600}
-                  value={pollIntervalSec}
-                  onChange={(e) => setPollIntervalSec(e.target.value)}
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
-            <button onClick={() => void handleSaveMailbox()} disabled={savingMailbox} style={btn()}>
-              {savingMailbox ? 'Saving…' : 'Save mailbox credentials'}
-            </button>
-            {intakeAddress && (
-              <div style={{ fontSize: 11, color: T.faint, marginTop: 10 }}>
-                Active mailbox: <span style={{ fontFamily: T.mono, color: T.accent }}>{intakeAddress}</span>
-                {' · '}imap.gmail.com:993 · poll every {pollIntervalSec}s
-              </div>
-            )}
-          </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-          <div style={card}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Allowed Senders by User</div>
-            <div style={{ fontSize: 12, color: T.muted, marginBottom: 14 }}>
-              Assign which email each user may send invoices from. {usersWithSender.length} user(s) currently whitelisted.
-            </div>
+      {/* Tabs */}
+      <div className="flex items-center gap-2 mb-5">
+        <TabBtn id="users" icon={Users} label="Users" count={users.length} />
+        <TabBtn id="orgs" icon={Building2} label="Organizations" count={allOrgs.length} />
+        <TabBtn id="email-intake" icon={Mail} label="Email Intake" />
+      </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: `2px solid ${T.border}`, textAlign: 'left' }}>
-                  <th style={{ padding: '8px 10px' }}>User</th>
-                  <th style={{ padding: '8px 10px' }}>Status</th>
-                  <th style={{ padding: '8px 10px' }}>Allowed Sender Email</th>
-                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => {
-                  const draft = intakeDrafts[u.user_id] ?? '';
-                  const saved = u.intake_email ?? '';
-                  const dirty = draft.trim().toLowerCase() !== saved.trim().toLowerCase();
-                  return (
-                    <tr key={u.user_id} style={{ borderBottom: `1px solid ${T.border}` }}>
-                      <td style={{ padding: '10px' }}>
-                        <div style={{ fontWeight: 600 }}>{u.name}</div>
-                        <div style={{ fontSize: 11, color: T.faint }}>{u.email}</div>
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: u.status === 'active' ? T.green : T.red }}>
-                          {u.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        <input
-                          type="email"
-                          value={draft}
-                          onChange={(e) => setIntakeDrafts((prev) => ({ ...prev, [u.user_id]: e.target.value }))}
-                          placeholder="sender@company.com"
-                          style={{ ...inputStyle, width: '100%', maxWidth: 320, boxSizing: 'border-box' }}
-                        />
-                      </td>
-                      <td style={{ padding: '10px', textAlign: 'right' }}>
-                        <button
-                          onClick={() => void handleSaveIntakeEmail(u.user_id)}
-                          disabled={!dirty}
-                          style={{
-                            ...btn(dirty ? T.accent : '#ccc'),
-                            padding: '5px 12px', fontSize: 11,
-                            opacity: dirty ? 1 : 0.5, cursor: dirty ? 'pointer' : 'default',
-                          }}
-                        >Save</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {users.length === 0 && (
-                  <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: T.faint }}>No users yet — create a user first</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      <Separator className="mb-5" />
 
-      {/* User Table */}
+      {/* ═══════════════════════════════════════════════════════════════════
+       * TAB: USERS
+       * ═══════════════════════════════════════════════════════════════════ */}
       {tab === 'users' && (
         <>
-          <div style={card}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>Users ({users.length})</div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: `2px solid ${T.border}`, textAlign: 'left' }}>
-                    <th style={{ padding: '8px 10px' }}>User</th>
-                    <th style={{ padding: '8px 10px' }}>Role</th>
-                    <th style={{ padding: '8px 10px' }}>Status</th>
-                    <th style={{ padding: '8px 10px' }}>Allowed Sender</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Balance (₹)</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>OCRs</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Cost</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+          <Card className="mb-4">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" /> All Users ({users.length})</CardTitle>
+                  <CardDescription>Create accounts, manage balance, block/unblock. Click a row to see details.</CardDescription>
+                </div>
+                <Button onClick={() => setShowCreateUser(true)}><Plus className="h-4 w-4 mr-1" /> Create User</Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Balance (₹)</TableHead>
+                    <TableHead className="text-right">OCRs</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {users.map((u) => {
-                    const isSel = selected === u.user_id;
+                    const isSel = selectedUser === u.user_id;
                     return (
-                      <tr key={u.user_id} onClick={() => void selectUser(u.user_id)}
-                        style={{ borderBottom: `1px solid ${T.border}`, cursor: 'pointer', background: isSel ? T.accentSoft : 'transparent', transition: 'background 0.1s' }}>
-                        <td style={{ padding: '10px 10px' }}>
-                          <div style={{ fontWeight: 600 }}>{u.name}</div>
-                          <div style={{ fontSize: 11, color: T.faint }}>{u.email}</div>
-                        </td>
-                        <td style={{ padding: '10px 10px' }}>
-                          <span style={{
-                            padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-                            background: u.role === 'admin' ? T.accentSoft : '#f0f0f0',
-                            color: u.role === 'admin' ? T.accent : T.muted,
-                          }}>{u.role}</span>
-                        </td>
-                        <td style={{ padding: '10px 10px' }}>
-                          <span style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            fontSize: 12, fontWeight: 600,
-                            color: u.status === 'active' ? T.green : T.red,
-                          }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: u.status === 'active' ? T.green : T.red }} />
-                            {u.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 10px', fontFamily: T.mono, fontSize: 11, color: u.intake_email ? T.accent : T.faint }}>
-                          {u.intake_email || '—'}
-                        </td>
-                        <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 700, fontFamily: T.mono, fontSize: 12 }}>
-                          {formatBalance(u.role, u.token_balance)}
-                        </td>
-                        <td style={{ padding: '10px 10px', textAlign: 'right', fontFamily: T.mono, fontSize: 12 }}>{u.total_ocr_count}</td>
-                        <td style={{ padding: '10px 10px', textAlign: 'right', fontFamily: T.mono, fontSize: 12 }}>{costFmt(u.total_cost_usd)}</td>
-                        <td style={{ padding: '10px 10px', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                            {u.status === 'active'
-                              ? <button onClick={(e) => { e.stopPropagation(); void handleBlock(u.user_id); }} style={{ ...btn(T.red), padding: '4px 10px', fontSize: 11 }}>Block</button>
-                              : <button onClick={(e) => { e.stopPropagation(); void handleUnblock(u.user_id); }} style={{ ...btn(T.green), padding: '4px 10px', fontSize: 11 }}>Unblock</button>
-                            }
-                            <button onClick={(e) => { e.stopPropagation(); void handleResetPassword(u.user_id); }} style={{ ...btn('#666'), padding: '4px 10px', fontSize: 11 }}>Reset Pass</button>
-                          </div>
-                        </td>
-                      </tr>
+                      <React.Fragment key={u.user_id}>
+                        <TableRow className={cn('cursor-pointer', isSel && 'bg-secondary')} onClick={() => void selectUser(u.user_id)}>
+                          <TableCell>
+                            <div className="font-semibold">{u.name}</div>
+                            <div className="text-[11px] text-muted-foreground">{u.email}</div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={u.role === 'admin' ? 'info' : 'muted'}>{u.role}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={u.status === 'active' ? 'success' : 'danger'}>{u.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm font-bold">{formatBalance(u.role, u.token_balance)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{u.total_ocr_count}</TableCell>
+                          <TableCell className="text-right font-mono text-sm">{costFmt(u.total_cost_usd)}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+                              {u.status === 'active'
+                                ? <Button variant="destructive" size="sm" onClick={() => void handleBlock(u.user_id)}>Block</Button>
+                                : <Button variant="outline" size="sm" onClick={() => void handleUnblock(u.user_id)}>Unblock</Button>}
+                              <Button variant="outline" size="sm" onClick={() => void handleResetPassword(u.user_id)}>
+                                <Lock className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Expanded user detail */}
+                        {isSel && selUser && (
+                          <TableRow>
+                            <TableCell colSpan={7} className="bg-muted/50 p-5">
+                              <div className="grid grid-cols-4 gap-3 mb-4">
+                                {[
+                                  { label: 'Balance', value: formatBalance(selUser.role, selUser.token_balance) },
+                                  { label: 'Total OCRs', value: String(selUser.total_ocr_count) },
+                                  { label: 'Total Spent', value: costFmt(selUser.total_cost_usd) },
+                                  { label: 'Tokens Used', value: costFmt(selUser.total_tokens_used) },
+                                ].map((s) => (
+                                  <div key={s.label} className="rounded-lg bg-card border border-border p-3 text-center">
+                                    <p className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider mb-1">{s.label}</p>
+                                    <p className="text-lg font-bold font-mono text-primary">{s.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Add balance */}
+                              <div className="flex items-end gap-3 mb-4">
+                                <div>
+                                  <Label className="text-xs">Amount (₹)</Label>
+                                  <Input type="number" step="0.01" value={addAmt} onChange={(e) => setAddAmt(e.target.value)} placeholder="1.00" className="w-28" />
+                                </div>
+                                <div className="flex-1">
+                                  <Label className="text-xs">Description</Label>
+                                  <Input value={addDesc} onChange={(e) => setAddDesc(e.target.value)} placeholder="Top-up note (optional)" />
+                                </div>
+                                <Button onClick={() => void handleAddTokens()} className="bg-success hover:bg-success/90">Add Balance</Button>
+                              </div>
+
+                              {/* Transactions */}
+                              <p className="text-xs font-semibold mb-2">Transaction History</p>
+                              {txs.length > 0 ? (
+                                <Table>
+                                  <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Type</TableHead><TableHead className="text-right">Amount</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Description</TableHead></TableRow></TableHeader>
+                                  <TableBody>
+                                    {txs.slice(0, 10).map((tx) => (
+                                      <TableRow key={tx.tx_id}>
+                                        <TableCell className="text-xs font-mono text-muted-foreground">{new Date(tx.created_at).toLocaleString()}</TableCell>
+                                        <TableCell><Badge variant={tx.type === 'credit' ? 'success' : 'danger'} className="text-[10px]">{tx.type.toUpperCase()}</Badge></TableCell>
+                                        <TableCell className={cn('text-right font-mono font-bold', tx.type === 'credit' ? 'text-success' : 'text-danger')}>
+                                          {tx.type === 'credit' ? '+' : '-'}{costFmt(tx.amount)}
+                                        </TableCell>
+                                        <TableCell className="text-right font-mono">{costFmt(tx.balance_after)}</TableCell>
+                                        <TableCell className="text-xs text-muted-foreground">{tx.description}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              ) : <p className="text-xs text-muted-foreground">No transactions yet.</p>}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Selected User Detail */}
-          {selUser && (
-            <div style={card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 16 }}>{selUser.name}</div>
-                  <div style={{ fontSize: 12, color: T.faint }}>{selUser.email} · Joined {new Date(selUser.created_at).toLocaleDateString()}</div>
-                  <div style={{ fontSize: 12, marginTop: 4 }}>
-                    Allowed sender:{' '}
-                    <span style={{ fontFamily: T.mono, color: selUser.intake_email ? T.accent : T.faint }}>
-                      {selUser.intake_email || 'not set — edit in Email Intake tab'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
-                {[
-                  { label: 'Balance', value: formatBalance(selUser.role, selUser.token_balance), color: T.accent },
-                  { label: 'Total OCRs', value: String(selUser.total_ocr_count), color: T.text },
-                  { label: 'Total Spent', value: costFmt(selUser.total_cost_usd), color: T.amber },
-                  { label: 'Tokens Used', value: costFmt(selUser.total_tokens_used), color: T.red },
-                ].map((s) => (
-                  <div key={s.label} style={{ padding: '10px 14px', background: T.bg, borderRadius: 8, textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: T.muted, fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: T.mono }}>{s.value}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ display: 'flex', gap: 8, marginBottom: 18, alignItems: 'flex-end' }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Amount (₹)</label>
-                  <input type="number" step="0.01" value={addAmt} onChange={(e) => setAddAmt(e.target.value)} placeholder="1.00" style={{ ...inputStyle, width: 100 }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 4 }}>Description</label>
-                  <input value={addDesc} onChange={(e) => setAddDesc(e.target.value)} placeholder="Top-up note (optional)" style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }} />
-                </div>
-                <button onClick={() => void handleAddTokens()} style={btn(T.green)}>Add Balance</button>
-              </div>
-
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Transaction History</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ borderBottom: `2px solid ${T.border}`, textAlign: 'left' }}>
-                    <th style={{ padding: '6px 8px' }}>Date</th>
-                    <th style={{ padding: '6px 8px' }}>Type</th>
-                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>Amount</th>
-                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>Balance After</th>
-                    <th style={{ padding: '6px 8px' }}>Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {txs.map((tx) => (
-                    <tr key={tx.tx_id} style={{ borderBottom: `1px solid ${T.border}` }}>
-                      <td style={{ padding: '6px 8px', fontFamily: T.mono, fontSize: 11 }}>{new Date(tx.created_at).toLocaleString()}</td>
-                      <td style={{ padding: '6px 8px' }}>
-                        <span style={{
-                          padding: '1px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700,
-                          background: tx.type === 'credit' ? '#e6f7ef' : '#fef2f2',
-                          color: tx.type === 'credit' ? T.green : T.red,
-                        }}>{tx.type === 'credit' ? 'CREDIT' : 'DEBIT'}</span>
-                      </td>
-                      <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: tx.type === 'credit' ? T.green : T.red, fontFamily: T.mono }}>
-                        {tx.type === 'credit' ? '+' : '-'}{costFmt(tx.amount)}
-                      </td>
-                      <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: T.mono }}>{costFmt(tx.balance_after)}</td>
-                      <td style={{ padding: '6px 8px', color: T.muted }}>{tx.description}</td>
-                    </tr>
-                  ))}
-                  {txs.length === 0 && (
-                    <tr><td colSpan={5} style={{ padding: '16px 8px', textAlign: 'center', color: T.faint }}>No transactions yet</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </>
       )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+       * TAB: ORGANIZATIONS
+       * ═══════════════════════════════════════════════════════════════════ */}
+      {tab === 'orgs' && (
+        <Card className="mb-4">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2"><Building2 className="h-4 w-4" /> All Organizations ({allOrgs.length})</CardTitle>
+                <CardDescription>Create orgs, assign owners. The owner manages their own members and settings.</CardDescription>
+              </div>
+              <Button onClick={() => setShowCreateOrg(!showCreateOrg)}><Plus className="h-4 w-4 mr-1" /> Create Org</Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {/* Create Org */}
+            {showCreateOrg && (
+              <div className="mb-4 p-4 rounded-lg border border-border bg-background space-y-3">
+                <p className="text-sm font-semibold">Create New Organization</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Label>Organization Name</Label>
+                    <Input value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} placeholder="Acme Fleet Services" />
+                  </div>
+                  <div>
+                    <Label>Owner (user who will own this org)</Label>
+                    <Select value={newOrgOwner} onValueChange={setNewOrgOwner}>
+                      <SelectTrigger><SelectValue placeholder="Select owner…" /></SelectTrigger>
+                      <SelectContent>
+                        {usersWithoutOrg.map((u) => (
+                          <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => void handleCreateOrg()} disabled={creating}>
+                    {creating ? 'Creating…' : 'Create Organization'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setShowCreateOrg(false)}>Cancel</Button>
+                </div>
+              </div>
+            )}
+
+            {allOrgs.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Organization</TableHead>
+                    <TableHead>Plan</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Members</TableHead>
+                    <TableHead className="text-right">Limit</TableHead>
+                    <TableHead>Created</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allOrgs.map((org) => {
+                    const planInfo = PLAN_META[org.plan] ?? PLAN_META.free;
+                    const isSelected = selectedOrg === org.org_id;
+                    return (
+                      <React.Fragment key={org.org_id}>
+                        <TableRow
+                          className={cn('cursor-pointer hover:bg-muted/50', isSelected && 'bg-secondary')}
+                          onClick={() => void handleSelectOrg(org.org_id)}
+                        >
+                          <TableCell>
+                            <div className="font-semibold">{org.name}</div>
+                            <div className="text-[11px] text-muted-foreground font-mono">{org.slug}</div>
+                          </TableCell>
+                          <TableCell><Badge variant={planInfo.variant}>{planInfo.label}</Badge></TableCell>
+                          <TableCell><Badge variant={org.status === 'active' ? 'success' : 'danger'}>{org.status}</Badge></TableCell>
+                          <TableCell className="text-right font-mono">{org.member_count}</TableCell>
+                          <TableCell className="text-right font-mono">{org.invoice_limit?.toLocaleString()}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{new Date(org.created_at).toLocaleDateString()}</TableCell>
+                        </TableRow>
+                        {isSelected && selectedOrgMembers.length > 0 && (
+                          <TableRow>
+                            <TableCell colSpan={6} className="bg-muted/50 py-3 px-6">
+                              <p className="text-xs font-semibold mb-2">Members of {org.name}:</p>
+                              <div className="flex flex-wrap gap-2">
+                                {selectedOrgMembers.map((m) => {
+                                  const user = userMap.get(m.user_id);
+                                  const roleMeta = ROLE_META[m.org_role] ?? ROLE_META.viewer;
+                                  return (
+                                    <div key={m.user_id} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5">
+                                      <span className="text-sm font-medium">{m.user_name ?? user?.name ?? m.user_id}</span>
+                                      <Badge variant={roleMeta.variant} className="text-[10px]">{roleMeta.label}</Badge>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Building2 className="h-10 w-10 text-muted-foreground mb-3" />
+                <h3 className="font-heading text-lg font-semibold">No Organizations Yet</h3>
+                <p className="mt-1 text-sm text-muted-foreground">Click "Create Org" to set up the first organization.</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+       * TAB: EMAIL INTAKE
+       * ═══════════════════════════════════════════════════════════════════ */}
+      {tab === 'email-intake' && (
+        <>
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Mail className="h-4 w-4" /> Email Intake Service</CardTitle>
+              <CardDescription>Configure IMAP mailbox for automatic invoice ingestion.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-3 mb-5">
+                <span className="text-sm font-semibold">Service Status:</span>
+                <Button size="sm" variant={intakeEnabled ? 'destructive' : 'default'} onClick={() => void handleToggleIntake()}>
+                  {intakeEnabled ? <><PowerOff className="h-3.5 w-3.5 mr-1" /> Disable</> : <><Power className="h-3.5 w-3.5 mr-1" /> Enable</>}
+                </Button>
+                <Badge variant={intakeEnabled ? 'success' : 'danger'}>
+                  {intakeEnabled ? (intakeRunning ? 'ACTIVE (polling)' : 'ENABLED') : 'DISABLED'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div>
+                  <Label>Intake Mailbox Email</Label>
+                  <Input type="email" value={mailboxUser} onChange={(e) => setMailboxUser(e.target.value)} placeholder="techcarrum@gmail.com" />
+                </div>
+                <div>
+                  <Label>App Password {intakeHasPassword ? `(saved ${intakePasswordHint ?? '••••'})` : ''}</Label>
+                  <Input type="password" value={mailboxPassword} onChange={(e) => setMailboxPassword(e.target.value)} placeholder={intakeHasPassword ? 'Leave blank to keep' : 'xxxx xxxx xxxx xxxx'} autoComplete="new-password" />
+                </div>
+                <div>
+                  <Label>Poll Interval (seconds)</Label>
+                  <Input type="number" min={10} max={3600} value={pollIntervalSec} onChange={(e) => setPollIntervalSec(e.target.value)} />
+                </div>
+              </div>
+              <Button onClick={() => void handleSaveMailbox()} disabled={savingMailbox}>
+                {savingMailbox ? 'Saving…' : 'Save Mailbox Credentials'}
+              </Button>
+              {intakeAddress && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Active: <code className="font-mono text-foreground">{intakeAddress}</code> · imap.gmail.com:993 · poll every {pollIntervalSec}s
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Allowed Senders by User</CardTitle>
+              <CardDescription>Assign which email each user may send invoices from.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Allowed Sender Email</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((u) => {
+                    const draft = intakeDrafts[u.user_id] ?? '';
+                    const saved = u.intake_email ?? '';
+                    const dirty = draft.trim().toLowerCase() !== saved.trim().toLowerCase();
+                    return (
+                      <TableRow key={u.user_id}>
+                        <TableCell>
+                          <div className="font-semibold">{u.name}</div>
+                          <div className="text-[11px] text-muted-foreground">{u.email}</div>
+                        </TableCell>
+                        <TableCell><Badge variant={u.status === 'active' ? 'success' : 'danger'}>{u.status}</Badge></TableCell>
+                        <TableCell>
+                          <Input
+                            type="email"
+                            value={draft}
+                            onChange={(e) => setIntakeDrafts((prev) => ({ ...prev, [u.user_id]: e.target.value }))}
+                            placeholder="sender@company.com"
+                            className="max-w-xs"
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" onClick={() => void handleSaveIntakeEmail(u.user_id)} disabled={!dirty}>Save</Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+       * CREATE USER DIALOG
+       * ═══════════════════════════════════════════════════════════════════ */}
+      <Dialog open={showCreateUser} onOpenChange={setShowCreateUser}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create New User</DialogTitle>
+            <DialogDescription>Create an account. You can then create an org and assign this user as owner.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Email *</Label><Input type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="user@company.com" /></div>
+              <div><Label>Name *</Label><Input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="John Doe" /></div>
+              <div><Label>Password *</Label><Input type="password" value={cPass} onChange={(e) => setCPass(e.target.value)} placeholder="Min 6 characters" /></div>
+              <div>
+                <Label>System Role</Label>
+                <Select value={cRole} onValueChange={(v) => setCRole(v as 'user' | 'admin')}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">User (regular)</SelectItem>
+                    <SelectItem value="admin">Admin (super admin)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Initial Balance (₹)</Label><Input type="number" step="0.01" value={cBalance} onChange={(e) => setCBalance(e.target.value)} placeholder="0.00" /></div>
+              <div>
+                <Label>Allowed Sender Email</Label>
+                <Input type="email" value={cIntakeEmail} onChange={(e) => setCIntakeEmail(e.target.value)} placeholder="user@fleet.com" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowCreateUser(false)}>Cancel</Button>
+              <Button onClick={() => void handleCreateUser()}><UserPlus className="h-4 w-4 mr-1" /> Create User</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

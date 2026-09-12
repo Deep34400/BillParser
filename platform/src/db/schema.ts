@@ -15,6 +15,8 @@ export { AppSettingsModel as AppSettings, type AppSettingsAttributes } from '../
 export { ProviderCredential, type ProviderCredentialAttributes } from '../shared/models/index.js';
 export { Organization, type OrganizationAttributes } from '../tenant/models/index.js';
 export { OrgMember, type OrgMemberAttributes } from '../tenant/models/index.js';
+export { AuditLog, type AuditLogAttributes } from '../audit/models/index.js';
+export { WebhookEndpoint, type WebhookEndpointAttributes } from '../webhook/models/index.js';
 
 // Init functions
 import { initBillModel, initBillPartModel, Bill, BillPart } from '../ocr/models/index.js';
@@ -23,6 +25,8 @@ import { initVendorModel, Vendor } from '../vendor/models/index.js';
 import { initAppSettingsModel } from '../shared/models/index.js';
 import { initProviderCredentialModel } from '../shared/models/index.js';
 import { initOrganizationModel, initOrgMemberModel, Organization, OrgMember } from '../tenant/models/index.js';
+import { initAuditLogModel } from '../audit/models/index.js';
+import { initWebhookEndpointModel } from '../webhook/models/index.js';
 
 export function initModels(seq: Sequelize): void {
   // Order matters: referenced tables first
@@ -36,6 +40,8 @@ export function initModels(seq: Sequelize): void {
   initTokenTransactionModel(seq);
   initAppSettingsModel(seq);
   initProviderCredentialModel(seq);
+  initAuditLogModel(seq);
+  initWebhookEndpointModel(seq);
 
   // ─── Associations ─────────────────────────────────────────────────────
 

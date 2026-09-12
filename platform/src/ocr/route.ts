@@ -16,6 +16,7 @@ import {
   getInvoiceFile, uploadInvoices, importFromUrls, reextractInvoice, cancelInvoice,
   processDraft, updateInvoice, deleteInvoice, bulkAction, reconcileRange,
   statelessParse, syncOcr, asyncOcr,
+  submitForApproval, approveInvoice, rejectInvoice,
   type UploadedFile,
 } from './service/invoiceService.js';
 import { exportInvoicesCsv, exportLineItemsCsv } from './service/exportService.js';
@@ -213,6 +214,44 @@ export async function billRoutes(app: FastifyInstance) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ error: `Process OCR failed: ${msg}` });
+    }
+  });
+
+  // ── Approval Workflow ───────────────────────────────────────────────────
+
+  app.post('/api/invoices/:id/submit-approval', async (req, reply) => {
+    try {
+      const { id } = req.params as { id: string };
+      await submitForApproval(id);
+      return { success: true, message: 'Submitted for approval' };
+    } catch (err) {
+      const code = (err as any)?.statusCode ?? 500;
+      return reply.code(code).send({ success: false, message: (err as Error).message });
+    }
+  });
+
+  app.post('/api/invoices/:id/approve', async (req, reply) => {
+    try {
+      if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
+      const { id } = req.params as { id: string };
+      await approveInvoice(id, req.appUser.user_id);
+      return { success: true, message: 'Invoice approved' };
+    } catch (err) {
+      const code = (err as any)?.statusCode ?? 500;
+      return reply.code(code).send({ success: false, message: (err as Error).message });
+    }
+  });
+
+  app.post('/api/invoices/:id/reject', async (req, reply) => {
+    try {
+      if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
+      const { id } = req.params as { id: string };
+      const body = req.body as { reason?: string };
+      await rejectInvoice(id, req.appUser.user_id, body.reason ?? '');
+      return { success: true, message: 'Invoice rejected' };
+    } catch (err) {
+      const code = (err as any)?.statusCode ?? 500;
+      return reply.code(code).send({ success: false, message: (err as Error).message });
     }
   });
 

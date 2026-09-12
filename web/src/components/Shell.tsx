@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, LogOut,
+  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, Building2, LogOut,
 } from 'lucide-react';
 import { api, type SessionUser } from '../api/client.js';
 import carrumLogo from '../assets/carrum-logo.svg';
@@ -19,9 +19,11 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { label: 'Organization', to: '/organization', icon: Building2 },
   { label: 'Settings', to: '/settings', icon: Settings },
   { label: 'Account', to: '/account', icon: User },
 ];
+
 
 const ADMIN_NAV = { label: 'Admin', to: '/admin', icon: Shield };
 
@@ -97,7 +99,14 @@ export function Shell({ children, user, onLogout, onUserUpdate }: Props) {
 
         {/* User footer */}
         <div className="mt-auto border-t border-border p-4">
-          <p className="text-xs font-semibold text-foreground truncate">{liveUser.name}</p>
+          <div className="flex items-center gap-2 mb-0.5">
+            <p className="text-xs font-semibold text-foreground truncate">{liveUser.name}</p>
+            {isAdmin && (
+              <span className="inline-flex items-center rounded-full bg-warning/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-warning border border-warning/20">
+                Super Admin
+              </span>
+            )}
+          </div>
           <p className="text-[11px] text-faint truncate">{liveUser.email}</p>
           <Button variant="outline" size="sm" className="mt-2.5 w-full gap-2" onClick={onLogout}>
             <LogOut className="h-3.5 w-3.5" />

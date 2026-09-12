@@ -16,6 +16,7 @@ import { Card } from '@/components/ui/card.js';
 import { Textarea } from '@/components/ui/textarea.js';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
 import { EmptyState } from '@/components/ui/empty-state.js';
+import { hasUnlimitedBalance, balanceNumber } from '../lib/balance.js';
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -90,6 +91,12 @@ export function InvoicesPage() {
   const [batchName, setBatchName] = useState('');
   const [importText, setImportText] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Balance check: disable uploads when insufficient
+  const sessionUser = (() => { try { return JSON.parse(localStorage.getItem('session_user') ?? '{}'); } catch { return {}; } })();
+  const unlimited = hasUnlimitedBalance(sessionUser.role ?? 'user', sessionUser.token_balance);
+  const balance = balanceNumber(sessionUser.role ?? 'user', sessionUser.token_balance);
+  const canUpload = unlimited || balance > 0;
 
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -346,8 +353,8 @@ export function InvoicesPage() {
             <Download className="h-4 w-4" /> Items
           </Button>
 
-          <Button onClick={() => setShowUpload((v) => !v)}>
-            <Upload className="h-4 w-4" /> Upload bills
+          <Button onClick={() => setShowUpload((v) => !v)} disabled={!canUpload} title={!canUpload ? 'Insufficient balance — contact admin to add points' : undefined}>
+            <Upload className="h-4 w-4" /> {canUpload ? 'Upload bills' : 'No balance'}
           </Button>
         </div>
       </div>
@@ -559,8 +566,8 @@ export function InvoicesPage() {
                         <EmptyState
                           icon={<Upload className="h-10 w-10" />}
                           title="No invoices yet"
-                          description="Upload your first invoice to get started."
-                          action={<Button onClick={() => setShowUpload(true)}>Upload bills</Button>}
+                          description={canUpload ? "Upload your first invoice to get started." : "Insufficient balance — contact admin to add points before uploading."}
+                          action={canUpload ? <Button onClick={() => setShowUpload(true)}>Upload bills</Button> : undefined}
                         />
                       ) : (
                         <EmptyState title="No invoices match this filter" />
@@ -590,6 +597,15 @@ export function InvoicesPage() {
                           <StatusDot status={row.status} />
                           {isDuplicate(row) && (
                             <Badge variant="warning" className="text-[9px] px-1.5 py-0">DUP</Badge>
+                          )}
+                          {row.approvalStatus === 'pending' && (
+                            <Badge variant="warning" className="text-[9px] px-1.5 py-0">PENDING APPROVAL</Badge>
+                          )}
+                          {row.approvalStatus === 'approved' && (
+                            <Badge variant="success" className="text-[9px] px-1.5 py-0">APPROVED</Badge>
+                          )}
+                          {row.approvalStatus === 'rejected' && (
+                            <Badge variant="danger" className="text-[9px] px-1.5 py-0" title={row.rejectionReason ?? ''}>REJECTED</Badge>
                           )}
                           {(row.status === 'PROCESSING' || row.status === 'PENDING') && (
                             <Button variant="outline" size="sm" className="h-5 px-2 text-[11px] text-danger border-danger/30"

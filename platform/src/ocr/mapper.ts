@@ -245,6 +245,10 @@ export interface FrontendInvoice {
   reviewReasons?: string[] | null;
   reviewCodes?: string[] | null;
   totalReconciliation?: import('./transformer/reconcileTotal.js').TotalReconciliation | null;
+  approvalStatus?: string | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  rejectionReason?: string | null;
   fallbackReason?: string | null;
   fallbackAttempts?: number | null;
   fallbackHistory?: Array<{
@@ -437,6 +441,10 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
       ?? (bill.parsed_data ? computeReview(bill.parsed_data).codes : null),
     totalReconciliation: bill.total_reconciliation
       ?? (bill.parsed_data ? reconcileInvoiceTotal(bill.parsed_data) : null),
+    approvalStatus: bill.approval_status ?? 'not_required',
+    approvedBy: bill.approved_by ?? null,
+    approvedAt: bill.approved_at ?? null,
+    rejectionReason: bill.rejection_reason ?? null,
     fallbackReason: bill.processing_status?.startsWith('FALLBACK:')
       ? bill.processing_status.slice('FALLBACK:'.length).trim()
       : null,

@@ -13,6 +13,7 @@ import {
 } from './repository.js';
 import type { OrgRole } from './models/index.js';
 import { NotFoundError, ValidationError, ForbiddenError } from '../shared/errors.js';
+import { getUserByEmail } from '../users/repository.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -212,4 +213,21 @@ export async function removeOrgMember(
 /** Get the user's current org membership (or null). */
 export async function getUserMembership(userId: string): Promise<OrgMemberDoc | null> {
   return getMembership(userId);
+}
+
+/**
+ * Invite a member by email (for org owners/admins who can't access admin user list).
+ * Looks up the user by email, then delegates to inviteMember.
+ */
+export async function inviteMemberByEmail(
+  orgId: string,
+  callerRole: OrgRole,
+  email: string,
+  role: OrgRole = 'viewer',
+): Promise<OrgMemberDoc> {
+  const user = await getUserByEmail(email);
+  if (!user) {
+    throw new NotFoundError('User', email);
+  }
+  return inviteMember(orgId, callerRole, user.user_id, role);
 }

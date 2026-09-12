@@ -67,6 +67,10 @@ export interface Invoice {
   lineItems?: LineItem[]; runs?: ExtractionRun[];
   reviewReasons?: string[] | null;
   reviewCodes?: string[] | null;
+  approvalStatus?: 'not_required' | 'pending' | 'approved' | 'rejected' | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  rejectionReason?: string | null;
   totalReconciliation?: {
     matched: boolean; calculated_total: number; grand_total_invoice: number | null;
     difference: number | null; tolerance: 2;

@@ -67,6 +67,55 @@ export interface UserInfo extends SessionUser {
 // Keep backward compat alias
 export type AccountInfo = SessionUser;
 
+// ─── Organization types ─────────────────────────────────────────────────────
+
+export type OrgRole = 'owner' | 'admin' | 'reviewer' | 'viewer' | 'api_user';
+
+export interface OrgInfo {
+  org_id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  status: string;
+  settings: Record<string, unknown> | null;
+  invoice_limit: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrgMemberInfo {
+  org_id: string;
+  user_id: string;
+  org_role: OrgRole;
+  joined_at: string;
+  user_name?: string;
+  user_email?: string;
+}
+
+export interface WebhookEndpointInfo {
+  endpoint_id: string;
+  org_id: string;
+  url: string;
+  events: string[];
+  secret: string;
+  active: boolean;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuditLogEntry {
+  log_id: string;
+  org_id: string | null;
+  user_id: string | null;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  details: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
 export const api = {
   config: () => j<AppConfig>('/api/config'),
   list: (qs: string) => j<{ invoices: Invoice[]; total: number; page: number; pageSize: number; totalPages: number }>(`/api/invoices${qs}`),
@@ -79,6 +128,9 @@ export const api = {
   },
   reextract: (id: string, provider?: string) => j(`/api/invoices/${id}/reextract`, { method: 'POST', body: JSON.stringify({ provider }) }),
   cancel: (id: string) => j(`/api/invoices/${id}/cancel`, { method: 'POST', body: '{}' }),
+  submitForApproval: (id: string) => j<{ success: boolean }>(`/api/invoices/${id}/submit-approval`, { method: 'POST', body: '{}' }),
+  approve: (id: string) => j<{ success: boolean }>(`/api/invoices/${id}/approve`, { method: 'POST', body: '{}' }),
+  reject: (id: string, reason: string) => j<{ success: boolean }>(`/api/invoices/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   processOcr: (id: string) => j<{ ok: boolean }>(`/api/invoices/${id}/process-ocr`, { method: 'POST', body: '{}' }),
   bakeoff: (id: string) => j<{ runs: ExtractionRun[] }>(`/api/invoices/${id}/bakeoff`, { method: 'POST' }),
   applyRun: (id: string, runId: string) => j(`/api/invoices/${id}/apply-run`, { method: 'POST', body: JSON.stringify({ runId }) }),
@@ -164,6 +216,58 @@ export const api = {
     j<{ success: boolean; data: UserInfo }>(`/api/admin/users/${id}/intake-email`, {
       method: 'PATCH', body: JSON.stringify({ intake_email }),
     }),
+
+  // ─── Organization (multi-tenancy) ────────────────────────────────────────
+  createOrg: (name: string, ownerUserId?: string) =>
+    j<{ success: boolean; data: OrgInfo }>('/api/orgs', { method: 'POST', body: JSON.stringify({ name, ownerUserId }) }),
+  getMyOrg: () =>
+    j<{ success: boolean; data: (OrgInfo & { role: OrgRole }) | null; isSuperAdmin?: boolean }>('/api/orgs/me'),
+  updateOrg: (updates: { name?: string; settings?: Record<string, unknown> }) =>
+    j<{ success: boolean; data: OrgInfo }>('/api/orgs', { method: 'PATCH', body: JSON.stringify(updates) }),
+  orgMembers: () =>
+    j<{ success: boolean; data: OrgMemberInfo[] }>('/api/orgs/members'),
+  orgUsage: () =>
+    j<{ success: boolean; data: { currentMonth: number; limit: number; percentage: number; remaining: number } }>('/api/orgs/usage'),
+  inviteMember: (userId: string, role: OrgRole = 'viewer') =>
+    j<{ success: boolean; data: OrgMemberInfo }>('/api/orgs/members', { method: 'POST', body: JSON.stringify({ userId, role }) }),
+  inviteMemberByEmail: (email: string, role: OrgRole = 'viewer') =>
+    j<{ success: boolean; data: OrgMemberInfo }>('/api/orgs/members', { method: 'POST', body: JSON.stringify({ email, role }) }),
+  changeMemberRole: (userId: string, role: OrgRole) =>
+    j<{ success: boolean }>(`/api/orgs/members/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  removeMember: (userId: string) =>
+    j<{ success: boolean }>(`/api/orgs/members/${userId}`, { method: 'DELETE' }),
+
+  // ─── Admin: Organization Management ─────────────────────────────────────
+  adminListOrgs: () =>
+    j<{ success: boolean; data: (OrgInfo & { member_count: number })[] }>('/api/admin/orgs'),
+  adminGetOrg: (orgId: string) =>
+    j<{ success: boolean; data: OrgInfo & { members: OrgMemberInfo[] } }>(`/api/admin/orgs/${orgId}`),
+  adminUpdateOrg: (orgId: string, updates: { name?: string; plan?: string; status?: string }) =>
+    j<{ success: boolean; data: OrgInfo }>(`/api/admin/orgs/${orgId}`, { method: 'PATCH', body: JSON.stringify(updates) }),
+  adminOrgMembers: (orgId: string) =>
+    j<{ success: boolean; data: OrgMemberInfo[] }>(`/api/admin/orgs/${orgId}/members`),
+
+  // ─── Webhooks ───────────────────────────────────────────────────────────
+  listWebhooks: () =>
+    j<{ success: boolean; data: WebhookEndpointInfo[]; metadata: { availableEvents: string[] } }>('/api/webhooks'),
+  createWebhook: (url: string, events: string[], description?: string) =>
+    j<{ success: boolean; data: WebhookEndpointInfo }>('/api/webhooks', {
+      method: 'POST', body: JSON.stringify({ url, events, description }),
+    }),
+  toggleWebhook: (id: string, active: boolean) =>
+    j<{ success: boolean }>(`/api/webhooks/${id}/toggle`, { method: 'PATCH', body: JSON.stringify({ active }) }),
+  deleteWebhook: (id: string) =>
+    j<{ success: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
+
+  // ─── Audit Logs ─────────────────────────────────────────────────────────
+  auditLogs: (params?: { action?: string; limit?: number; offset?: number }) => {
+    const p = new URLSearchParams();
+    if (params?.action) p.set('action', params.action);
+    if (params?.limit) p.set('limit', String(params.limit));
+    if (params?.offset) p.set('offset', String(params.offset));
+    const qs = p.toString();
+    return j<{ success: boolean; data: AuditLogEntry[]; metadata: { total: number } }>(`/api/audit/logs${qs ? '?' + qs : ''}`);
+  },
 
   // ─── Email Intake Config ─────────────────────────────────────────────────
   updateEmailIntake: (body: {

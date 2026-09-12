@@ -279,6 +279,15 @@ export interface BillDoc {
    */
   fx_rate_usd_inr?: number | null;
 
+  // ─── Approval workflow ──────────────────────────────────────────────────────
+  /** Approval status: 'not_required' | 'pending' | 'approved' | 'rejected' */
+  approval_status?: string;
+  /** User ID who approved/rejected */
+  approved_by?: string | null;
+  /** Timestamp of approval/rejection */
+  approved_at?: string | null;
+  /** Reason for rejection (filled only when rejected) */
+  rejection_reason?: string | null;
 
   schema_version: number;
 

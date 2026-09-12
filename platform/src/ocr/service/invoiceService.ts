@@ -24,8 +24,9 @@ import { upsertVendorFromInvoice } from '../../vendor/vendorService.js';
 import { deductTokens, trackOcrCost } from '../../users/service.js';
 import { reconcileBillsInCreatedAtRange } from './reconcileRange.js';
 import {
-  NotFoundError, ValidationError, InsufficientBalanceError, UnsupportedFileError,
+  NotFoundError, ValidationError, InsufficientBalanceError, UnsupportedFileError, ForbiddenError,
 } from '../../shared/errors.js';
+import { enforceUsageLimit } from '../../tenant/usage.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -357,6 +358,11 @@ export async function uploadInvoices(files: UploadedFile[], userId?: string, org
     return { created: [], duplicates: [], rejected: [{ name: '(none)', reason: 'No files in upload' }] };
   }
 
+  // Enforce plan usage limit if user belongs to an org
+  if (orgId) {
+    await enforceUsageLimit(orgId, files.length);
+  }
+
   for (const file of files) {
     if (!file.buf?.length) {
       rejected.push({ name: file.name, reason: 'Empty file (0 bytes)' });
@@ -633,4 +639,54 @@ export async function asyncOcr(
   processInBackground(billId, buf, 'api-upload.pdf', publicUrl, storagePath, userId);
 
   return { billId };
+}
+
+// ─── Approval Workflow ──────────────────────────────────────────────────────
+
+/** Submit a completed invoice for approval. Sets status to 'pending'. */
+export async function submitForApproval(billId: string): Promise<void> {
+  const bill = await getInvoice(billId);
+  if (bill.ocr_status !== 'OCR_COMPLETED' && bill.ocr_status !== 'NEED_REVIEW' && bill.ocr_status !== 'VERIFIED') {
+    throw new ValidationError(`Cannot submit for approval — invoice is ${bill.ocr_status}`);
+  }
+  await updateBill(billId, {
+    approval_status: 'pending',
+    approved_by: null,
+    approved_at: null,
+    rejection_reason: null,
+  });
+  cacheInvalidate();
+}
+
+/** Approve an invoice. */
+export async function approveInvoice(billId: string, approvedBy: string): Promise<void> {
+  const bill = await getInvoice(billId);
+  if ((bill as any).approval_status !== 'pending') {
+    throw new ValidationError('Invoice is not pending approval');
+  }
+  await updateBill(billId, {
+    approval_status: 'approved',
+    approved_by: approvedBy,
+    approved_at: new Date().toISOString(),
+    rejection_reason: null,
+  });
+  cacheInvalidate();
+}
+
+/** Reject an invoice with a reason. */
+export async function rejectInvoice(billId: string, rejectedBy: string, reason: string): Promise<void> {
+  const bill = await getInvoice(billId);
+  if ((bill as any).approval_status !== 'pending') {
+    throw new ValidationError('Invoice is not pending approval');
+  }
+  if (!reason?.trim()) {
+    throw new ValidationError('Rejection reason is required');
+  }
+  await updateBill(billId, {
+    approval_status: 'rejected',
+    approved_by: rejectedBy,
+    approved_at: new Date().toISOString(),
+    rejection_reason: reason.trim(),
+  });
+  cacheInvalidate();
 }

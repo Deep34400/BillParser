@@ -4,6 +4,9 @@
 import { DataTypes, Model, type Sequelize, type Optional } from 'sequelize';
 import { BILL_TYPES, OCR_STATUSES } from '../../shared/constants.js';
 
+export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected', 'not_required'] as const;
+export type ApprovalStatus = typeof APPROVAL_STATUSES[number];
+
 export interface BillAttributes {
   billId: string;
   orgId: string | null;
@@ -82,6 +85,10 @@ export interface BillAttributes {
   inputRatePer1m: number | null;
   outputRatePer1m: number | null;
   fxRateUsdInr: number | null;
+  approvalStatus: string;
+  approvedBy: string | null;
+  approvedAt: Date | null;
+  rejectionReason: string | null;
   schemaVersion: number;
   createdAt: Date;
   updatedAt: Date;
@@ -165,6 +172,10 @@ export class Bill extends Model<BillAttributes> implements BillAttributes {
   declare inputRatePer1m: number | null;
   declare outputRatePer1m: number | null;
   declare fxRateUsdInr: number | null;
+  declare approvalStatus: string;
+  declare approvedBy: string | null;
+  declare approvedAt: Date | null;
+  declare rejectionReason: string | null;
   declare schemaVersion: number;
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -249,6 +260,10 @@ export function initBillModel(seq: Sequelize): void {
     inputRatePer1m: { type: DataTypes.DECIMAL(18, 10), field: 'input_rate_per_1m' },
     outputRatePer1m: { type: DataTypes.DECIMAL(18, 10), field: 'output_rate_per_1m' },
     fxRateUsdInr: { type: DataTypes.DECIMAL(10, 4), field: 'fx_rate_usd_inr' },
+    approvalStatus: { type: DataTypes.TEXT, allowNull: false, defaultValue: 'not_required', field: 'approval_status', validate: { isIn: [APPROVAL_STATUSES as unknown as string[]] } },
+    approvedBy: { type: DataTypes.TEXT, field: 'approved_by' },
+    approvedAt: { type: DataTypes.DATE, field: 'approved_at' },
+    rejectionReason: { type: DataTypes.TEXT, field: 'rejection_reason' },
     schemaVersion: { type: DataTypes.INTEGER, allowNull: false, field: 'schema_version' },
     createdAt: { type: DataTypes.DATE, allowNull: false, field: 'created_at' },
     updatedAt: { type: DataTypes.DATE, allowNull: false, field: 'updated_at' },

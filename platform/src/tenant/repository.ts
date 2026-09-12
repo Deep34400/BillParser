@@ -3,6 +3,7 @@
  */
 import { Organization, OrgMember } from './models/index.js';
 import type { OrgRole } from './models/index.js';
+import { User } from '../users/models/user.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,9 @@ export interface OrgMemberDoc {
   user_id: string;
   org_role: OrgRole;
   joined_at: string;
+  /** Populated via JOIN when listing members — not always present. */
+  user_name?: string;
+  user_email?: string;
 }
 
 // ─── Row ↔ Doc mapping ─────────────────────────────────────────────────────
@@ -110,8 +114,16 @@ export async function getMembership(userId: string): Promise<OrgMemberDoc | null
 }
 
 export async function getMembersOfOrg(orgId: string): Promise<OrgMemberDoc[]> {
-  const rows = await OrgMember.findAll({ where: { orgId } });
-  return rows.map(memberRowToDoc);
+  const rows = await OrgMember.findAll({
+    where: { orgId },
+    include: [{ model: User, as: 'user', attributes: ['name', 'email'], required: false }],
+  });
+  return rows.map((row) => {
+    const doc = memberRowToDoc(row);
+    const u = (row as any).user;
+    if (u) { doc.user_name = u.name; doc.user_email = u.email; }
+    return doc;
+  });
 }
 
 export async function updateMemberRole(orgId: string, userId: string, role: OrgRole): Promise<void> {
@@ -124,4 +136,10 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
 
 export async function countMembers(orgId: string): Promise<number> {
   return OrgMember.count({ where: { orgId } });
+}
+
+/** List all organizations (super admin only). */
+export async function listAllOrgs(): Promise<OrgDoc[]> {
+  const rows = await Organization.findAll({ order: [['createdAt', 'DESC']] });
+  return rows.map(orgRowToDoc);
 }
