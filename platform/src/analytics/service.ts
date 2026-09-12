@@ -4,6 +4,7 @@
  */
 import { fetchAllBills, type BillDoc } from './repository.js';
 import { getSettings } from '../shared/settings.js';
+import { toNum } from '../shared/numbers.js';
 import { isJunkVendorName } from '../ocr/transformer/normalize/vendor.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -78,11 +79,11 @@ export async function computeKpis(): Promise<KpiResult> {
 
       if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
       completedCount++;
-      const amount = bill.grand_total_amount ?? 0;
+      const amount = toNum(bill.grand_total_amount) ?? 0;
       totalSpend += amount;
-      totalParts += bill.parts_amount ?? 0;
-      totalLabour += bill.labour_amount ?? 0;
-      totalTax += bill.total_tax_amount ?? 0;
+      totalParts += toNum(bill.parts_amount) ?? 0;
+      totalLabour += toNum(bill.labour_amount) ?? 0;
+      totalTax += toNum(bill.total_tax_amount) ?? 0;
       if (bill.confidence_score != null) confidenceSum += bill.confidence_score;
 
       const vendor = bill.vendor_name ?? bill.company_name ?? 'Unknown';
@@ -128,10 +129,10 @@ export async function getVehicleSpend(vehicleId?: string): Promise<VehicleSpendS
       total_bills: 0, total_amount: 0, parts_amount: 0, labour_amount: 0, total_tax: 0,
     };
     existing.total_bills++;
-    existing.total_amount += bill.grand_total_amount ?? 0;
-    existing.parts_amount += bill.parts_amount ?? 0;
-    existing.labour_amount += bill.labour_amount ?? 0;
-    existing.total_tax += bill.total_tax_amount ?? 0;
+    existing.total_amount += toNum(bill.grand_total_amount) ?? 0;
+    existing.parts_amount += toNum(bill.parts_amount) ?? 0;
+    existing.labour_amount += toNum(bill.labour_amount) ?? 0;
+    existing.total_tax += toNum(bill.total_tax_amount) ?? 0;
     byVehicle.set(vid, existing);
   }
 

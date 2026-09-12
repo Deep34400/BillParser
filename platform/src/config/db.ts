@@ -9,9 +9,12 @@ import pg from 'pg';
 import { env } from './env.js';
 
 // pg returns NUMERIC (oid 1700) as strings by default.
-// Override globally so every query returns JS numbers.
+// Bind the same `pg` instance Sequelize uses so the parser actually applies.
 const NUMERIC_OID = 1700;
-pg.types.setTypeParser(NUMERIC_OID, (val: string) => parseFloat(val));
+pg.types.setTypeParser(NUMERIC_OID, (val: string) => {
+  const n = parseFloat(val);
+  return Number.isFinite(n) ? n : null;
+});
 
 let _sequelize: Sequelize | undefined;
 
@@ -19,6 +22,7 @@ export function sequelize(): Sequelize {
   if (!_sequelize) {
     _sequelize = new Sequelize(env.databaseUrl, {
       dialect: 'postgres',
+      dialectModule: pg,
       logging: false,
       pool: {
         max: 2,
