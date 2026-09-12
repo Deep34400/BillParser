@@ -6,9 +6,10 @@ import type { UserDoc } from './repository.js';
 
 /** Public user view for authenticated users — hides password + api key internals. */
 export function clientUserView(user: UserDoc) {
+  const raw = Number(user.token_balance);
   const unlimited = user.role === 'admin'
     || user.token_balance === Infinity
-    || !Number.isFinite(user.token_balance);
+    || !Number.isFinite(raw);
 
   return {
     user_id: user.user_id,
@@ -16,7 +17,7 @@ export function clientUserView(user: UserDoc) {
     name: user.name,
     role: user.role,
     status: user.status,
-    token_balance: unlimited ? null : user.token_balance,
+    token_balance: unlimited ? null : raw,
     total_tokens_used: user.total_tokens_used,
     total_ocr_count: user.total_ocr_count,
     total_cost_usd: user.total_cost_usd,

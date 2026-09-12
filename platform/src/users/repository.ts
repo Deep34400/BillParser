@@ -6,6 +6,7 @@ import { v4 as uuid } from 'uuid';
 import { Op, literal } from 'sequelize';
 import { sequelize } from '../config/db.js';
 import { User, ApiKey, TokenTransaction } from './models/index.js';
+import { toNum } from '../shared/numbers.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -63,10 +64,10 @@ function userRowToDoc(row: User): UserDoc {
     status: row.status as UserStatus,
     api_key_hash: row.apiKeyHash,
     api_key_prefix: row.apiKeyPrefix,
-    token_balance: row.tokenBalance,
-    total_tokens_used: row.totalTokensUsed,
+    token_balance: toNum(row.tokenBalance) ?? 0,
+    total_tokens_used: toNum(row.totalTokensUsed) ?? 0,
     total_ocr_count: row.totalOcrCount,
-    total_cost_usd: row.totalCostUsd,
+    total_cost_usd: toNum(row.totalCostUsd) ?? 0,
     intake_email: row.intakeEmail ?? undefined,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
@@ -90,8 +91,8 @@ function txRowToDoc(row: TokenTransaction): TokenTransactionDoc {
     tx_id: row.txId,
     user_id: row.userId,
     type: row.type as 'credit' | 'debit',
-    amount: row.amount,
-    balance_after: row.balanceAfter,
+    amount: toNum(row.amount) ?? 0,
+    balance_after: toNum(row.balanceAfter) ?? 0,
     description: row.description,
     reference_id: row.referenceId,
     created_at: row.createdAt.toISOString(),

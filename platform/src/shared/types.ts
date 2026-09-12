@@ -288,6 +288,10 @@ export interface BillDoc {
   approved_at?: string | null;
   /** Reason for rejection (filled only when rejected) */
   rejection_reason?: string | null;
+  /** User who submitted the invoice into the approval cycle */
+  submitted_by?: string | null;
+  /** Current hop in the cycle: 'admin' (org admin) then 'owner' */
+  approval_step?: string | null;
 
   schema_version: number;
 

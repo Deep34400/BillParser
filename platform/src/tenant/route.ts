@@ -17,6 +17,7 @@ import { getUsageInfo } from './usage.js';
 import { listAllOrgs, countMembers } from './repository.js';
 import { requireAdmin } from '../middleware/auth.js';
 import type { OrgRole } from './models/index.js';
+import { registerUser } from '../users/service.js';
 
 /** Helper: check if request user is a system-level admin. */
 function isSuperAdmin(req: { appUser?: { role: string } }): boolean {
@@ -182,6 +183,31 @@ export async function tenantRoutes(app: FastifyInstance) {
         return reply.code(400).send({ success: false, message: 'email or userId is required' });
       }
       return { success: true, data: member };
+    } catch (err) {
+      const code = (err as any)?.statusCode ?? 500;
+      return reply.code(code).send({ success: false, message: (err as Error).message });
+    }
+  });
+
+  /** POST /api/orgs/members/create — org admin creates a new user account and adds to org. */
+  app.post('/api/orgs/members/create', async (req, reply) => {
+    try {
+      if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
+      if (!req.orgId || !req.orgRole) return reply.code(404).send({ success: false, message: 'No organization' });
+      if (req.orgRole !== 'owner' && req.orgRole !== 'admin') {
+        return reply.code(403).send({ success: false, message: 'Only org owner/admin can create members' });
+      }
+
+      const body = req.body as { name: string; email: string; password: string; role?: OrgRole };
+      if (!body.name || !body.email || !body.password) {
+        return reply.code(400).send({ success: false, message: 'name, email, and password are required' });
+      }
+
+      const result = await registerUser({ email: body.email, name: body.name, password: body.password, role: 'user' });
+      if ('error' in result) return reply.code(result.status).send({ success: false, message: result.error });
+
+      const member = await inviteMember(req.orgId, req.orgRole, result.user_id, body.role ?? 'viewer');
+      return { success: true, data: { user: result, member } };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ success: false, message: (err as Error).message });

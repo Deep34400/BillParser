@@ -249,6 +249,8 @@ export interface FrontendInvoice {
   approvedBy?: string | null;
   approvedAt?: string | null;
   rejectionReason?: string | null;
+  submittedBy?: string | null;
+  approvalStep?: string | null;
   fallbackReason?: string | null;
   fallbackAttempts?: number | null;
   fallbackHistory?: Array<{
@@ -445,6 +447,8 @@ export function billToInvoice(bill: BillDoc, parts?: BillPartDoc[]): FrontendInv
     approvedBy: bill.approved_by ?? null,
     approvedAt: bill.approved_at ?? null,
     rejectionReason: bill.rejection_reason ?? null,
+    submittedBy: bill.submitted_by ?? null,
+    approvalStep: bill.approval_step ?? null,
     fallbackReason: bill.processing_status?.startsWith('FALLBACK:')
       ? bill.processing_status.slice('FALLBACK:'.length).trim()
       : null,

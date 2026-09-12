@@ -89,6 +89,8 @@ export interface BillAttributes {
   approvedBy: string | null;
   approvedAt: Date | null;
   rejectionReason: string | null;
+  submittedBy: string | null;
+  approvalStep: string | null;
   schemaVersion: number;
   createdAt: Date;
   updatedAt: Date;
@@ -176,6 +178,8 @@ export class Bill extends Model<BillAttributes> implements BillAttributes {
   declare approvedBy: string | null;
   declare approvedAt: Date | null;
   declare rejectionReason: string | null;
+  declare submittedBy: string | null;
+  declare approvalStep: string | null;
   declare schemaVersion: number;
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -264,6 +268,8 @@ export function initBillModel(seq: Sequelize): void {
     approvedBy: { type: DataTypes.TEXT, field: 'approved_by' },
     approvedAt: { type: DataTypes.DATE, field: 'approved_at' },
     rejectionReason: { type: DataTypes.TEXT, field: 'rejection_reason' },
+    submittedBy: { type: DataTypes.TEXT, field: 'submitted_by' },
+    approvalStep: { type: DataTypes.TEXT, field: 'approval_step' },
     schemaVersion: { type: DataTypes.INTEGER, allowNull: false, field: 'schema_version' },
     createdAt: { type: DataTypes.DATE, allowNull: false, field: 'created_at' },
     updatedAt: { type: DataTypes.DATE, allowNull: false, field: 'updated_at' },

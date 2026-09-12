@@ -643,14 +643,22 @@ export async function asyncOcr(
 
 // ─── Approval Workflow ──────────────────────────────────────────────────────
 
-/** Submit a completed invoice for approval. Sets status to 'pending'. */
-export async function submitForApproval(billId: string): Promise<void> {
+/**
+ * Approval cycle (hierarchy):
+ *   1. Member submits  → waiting for Org Admin
+ *   2. Org Admin signs → waiting for Owner
+ *   3. Owner signs     → approved
+ * Super admin can final-approve at any hop. Owner can also skip the admin hop.
+ */
+export async function submitForApproval(billId: string, submittedBy?: string): Promise<void> {
   const bill = await getInvoice(billId);
   if (bill.ocr_status !== 'OCR_COMPLETED' && bill.ocr_status !== 'NEED_REVIEW' && bill.ocr_status !== 'VERIFIED') {
     throw new ValidationError(`Cannot submit for approval — invoice is ${bill.ocr_status}`);
   }
   await updateBill(billId, {
     approval_status: 'pending',
+    approval_step: 'admin',
+    submitted_by: submittedBy ?? null,
     approved_by: null,
     approved_at: null,
     rejection_reason: null,
@@ -658,25 +666,57 @@ export async function submitForApproval(billId: string): Promise<void> {
   cacheInvalidate();
 }
 
-/** Approve an invoice. */
-export async function approveInvoice(billId: string, approvedBy: string): Promise<void> {
+export async function approveInvoice(
+  billId: string,
+  approvedBy: string,
+  opts: { isSuperAdmin?: boolean; orgRole?: string | null } = {},
+): Promise<{ approved: boolean; nextStep: string | null }> {
   const bill = await getInvoice(billId);
-  if ((bill as any).approval_status !== 'pending') {
+  if (bill.approval_status !== 'pending') {
     throw new ValidationError('Invoice is not pending approval');
   }
-  await updateBill(billId, {
-    approval_status: 'approved',
-    approved_by: approvedBy,
-    approved_at: new Date().toISOString(),
-    rejection_reason: null,
-  });
-  cacheInvalidate();
+
+  const step = bill.approval_step ?? 'admin';
+  const orgRole = opts.orgRole ?? null;
+  const isSuper = opts.isSuperAdmin === true;
+  const isOwner = orgRole === 'owner';
+  const isOrgAdmin = orgRole === 'admin';
+
+  const finalize = async () => {
+    await updateBill(billId, {
+      approval_status: 'approved',
+      approval_step: 'done',
+      approved_by: approvedBy,
+      approved_at: new Date().toISOString(),
+      rejection_reason: null,
+    });
+    cacheInvalidate();
+    return { approved: true, nextStep: null as string | null };
+  };
+
+  if (isSuper || isOwner) return finalize();
+
+  if (step === 'admin' && isOrgAdmin) {
+    await updateBill(billId, {
+      approval_status: 'pending',
+      approval_step: 'owner',
+      approved_by: approvedBy,
+      approved_at: new Date().toISOString(),
+    });
+    cacheInvalidate();
+    return { approved: false, nextStep: 'owner' };
+  }
+
+  throw new ValidationError(
+    step === 'owner'
+      ? 'Waiting for the organization owner to give final approval'
+      : 'Waiting for an organization admin to approve first',
+  );
 }
 
-/** Reject an invoice with a reason. */
 export async function rejectInvoice(billId: string, rejectedBy: string, reason: string): Promise<void> {
   const bill = await getInvoice(billId);
-  if ((bill as any).approval_status !== 'pending') {
+  if (bill.approval_status !== 'pending') {
     throw new ValidationError('Invoice is not pending approval');
   }
   if (!reason?.trim()) {
@@ -684,6 +724,7 @@ export async function rejectInvoice(billId: string, rejectedBy: string, reason: 
   }
   await updateBill(billId, {
     approval_status: 'rejected',
+    approval_step: null,
     approved_by: rejectedBy,
     approved_at: new Date().toISOString(),
     rejection_reason: reason.trim(),

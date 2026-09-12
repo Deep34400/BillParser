@@ -22,6 +22,8 @@ import {
 import { exportInvoicesCsv, exportLineItemsCsv } from './service/exportService.js';
 import { bearerFromRequest } from '../middleware/auth.js';
 import { isPdf, isImage } from '../shared/storage.js';
+import { can } from '../shared/roles.js';
+import type { OrgRole } from '../tenant/models/index.js';
 
 export async function billRoutes(app: FastifyInstance) {
 
@@ -173,6 +175,12 @@ export async function billRoutes(app: FastifyInstance) {
 
   app.post('/api/invoices/import', async (req, reply) => {
     try {
+      if (!req.appUser) {
+        return reply.status(401).send({ success: false, message: 'Authentication required' });
+      }
+      if (req.appUser.role !== 'admin' && (req.appUser.token_balance ?? 0) <= 0) {
+        return reply.status(402).send({ success: false, message: 'Insufficient balance — contact admin to add balance' });
+      }
       const body = req.body as { sources?: string[] } | undefined;
       const sources = body?.sources ?? [];
       return await importFromUrls(sources, req.appUser?.user_id, req.orgId);
@@ -221,9 +229,10 @@ export async function billRoutes(app: FastifyInstance) {
 
   app.post('/api/invoices/:id/submit-approval', async (req, reply) => {
     try {
+      if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
       const { id } = req.params as { id: string };
-      await submitForApproval(id);
-      return { success: true, message: 'Submitted for approval' };
+      await submitForApproval(id, req.appUser.user_id);
+      return { success: true, message: 'Submitted — waiting for Org Admin' };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ success: false, message: (err as Error).message });
@@ -233,9 +242,20 @@ export async function billRoutes(app: FastifyInstance) {
   app.post('/api/invoices/:id/approve', async (req, reply) => {
     try {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
+      if (req.appUser.role !== 'admin' && req.orgRole && !can(req.orgRole as OrgRole, 'invoice:approve')) {
+        return reply.status(403).send({ success: false, message: 'You do not have permission to approve invoices' });
+      }
       const { id } = req.params as { id: string };
-      await approveInvoice(id, req.appUser.user_id);
-      return { success: true, message: 'Invoice approved' };
+      const result = await approveInvoice(id, req.appUser.user_id, {
+        isSuperAdmin: req.appUser.role === 'admin',
+        orgRole: req.orgRole ?? null,
+      });
+      return {
+        success: true,
+        approved: result.approved,
+        nextStep: result.nextStep,
+        message: result.approved ? 'Invoice approved' : 'Signed — waiting for Owner',
+      };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ success: false, message: (err as Error).message });
@@ -245,6 +265,9 @@ export async function billRoutes(app: FastifyInstance) {
   app.post('/api/invoices/:id/reject', async (req, reply) => {
     try {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
+      if (req.appUser.role !== 'admin' && req.orgRole && !can(req.orgRole as OrgRole, 'invoice:approve')) {
+        return reply.status(403).send({ success: false, message: 'You do not have permission to reject invoices' });
+      }
       const { id } = req.params as { id: string };
       const body = req.body as { reason?: string };
       await rejectInvoice(id, req.appUser.user_id, body.reason ?? '');
