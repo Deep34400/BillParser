@@ -9,12 +9,6 @@ import { DocumentPreview } from '../components/DocumentPreview.js';
 import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
 
-/* Client-side invoice list cache (30s TTL) */
-const INV_CACHE_TTL = 30_000;
-let invCache: { invoices: Invoice[]; batches: Batch[]; total: number; page: number; pageSize: number; totalPages: number; at: number; cacheKey: string } | null = null;
-let countsCache: { counts: Record<string, number>; at: number } | null = null;
-export function invalidateInvoiceCache() { invCache = null; countsCache = null; }
-
 const DEFAULT_PAGE_SIZE = 10;
 
 type SortKey = 'none' | 'status' | 'vendorName' | 'invoiceDate' | 'confidence' | 'totalAmount';
@@ -138,15 +132,6 @@ export function InvoicesPage() {
     try {
       const statusParams = statusToApiParams(status ?? 'ALL');
       const code = reviewCode ?? '';
-      const cacheKey = `${page}-${size}-${search ?? ''}-${JSON.stringify(statusParams)}-${code}`;
-      if (invCache && Date.now() - invCache.at < INV_CACHE_TTL && invCache.cacheKey === cacheKey) {
-        setAllInvoices(invCache.invoices);
-        setBatches(invCache.batches);
-        setTotalRecords(invCache.total);
-        setTotalPages(invCache.totalPages);
-        setCurrentPage(invCache.page);
-        return;
-      }
       const params: Record<string, string | undefined> = {
         page: String(page),
         pageSize: String(size),
@@ -156,7 +141,6 @@ export function InvoicesPage() {
       if (code && (status ?? 'ALL') === 'NEEDS_REVIEW') params.review_code = code;
       const qs = buildQs(params);
       const [inv, bat] = await Promise.all([api.list(qs), api.batches().catch(() => ({ batches: [] }))]);
-      invCache = { invoices: inv.invoices, batches: bat.batches, total: inv.total, page: inv.page, pageSize: inv.pageSize, totalPages: inv.totalPages, at: Date.now(), cacheKey };
       setAllInvoices(inv.invoices);
       setBatches(bat.batches);
       setTotalRecords(inv.total);
@@ -174,12 +158,7 @@ export function InvoicesPage() {
 
   const fetchGlobalCounts = useCallback(async () => {
     try {
-      if (countsCache && Date.now() - countsCache.at < INV_CACHE_TTL) {
-        applyCountsToState(countsCache.counts);
-        return;
-      }
       const res = await api.counts();
-      countsCache = { counts: res.counts, at: Date.now() };
       applyCountsToState(res.counts);
     } catch (_e) { /* ignore */ }
   }, []);
@@ -236,7 +215,6 @@ export function InvoicesPage() {
     debounceRef.current = setTimeout(() => {
       setQ(searchInput);
       setCurrentPage(1);
-      invalidateInvoiceCache();
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -245,7 +223,6 @@ export function InvoicesPage() {
 
   // Polling: refetch when some rows are PENDING or PROCESSING
   const refetchWithCounts = useCallback(async () => {
-    invalidateInvoiceCache();
     await Promise.all([refetch(), fetchGlobalCounts()]);
   }, [refetch, fetchGlobalCounts]);
 
@@ -346,7 +323,6 @@ export function InvoicesPage() {
       await api.bulk('reextract', [...selected]);
       setToast('Re-extraction queued');
       setSelected(new Set());
-      invalidateInvoiceCache();
       await refetch();
     } catch (e) {
       setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
@@ -367,7 +343,6 @@ export function InvoicesPage() {
     try {
       await api.processOcr(id);
       setToast('OCR processing started…');
-      invalidateInvoiceCache();
       await refetch();
     } catch (e) {
       setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
@@ -379,7 +354,6 @@ export function InvoicesPage() {
       await api.bulk('delete', [...selected]);
       setSelected(new Set());
       setToast('Deleted selected invoices');
-      invalidateInvoiceCache();
       await refetch();
     } catch (e) {
       setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
@@ -432,7 +406,6 @@ export function InvoicesPage() {
         .slice(0, 3)
         .join('; ');
       if (dupes > 0) setDuplicateBanner({ count: dupes });
-      invalidateInvoiceCache();
       await refetch();
       setToast(
         `Uploaded ${created} file${created === 1 ? '' : 's'}` +
@@ -463,7 +436,6 @@ export function InvoicesPage() {
       const dupes = result?.duplicates?.length ?? 0;
       const rejected = result?.rejected?.length ?? 0;
       if (dupes > 0) setDuplicateBanner({ count: dupes });
-      invalidateInvoiceCache();
       await refetch();
       setToast(
         `Imported ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`,
@@ -722,7 +694,6 @@ export function InvoicesPage() {
                 setStatusFilter(key);
                 setReviewCodeFilter('');
                 setCurrentPage(1);
-                invalidateInvoiceCache();
               }}
               style={{
               padding: '6px 14px', borderRadius: 999,
@@ -759,7 +730,6 @@ export function InvoicesPage() {
                 onClick={() => {
                   setReviewCodeFilter(key);
                   setCurrentPage(1);
-                  invalidateInvoiceCache();
                 }}
                 style={{
                   padding: '4px 12px', borderRadius: 999,
@@ -1015,7 +985,7 @@ export function InvoicesPage() {
                 Page size
                 <select
                   value={pageSize}
-                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); invalidateInvoiceCache(); }}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1);  }}
                   style={{
                     padding: '4px 8px', border: '1px solid #E4E1D3', borderRadius: 4,
                     fontSize: 13, background: '#fff', cursor: 'pointer',
@@ -1026,7 +996,7 @@ export function InvoicesPage() {
               </label>
               <button
                 disabled={currentPage <= 1 || loading}
-                onClick={() => { setCurrentPage((p) => p - 1); invalidateInvoiceCache(); }}
+                onClick={() => { setCurrentPage((p) => p - 1);  }}
                 style={{
                   padding: '6px 16px', fontSize: 13, fontWeight: 500, borderRadius: 4,
                   border: '1px solid #E4E1D3', background: currentPage <= 1 ? '#f5f5f0' : '#fff',
@@ -1037,7 +1007,7 @@ export function InvoicesPage() {
               </button>
               <button
                 disabled={currentPage >= totalPages || loading}
-                onClick={() => { setCurrentPage((p) => p + 1); invalidateInvoiceCache(); }}
+                onClick={() => { setCurrentPage((p) => p + 1);  }}
                 style={{
                   padding: '6px 16px', fontSize: 13, fontWeight: 500, borderRadius: 4,
                   border: '1px solid #E4E1D3', background: currentPage >= totalPages ? '#f5f5f0' : '#fff',

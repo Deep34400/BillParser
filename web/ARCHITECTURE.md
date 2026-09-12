@@ -71,24 +71,13 @@ web/
 - **`lib/`** keeps formatting and model utilities separate from React components — pure functions, easy to test.
 - **Pages** are route-level; **components** are reusable within pages; **overlays** are modal UIs that appear over pages.
 
-## Caching Strategy
+## Data loading
 
-### Invoice List Cache
-- 30-second TTL client-side cache (`invCache` in `InvoicesPage.tsx`)
-- Invalidated on upload, delete, reextract, import
-- Navigating away and back within 30s uses cached data — instant page load
+The UI does **not** cache GET responses. Invoice list, counts, and analytics tabs call the API on each visit.
 
-### Analytics Cache (Two Layers)
+Analytics tabs stay lazy (fetch when first opened). Search is debounced 300ms.
 
-**Client-side** (`AnalyticsPage.tsx`):
-- `cachedFetch(key, fetcher)` — 30s TTL per endpoint
-- Switching between tabs/chips uses cached data if fresh
-- Each sub-view (Vehicles, Months, Cost/km, API Costs) is lazy-loaded — only fetched on first click
-
-**Server-side** (`platform/src/shared/cache.ts`):
-- In-memory TTL cache (30s) per analytics endpoint
-- Invalidated when bills are created, deleted, or bulk-modified
-- Prevents repeated DB scans across concurrent requests
+Server-side only (`platform/src/shared/cache.ts`): 30s TTL on analytics aggregations, cleared when bills change.
 
 ### Analytics Split APIs
 Instead of one monolithic `GET /api/analytics`, the frontend calls:

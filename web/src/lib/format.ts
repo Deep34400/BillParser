@@ -1,18 +1,29 @@
-export const money = (v: number | null | undefined, currency = 'INR'): string =>
-  v === null || v === undefined ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(v);
+function asMoney(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export const money = (v: number | string | null | undefined, currency = 'INR'): string => {
+  const n = asMoney(v);
+  return n === null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
+};
 
 /** Full precision — use in tooltips / detail rows. */
-export const moneyFull = (v: number | null | undefined, currency = 'INR'): string =>
-  v === null || v === undefined ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+export const moneyFull = (v: number | string | null | undefined, currency = 'INR'): string => {
+  const n = asMoney(v);
+  return n === null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+};
 
 /** Compact Indian format for tables with many rows (₹5.2L, ₹1.3Cr). */
-export const moneyCompact = (v: number | null | undefined): string => {
-  if (v === null || v === undefined) return '—';
-  const abs = Math.abs(v);
-  if (abs >= 1_00_00_000) return `₹${(v / 1_00_00_000).toFixed(2)}Cr`;
-  if (abs >= 1_00_000) return `₹${(v / 1_00_000).toFixed(2)}L`;
-  if (abs >= 1_000) return `₹${(v / 1_000).toFixed(1)}K`;
-  return `₹${Math.round(v).toLocaleString('en-IN')}`;
+export const moneyCompact = (v: number | string | null | undefined): string => {
+  const n = asMoney(v);
+  if (n === null) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1_00_00_000) return `₹${(n / 1_00_00_000).toFixed(2)}Cr`;
+  if (abs >= 1_00_000) return `₹${(n / 1_00_000).toFixed(2)}L`;
+  if (abs >= 1_000) return `₹${(n / 1_000).toFixed(1)}K`;
+  return `₹${Math.round(n).toLocaleString('en-IN')}`;
 };
 
 export const countFmt = (n: number): string => n.toLocaleString('en-IN');

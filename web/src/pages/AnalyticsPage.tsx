@@ -14,16 +14,6 @@ const KPI_DOCS: DocItem[] = [
 type MainTab = 'overview' | 'costs';
 type SpendView = 'workshops' | 'vehicles' | 'months' | 'costkm';
 
-/* ─── Client-side cache ──────────────────────────────────────────────── */
-const CLIENT_CACHE_TTL = 30_000;
-const clientCache = new Map<string, { data: unknown; at: number }>();
-
-function cachedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const hit = clientCache.get(key);
-  if (hit && Date.now() - hit.at < CLIENT_CACHE_TTL) return Promise.resolve(hit.data as T);
-  return fetcher().then((d) => { clientCache.set(key, { data: d, at: Date.now() }); return d; });
-}
-
 export function AnalyticsPage() {
   const [kpis, setKpis] = useState<AnalyticsKpis | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,7 +21,7 @@ export function AnalyticsPage() {
   const [spendView, setSpendView] = useState<SpendView>('workshops');
 
   useEffect(() => {
-    cachedFetch('kpis', api.analyticsKpis).then(setKpis).finally(() => setLoading(false));
+    api.analyticsKpis().then(setKpis).finally(() => setLoading(false));
   }, []);
 
   if (loading) {
@@ -312,7 +302,7 @@ function MonthsView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    cachedFetch('months', () => api.analyticsMonths().then((r) => r.months))
+    api.analyticsMonths().then((r) => r.months)
       .then(setData).finally(() => setLoading(false));
   }, []);
 
@@ -448,7 +438,7 @@ function CostsTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    cachedFetch('costs', api.analyticsCosts).then(setCosts).finally(() => setLoading(false));
+    api.analyticsCosts().then(setCosts).finally(() => setLoading(false));
   }, []);
 
   // Server-computed rupee totals convert each bill at the rate frozen when it was
