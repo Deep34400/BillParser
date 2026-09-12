@@ -495,6 +495,55 @@ export function InvoiceDetailPage() {
                 >
                   Delete
                 </button>
+
+                {/* ─── Approval cycle: Member → Org Admin → Owner ─── */}
+                {inv.approvalStatus !== 'approved' && inv.approvalStatus !== 'pending' && (inv.status === 'COMPLETED' || inv.status === 'NEEDS_REVIEW' || inv.verified) && (
+                  <button
+                    onClick={async () => {
+                      try { await api.submitForApproval(inv.id); setToast('Submitted — waiting for Org Admin'); void reload(); }
+                      catch (e) { setToast('Failed: ' + (e instanceof Error ? e.message : 'unknown')); }
+                    }}
+                    style={{ ...actionBtn, background: '#fff8e6', color: T.amber, border: '1px solid #fde2b3', fontWeight: 600 }}
+                  >
+                    Submit for approval
+                  </button>
+                )}
+                {inv.approvalStatus === 'pending' && (
+                  <>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: T.amber, padding: '4px 8px', background: '#fff8e6', borderRadius: 6, border: '1px solid #fde2b3' }}>
+                      {inv.approvalStep === 'owner' ? 'Step 2/2 · Waiting for Owner' : 'Step 1/2 · Waiting for Org Admin'}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const r = await api.approve(inv.id);
+                          setToast((r as { message?: string }).message ?? 'Signed');
+                          void reload();
+                        } catch (e) { setToast('Failed: ' + (e instanceof Error ? e.message : 'unknown')); }
+                      }}
+                      style={{ ...actionBtn, background: '#e6f7ef', color: T.green, border: '1px solid #b7e8cf', fontWeight: 600 }}
+                    >
+                      ✓ {inv.approvalStep === 'owner' ? 'Final approve' : 'Approve'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const reason = prompt('Reason for rejection:');
+                        if (!reason) return;
+                        try { await api.reject(inv.id, reason); setToast('Invoice rejected'); void reload(); }
+                        catch (e) { setToast('Failed: ' + (e instanceof Error ? e.message : 'unknown')); }
+                      }}
+                      style={{ ...actionBtn, background: '#fef2f2', color: T.red, border: '1px solid #fecaca', fontWeight: 600 }}
+                    >
+                      ✕ Reject
+                    </button>
+                  </>
+                )}
+                {inv.approvalStatus === 'approved' && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: T.green, padding: '4px 10px' }}>✓ APPROVED</span>
+                )}
+                {inv.approvalStatus === 'rejected' && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: T.red, padding: '4px 10px' }} title={inv.rejectionReason ?? ''}>✕ REJECTED</span>
+                )}
               </>
             ) : (
               <>

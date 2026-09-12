@@ -71,6 +71,8 @@ export interface Invoice {
   approvedBy?: string | null;
   approvedAt?: string | null;
   rejectionReason?: string | null;
+  submittedBy?: string | null;
+  approvalStep?: 'admin' | 'owner' | null;
   totalReconciliation?: {
     matched: boolean; calculated_total: number; grand_total_invoice: number | null;
     difference: number | null; tolerance: 2;

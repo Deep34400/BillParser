@@ -7,15 +7,20 @@ export function hasUnlimitedBalance(role: string, balance: number | null | undef
 }
 
 
+function asUsd(balance: number | string | null | undefined): number {
+  if (balance == null || balance === '') return 0;
+  const n = typeof balance === 'number' ? balance : Number(balance);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** Format balance in ₹ (backend stores in USD, convert for display). */
-export function formatBalance(role: string, balance: number | null | undefined): string {
-  if (hasUnlimitedBalance(role, balance)) return '∞';
-  const n = typeof balance === 'number' && Number.isFinite(balance) ? balance : 0;
-  const inr = n * usdToInrRate();
+export function formatBalance(role: string, balance: number | string | null | undefined): string {
+  if (hasUnlimitedBalance(role, asUsd(balance))) return '∞';
+  const inr = asUsd(balance) * usdToInrRate();
   return `₹${inr.toFixed(2)}`;
 }
 
-export function balanceNumber(role: string, balance: number | null | undefined): number {
-  if (hasUnlimitedBalance(role, balance)) return Infinity;
-  return typeof balance === 'number' && Number.isFinite(balance) ? balance : 0;
+export function balanceNumber(role: string, balance: number | string | null | undefined): number {
+  if (hasUnlimitedBalance(role, asUsd(balance))) return Infinity;
+  return asUsd(balance);
 }

@@ -67,8 +67,12 @@ export function Shell({ children, user, onLogout, onUserUpdate }: Props) {
   useEffect(() => { void refreshAccount(); }, [refreshAccount]);
   useEffect(() => { void refreshAccount(); }, [location.pathname, refreshAccount]);
 
-  const secondary = liveUser.role === 'admin' ? [...SECONDARY_NAV, ADMIN_NAV] : SECONDARY_NAV;
   const isAdmin = liveUser.role === 'admin';
+  // Super admin: replace "Organization" with "Admin" (combined dashboard).
+  // Regular users: keep "Organization" (their own org management).
+  const secondary = isAdmin
+    ? [ADMIN_NAV, ...SECONDARY_NAV.filter((n) => n.to !== '/organization')]
+    : SECONDARY_NAV;
   const balance = balanceNumber(liveUser.role, liveUser.token_balance);
   const unlimited = hasUnlimitedBalance(liveUser.role, liveUser.token_balance);
   const isHealthy = unlimited || balance > 0;

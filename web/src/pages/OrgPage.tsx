@@ -98,11 +98,16 @@ function RegularUserOrgView() {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState('');
 
-  // Invite by email
+  // Invite by email / create new member
   const [showInvite, setShowInvite] = useState(false);
+  const [inviteMode, setInviteMode] = useState<'invite' | 'create'>('invite');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<OrgRole>('viewer');
   const [inviting, setInviting] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createEmail, setCreateEmail] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [createRole, setCreateRole] = useState<OrgRole>('viewer');
 
   const [showAddWebhook, setShowAddWebhook] = useState(false);
   const [whUrl, setWhUrl] = useState('');
@@ -159,6 +164,19 @@ function RegularUserOrgView() {
       await api.inviteMemberByEmail(inviteEmail.trim(), inviteRole);
       flash('Member invited!');
       setShowInvite(false); setInviteEmail(''); setInviteRole('viewer');
+      await loadAll();
+    } catch (e) { flash((e as Error).message, 'err'); }
+    finally { setInviting(false); }
+  };
+
+  const handleCreateMember = async () => {
+    if (!createName.trim() || !createEmail.trim() || !createPassword) return flash('Fill all fields', 'err');
+    if (createPassword.length < 6) return flash('Password must be at least 6 characters', 'err');
+    setInviting(true);
+    try {
+      await api.createOrgMember(createName.trim(), createEmail.trim(), createPassword, createRole);
+      flash('Account created & added to org!');
+      setShowInvite(false); setCreateName(''); setCreateEmail(''); setCreatePassword(''); setCreateRole('viewer');
       await loadAll();
     } catch (e) { flash((e as Error).message, 'err'); }
     finally { setInviting(false); }
@@ -450,48 +468,80 @@ function RegularUserOrgView() {
         </CardContent>
       </Card>
 
-      {/* Invite dialog — invite by email (no admin access needed) */}
+      {/* Invite / Create member dialog */}
       <Dialog open={showInvite} onOpenChange={setShowInvite}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Invite Member</DialogTitle>
-            <DialogDescription>Enter the email of a registered user to add them to your organization.</DialogDescription>
+            <DialogTitle>Add Member</DialogTitle>
+            <DialogDescription>Invite an existing user or create a new account.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div>
-              <Label>Email Address</Label>
-              <Input
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="user@company.com"
-                onKeyDown={(e) => e.key === 'Enter' && void handleInviteByEmail()}
-              />
-            </div>
-            <div>
-              <Label>Role</Label>
-              <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as OrgRole)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {ASSIGNABLE_ROLES.map((r) => (
-                    <SelectItem key={r} value={r}>{ROLE_META[r]?.label ?? r}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {inviteRole === 'admin' && 'Full org access except billing'}
-                {inviteRole === 'reviewer' && 'Can upload, edit, approve invoices'}
-                {inviteRole === 'viewer' && 'Read-only access to invoices'}
-                {inviteRole === 'api_user' && 'API-only access for integrations'}
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setShowInvite(false)}>Cancel</Button>
-              <Button onClick={() => void handleInviteByEmail()} disabled={inviting}>
-                <UserPlus className="h-4 w-4 mr-1" />{inviting ? 'Inviting…' : 'Invite'}
-              </Button>
-            </div>
+          <div className="flex gap-2 border-b border-border pb-3">
+            <Button variant={inviteMode === 'invite' ? 'default' : 'outline'} size="sm" onClick={() => setInviteMode('invite')}>Invite Existing</Button>
+            <Button variant={inviteMode === 'create' ? 'default' : 'outline'} size="sm" onClick={() => setInviteMode('create')}>Create New</Button>
           </div>
+          {inviteMode === 'invite' ? (
+            <div className="space-y-4 pt-2">
+              <div>
+                <Label>Email Address</Label>
+                <Input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="user@company.com" onKeyDown={(e) => e.key === 'Enter' && void handleInviteByEmail()} />
+              </div>
+              <div>
+                <Label>Role</Label>
+                <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as OrgRole)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ASSIGNABLE_ROLES.map((r) => (
+                      <SelectItem key={r} value={r}>{ROLE_META[r]?.label ?? r}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {inviteRole === 'admin' && 'Full org access except billing'}
+                  {inviteRole === 'reviewer' && 'Can upload, edit, approve invoices'}
+                  {inviteRole === 'viewer' && 'Read-only access to invoices'}
+                  {inviteRole === 'api_user' && 'API-only access for integrations'}
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setShowInvite(false)}>Cancel</Button>
+                <Button onClick={() => void handleInviteByEmail()} disabled={inviting}>
+                  <UserPlus className="h-4 w-4 mr-1" />{inviting ? 'Inviting…' : 'Invite'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 pt-2">
+              <div>
+                <Label>Full Name</Label>
+                <Input value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="Jane Doe" />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input type="email" value={createEmail} onChange={(e) => setCreateEmail(e.target.value)} placeholder="jane@company.com" />
+              </div>
+              <div>
+                <Label>Password</Label>
+                <Input type="password" value={createPassword} onChange={(e) => setCreatePassword(e.target.value)} placeholder="Min 6 characters" />
+              </div>
+              <div>
+                <Label>Role</Label>
+                <Select value={createRole} onValueChange={(v) => setCreateRole(v as OrgRole)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ASSIGNABLE_ROLES.map((r) => (
+                      <SelectItem key={r} value={r}>{ROLE_META[r]?.label ?? r}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setShowInvite(false)}>Cancel</Button>
+                <Button onClick={() => void handleCreateMember()} disabled={inviting}>
+                  <UserPlus className="h-4 w-4 mr-1" />{inviting ? 'Creating…' : 'Create Account'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

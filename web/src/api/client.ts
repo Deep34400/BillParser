@@ -232,6 +232,8 @@ export const api = {
     j<{ success: boolean; data: OrgMemberInfo }>('/api/orgs/members', { method: 'POST', body: JSON.stringify({ userId, role }) }),
   inviteMemberByEmail: (email: string, role: OrgRole = 'viewer') =>
     j<{ success: boolean; data: OrgMemberInfo }>('/api/orgs/members', { method: 'POST', body: JSON.stringify({ email, role }) }),
+  createOrgMember: (name: string, email: string, password: string, role: OrgRole = 'viewer') =>
+    j<{ success: boolean; data: { user: any; member: OrgMemberInfo } }>('/api/orgs/members/create', { method: 'POST', body: JSON.stringify({ name, email, password, role }) }),
   changeMemberRole: (userId: string, role: OrgRole) =>
     j<{ success: boolean }>(`/api/orgs/members/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
   removeMember: (userId: string) =>
@@ -296,6 +298,16 @@ export const api = {
       '/api/odometer/extract',
       { method: 'POST', body: JSON.stringify({ imageUrl, crossVerify: crossVerify ?? false }) },
     ),
+  odometerExtractFile: (file: File, crossVerify?: boolean) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (crossVerify) fd.append('crossVerify', 'true');
+    const t = localStorage.getItem('session_token');
+    const headers: Record<string, string> = {};
+    if (t) headers['authorization'] = `Bearer ${t}`;
+    return fetch('/api/odometer/extract', { method: 'POST', headers, body: fd })
+      .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error ?? r.statusText); return d; });
+  },
   odometerBatch: (images: Array<{ url: string; id?: string }>, crossVerify?: boolean) =>
     j<{ success: boolean; data: Array<{ id: string; url: string; odometer_km: number | null; confidence?: number; success: boolean; error?: string }> }>(
       '/api/odometer/batch',

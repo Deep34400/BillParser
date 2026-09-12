@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
-import { Gauge, CheckCircle, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Gauge, CheckCircle, AlertTriangle, XCircle, Loader2, Upload } from 'lucide-react';
 import { api } from '../api/client.js';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/button.js';
@@ -20,6 +20,7 @@ export function OdometerPage() {
   const [crossVerify, setCrossVerify] = useState(false);
   const [results, setResults] = useState<OdometerResultItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [pipelineInfo, setPipelineInfo] = useState<{ mode: string; provider: string; model: string } | null>(null);
 
   useEffect(() => {
@@ -48,6 +49,25 @@ export function OdometerPage() {
     for (const url of urls) await extractSingle(url);
     setLoading(false); setUrlInput('');
   }, [urlInput, extractSingle]);
+
+  const handleFileUpload = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setLoading(true);
+    for (const file of Array.from(files)) {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const localUrl = URL.createObjectURL(file);
+      const item: OdometerResultItem = { id, url: localUrl, odometer_km: null, loading: true };
+      setResults((prev) => [item, ...prev]);
+      try {
+        const res = await api.odometerExtractFile(file, crossVerify);
+        setResults((prev) => prev.map((r) => r.id === id ? { ...r, loading: false, odometer_km: res.data.odometer_km, confidence: res.data.primary?.confidence, provider: res.data.primary?.provider, model: res.data.primary?.model, raw_text: res.data.primary?.raw_text, notes: res.data.primary?.notes, latency_ms: res.data.primary?.latency_ms, needsReview: res.data.needsReview, reviewReason: res.data.reviewReason, pipelineMode: res.data.pipelineMode } : r));
+      } catch (err) {
+        setResults((prev) => prev.map((r) => (r.id === id ? { ...r, loading: false, error: (err as Error).message } : r)));
+      }
+    }
+    setLoading(false);
+    if (fileRef.current) fileRef.current.value = '';
+  }, [crossVerify]);
 
   return (
     <div className="max-w-[1100px] mx-auto px-7 py-8 font-sans">
@@ -82,8 +102,12 @@ export function OdometerPage() {
             </label>
             <div className="ml-auto flex gap-2">
               {results.length > 0 && <Button variant="outline" onClick={() => setResults([])}>Clear</Button>}
+              <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void handleFileUpload(e.target.files)} />
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={loading}>
+                <Upload className="h-4 w-4 mr-1.5" /> Upload Images
+              </Button>
               <Button onClick={handleExtract} disabled={loading || !urlInput.trim()}>
-                {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Extracting…</> : 'Extract Reading'}
+                {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Extracting…</> : 'Extract from URL'}
               </Button>
             </div>
           </div>

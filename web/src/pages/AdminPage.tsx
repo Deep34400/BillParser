@@ -7,7 +7,7 @@ import {
   api, type UserInfo, type TokenTransaction, type OrgInfo, type OrgMemberInfo,
   type OrgRole, type AuditLogEntry,
 } from '../api/client.js';
-import { costFmt } from '../lib/format.js';
+import { costFmt, usdToInrRate } from '../lib/format.js';
 import { formatBalance } from '../lib/balance.js';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/button.js';
@@ -155,7 +155,7 @@ export function AdminPage() {
     if (!cEmail || !cName || !cPass) return flash('Fill all required fields', 'err');
     if (cPass.length < 6) return flash('Password min 6 characters', 'err');
     try {
-      await api.adminCreateUser(cEmail, cName, cPass, cRole, cBalance ? Number(cBalance) : undefined, cIntakeEmail || undefined);
+      await api.adminCreateUser(cEmail, cName, cPass, cRole, cBalance ? Number(cBalance) / usdToInrRate() : undefined, cIntakeEmail || undefined);
       setCEmail(''); setCName(''); setCPass(''); setCBalance(''); setCIntakeEmail('');
       flash('User created!'); setShowCreateUser(false);
       await loadUsers();
@@ -171,9 +171,11 @@ export function AdminPage() {
   };
 
   const handleAddTokens = async () => {
-    if (!selectedUser || !addAmt) return;
+    if (!selectedUser) return;
+    if (!addAmt || Number(addAmt) <= 0) return flash('Enter an amount greater than 0', 'err');
     try {
-      await api.adminAddTokens(selectedUser, Number(addAmt), addDesc || undefined);
+      const usd = Number(addAmt) / usdToInrRate();
+      await api.adminAddTokens(selectedUser, usd, addDesc || undefined);
       setAddAmt(''); setAddDesc(''); flash('Balance added');
       await loadUsers(); const r = await api.adminUserTransactions(selectedUser); setTxs(r.data);
     } catch (e) { flash((e as Error).message, 'err'); }
@@ -394,7 +396,7 @@ export function AdminPage() {
                               <div className="flex items-end gap-3 mb-4">
                                 <div>
                                   <Label className="text-xs">Amount (₹)</Label>
-                                  <Input type="number" step="0.01" value={addAmt} onChange={(e) => setAddAmt(e.target.value)} placeholder="1.00" className="w-28" />
+                                  <Input type="number" step="1" value={addAmt} onChange={(e) => setAddAmt(e.target.value)} placeholder="1000" className="w-28" />
                                 </div>
                                 <div className="flex-1">
                                   <Label className="text-xs">Description</Label>
@@ -667,7 +669,7 @@ export function AdminPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>Initial Balance (₹)</Label><Input type="number" step="0.01" value={cBalance} onChange={(e) => setCBalance(e.target.value)} placeholder="0.00" /></div>
+              <div><Label>Initial Balance (₹)</Label><Input type="number" step="1" value={cBalance} onChange={(e) => setCBalance(e.target.value)} placeholder="1000" /></div>
               <div>
                 <Label>Allowed Sender Email</Label>
                 <Input type="email" value={cIntakeEmail} onChange={(e) => setCIntakeEmail(e.target.value)} placeholder="user@fleet.com" />
