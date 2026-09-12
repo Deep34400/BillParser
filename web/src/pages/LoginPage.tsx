@@ -1,7 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api/client.js';
-import { T } from '../theme.js';
 import carrumLogo from '../assets/carrum-logo.svg';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
+import { Label } from '@/components/ui/label.js';
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card.js';
 
 interface Props {
   onLogin: () => void;
@@ -31,91 +34,55 @@ export function LoginPage({ onLogin }: Props) {
   };
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: `linear-gradient(135deg, ${T.bg} 0%, #e8e5de 100%)`, fontFamily: T.font,
-    }}>
-      <div style={{
-        width: 400, background: T.panel, borderRadius: 16, padding: '40px 36px',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.08)', border: `1px solid ${T.border}`,
-      }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <img
-            src={carrumLogo}
-            alt="Carrum"
-            style={{ width: 190, maxWidth: '100%', height: 'auto', margin: '0 auto 18px', display: 'block' }}
-          />
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: T.text, margin: 0 }}>
-            Invoice OCR
-          </h1>
-          <p style={{ fontSize: 13, color: T.muted, marginTop: 6 }}>
-            Sign in to your account
-          </p>
-        </div>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-border/50 font-sans px-4">
+      <Card className="w-full max-w-[400px] shadow-lg">
+        <CardHeader className="items-center text-center pb-2">
+          <img src={carrumLogo} alt="Carrum" className="mx-auto mb-4 block h-auto w-48" />
+          <h1 className="font-heading text-xl font-bold text-foreground">Invoice OCR</h1>
+          <p className="text-sm text-muted-foreground mt-1">Sign in to your account</p>
+        </CardHeader>
 
-        <form onSubmit={(e) => void handleSubmit(e)} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 6 }}>
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
-              autoFocus
-              style={{
-                width: '100%', padding: '10px 14px', border: `1px solid ${T.border}`,
-                borderRadius: 8, fontSize: 14, fontFamily: T.font, boxSizing: 'border-box',
-                outline: 'none', transition: 'border-color 0.15s',
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: T.muted, display: 'block', marginBottom: 6 }}>
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              style={{
-                width: '100%', padding: '10px 14px', border: `1px solid ${T.border}`,
-                borderRadius: 8, fontSize: 14, fontFamily: T.font, boxSizing: 'border-box',
-                outline: 'none', transition: 'border-color 0.15s',
-              }}
-            />
-          </div>
-
-          {error && (
-            <div style={{
-              padding: '10px 14px', background: '#fef2f2', border: `1px solid #fecaca`,
-              borderRadius: 8, fontSize: 13, color: T.red,
-            }}>
-              {error}
+        <CardContent>
+          <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                autoFocus
+              />
             </div>
-          )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%', padding: '11px 14px', border: 'none', borderRadius: 8,
-              background: loading ? T.muted : T.accent, color: '#fff', fontSize: 14, fontWeight: 600,
-              cursor: loading ? 'wait' : 'pointer', fontFamily: T.font, transition: 'background 0.15s',
-              marginTop: 4,
-            }}
-          >
-            {loading ? 'Signing in...' : 'Sign in'}
-          </button>
-        </form>
+            <div className="space-y-1.5">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+              />
+            </div>
 
-        <div style={{ textAlign: 'center', marginTop: 24, fontSize: 11, color: T.faint }}>
-          Contact admin if you don't have an account
-        </div>
-      </div>
+            {error && (
+              <div className="rounded-lg border border-danger/20 bg-danger-soft px-3.5 py-2.5 text-sm text-danger">
+                {error}
+              </div>
+            )}
+
+            <Button type="submit" disabled={loading} className="mt-1 w-full">
+              {loading ? 'Signing in...' : 'Sign in'}
+            </Button>
+          </form>
+        </CardContent>
+
+        <CardFooter className="justify-center">
+          <p className="text-[11px] text-faint">Contact admin if you don't have an account</p>
+        </CardFooter>
+      </Card>
     </div>
   );
 }

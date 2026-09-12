@@ -1,24 +1,32 @@
-import { T } from '../theme.js';
-import { confColor, confLabel } from '../lib/format.js';
+import { cn } from '@/lib/utils.js';
 
-export function ConfidenceBar({ value, verified }: { value?: number | null; verified?: boolean }) {
+interface Props {
+  value?: number | null;
+  verified?: boolean;
+}
+
+export function ConfidenceBar({ value, verified }: Props) {
   if (verified) {
     return (
-      <span style={{ color: T.green, fontWeight: 600, fontSize: 12 }}>✓ Verified</span>
-    );
-  }
-
-  if (typeof value === 'number') {
-    const color = confColor(value);
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ display: 'inline-block', width: 62, height: 6, background: '#ece8df', borderRadius: 3, overflow: 'hidden', flexShrink: 0 }}>
-          <span style={{ display: 'block', width: `${value * 100}%`, height: '100%', background: color, borderRadius: 3 }} />
-        </span>
-        <span style={{ color, fontSize: 12, fontWeight: 500 }}>{confLabel(value)}</span>
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success">
+        <span className="h-2 w-2 rounded-full bg-success" />
+        Verified
       </span>
     );
   }
 
-  return <span style={{ color: T.faint }}>—</span>;
+  if (value == null) return <span className="text-xs text-faint">—</span>;
+
+  const pct = Math.round(value * 100);
+  const color = pct >= 90 ? 'bg-success' : pct >= 70 ? 'bg-warning' : 'bg-danger';
+  const textColor = pct >= 90 ? 'text-success' : pct >= 70 ? 'text-warning' : 'text-danger';
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+        <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${pct}%` }} />
+      </div>
+      <span className={cn('text-xs font-medium', textColor)}>{pct}%</span>
+    </div>
+  );
 }

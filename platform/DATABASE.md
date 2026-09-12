@@ -1,27 +1,44 @@
 # Database Design — BillParser Platform
 
 > **ORM:** Sequelize 6 · **Database:** PostgreSQL 15+ · **Extension:** pg_trgm (trigram search)
+> **Tables:** 10 (8 original + 2 multi-tenancy)
 
 ---
 
 ## Entity Relationship Diagram
 
 ```
-┌─────────────────┐         ┌──────────────────────────────────────┐
+┌──────────────────┐
+│  organizations   │ 1    N  ┌──────────────────────────────────────┐
+│──────────────────│◄────────│           org_members                │
+│ org_id      PK   │         │──────────────────────────────────────│
+│ name             │         │ org_id   PK, FK → organizations     │
+│ slug    UNIQUE   │         │ user_id  PK, FK → users             │
+│ plan             │         │ org_role (owner/admin/reviewer/...)  │
+│ status           │         │ joined_at                            │
+│ settings  JSONB  │         └──────────────────────────────────────┘
+│ invoice_limit    │
+│ created_at       │
+│ updated_at       │
+└───────┬──────────┘
+        │ 1
+        │ N
+┌───────▼─────────┐         ┌──────────────────────────────────────┐
 │    vendors       │ 1    N  │               bills                  │
 │─────────────────│◄────────│──────────────────────────────────────│
 │ vendor_id  PK   │         │ bill_id         PK                   │
-│ legal_name      │         │ vendor_id       FK → vendors (NULL)  │
-│ display_name    │         │ bill_type       NOT NULL              │
-│ gstin           │         │ ocr_status      NOT NULL              │
-│ pan             │         │ vendor_name, vendor_gstin             │
-│ invoice_count   │         │ invoice_number, invoice_date          │
-│ first_seen      │         │ grand_total_amount, parts_amount ...  │
-│ last_seen       │         │ parsed_data     JSONB                 │
-│ parser_name     │         │ total_reconciliation  JSONB           │
-│ created_at      │         │ fallback_history      JSONB           │
-│ updated_at      │         │ extraction_*, structuring_* (costs)   │
-└─────────────────┘         │ schema_version, created_at, updated_at│
+│ legal_name      │         │ org_id          FK → organizations   │
+│ display_name    │         │ vendor_id       FK → vendors (NULL)  │
+│ gstin           │         │ bill_type       NOT NULL              │
+│ pan             │         │ ocr_status      NOT NULL              │
+│ invoice_count   │         │ vendor_name, vendor_gstin             │
+│ first_seen      │         │ invoice_number, invoice_date          │
+│ last_seen       │         │ grand_total_amount, parts_amount ...  │
+│ parser_name     │         │ parsed_data     JSONB                 │
+│ created_at      │         │ total_reconciliation  JSONB           │
+│ updated_at      │         │ fallback_history      JSONB           │
+└─────────────────┘         │ extraction_*, structuring_* (costs)   │
+                            │ schema_version, created_at, updated_at│
                             └───────────────┬──────────────────────┘
                                             │ 1
                                             │
@@ -80,7 +97,60 @@
 
 ## Tables in Detail
 
-### 1. `vendors` — Vendor Registry
+### 1. `organizations` — Multi-Tenancy Root
+
+Each organization is a tenant. Users belong to organizations via `org_members`. Bills are scoped to an organization via `org_id`.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `org_id` | TEXT | **PK** | UUID |
+| `name` | TEXT | NOT NULL | Organization display name |
+| `slug` | TEXT | NOT NULL, UNIQUE | URL-safe identifier |
+| `plan` | TEXT | NOT NULL, default `free` | `free`, `starter`, `business`, `enterprise` |
+| `status` | TEXT | NOT NULL, default `active` | `active` or `suspended` |
+| `settings` | JSONB | default `{}` | Organization-level config |
+| `invoice_limit` | INTEGER | NOT NULL, default 50 | Max invoices per billing period |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `organizations_slug_idx` — UNIQUE on `slug`
+
+**Plan Limits:**
+| Plan | Invoice Limit |
+|------|--------------|
+| `free` | 50 |
+| `starter` | 500 |
+| `business` | 5,000 |
+| `enterprise` | 999,999 |
+
+---
+
+### 2. `org_members` — Organization Membership
+
+Maps users to organizations with roles. Composite primary key.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `org_id` | TEXT | **PK**, FK → organizations (CASCADE) | Organization |
+| `user_id` | TEXT | **PK**, FK → users (CASCADE) | User |
+| `org_role` | TEXT | NOT NULL | `owner`, `admin`, `reviewer`, `viewer`, `api_user` |
+| `joined_at` | TIMESTAMPTZ | NOT NULL | When the user joined |
+
+**RBAC Roles:**
+| Role | Description |
+|------|-------------|
+| `owner` | Full access, can assign admin, delete org |
+| `admin` | Full access except org deletion |
+| `reviewer` | View + approve/reject invoices |
+| `viewer` | Read-only access |
+| `api_user` | API-only access (upload + read) |
+
+---
+
+### 3. `vendors` — Vendor Registry
+
+> *Renumbered from original #1 after adding organizations + org_members.*
 
 Auto-populated from processed invoices. Matched by GSTIN → PAN → legal name.
 
@@ -106,7 +176,7 @@ Auto-populated from processed invoices. Matched by GSTIN → PAN → legal name.
 
 ---
 
-### 2. `bills` — The Core Invoice Table
+### 4. `bills` — The Core Invoice Table
 
 One row per uploaded invoice. Contains all extracted data, costs, and audit fields.
 
@@ -114,6 +184,7 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 |--------|------|-------------|-------------|
 | **Identity** | | | |
 | `bill_id` | TEXT | **PK** | UUID |
+| `org_id` | TEXT | FK → organizations, SET NULL | Tenant isolation (nullable for legacy bills) |
 | `fleet_id` | TEXT | | Fleet identifier |
 | `vehicle_id` | TEXT | Indexed | Vehicle identifier |
 | `bill_type` | TEXT | NOT NULL, CHECK | MAINTENANCE, FUEL, INSURANCE, TYRE, TOLL, ACCIDENT_REPAIR, BATTERY_REPLACEMENT, AMC_CONTRACT, OTHER |
@@ -211,6 +282,7 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 - `bills_vehicle_idx` — `vehicle_id` (vehicle analytics)
 - `bills_vendor_idx` — `vendor_id` (vendor drilldown)
 - `bills_dup_idx` — `(invoice_number, vendor_gstin)` (duplicate detection)
+- `bills_org_updated_idx` — `(org_id, updated_at DESC)` (tenant-scoped pagination)
 
 **GST Rules:**
 - Intra-state: CGST + SGST (IGST = NULL)
@@ -220,7 +292,7 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 
 ---
 
-### 3. `bill_parts` — Line Items
+### 5. `bill_parts` — Line Items
 
 One row per part or labour line item. Cascade-deleted when parent bill is removed.
 
@@ -249,7 +321,7 @@ One row per part or labour line item. Cascade-deleted when parent bill is remove
 
 ---
 
-### 4. `users` — Authentication & Billing
+### 6. `users` — Authentication & Billing
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
@@ -274,7 +346,7 @@ One row per part or labour line item. Cascade-deleted when parent bill is remove
 
 ---
 
-### 5. `api_keys` — Multi-Key Authentication
+### 7. `api_keys` — Multi-Key Authentication
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
@@ -292,7 +364,7 @@ One row per part or labour line item. Cascade-deleted when parent bill is remove
 
 ---
 
-### 6. `token_transactions` — Billing Ledger
+### 8. `token_transactions` — Billing Ledger
 
 Append-only audit log. Every credit/debit creates a row.
 
@@ -314,7 +386,7 @@ Append-only audit log. Every credit/debit creates a row.
 
 ---
 
-### 7. `app_settings` — Singleton Configuration
+### 9. `app_settings` — Singleton Configuration
 
 Single row (`id = 1`). Stores pipeline config, pricing, and email intake settings.
 
@@ -340,7 +412,7 @@ Single row (`id = 1`). Stores pipeline config, pricing, and email intake setting
 
 ---
 
-### 8. `provider_credentials` — API Keys per Provider
+### 10. `provider_credentials` — API Keys per Provider
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -353,6 +425,9 @@ Single row (`id = 1`). Stores pipeline config, pricing, and email intake setting
 
 | From | To | On Delete | Why |
 |------|----|-----------|-----|
+| `org_members.org_id` | `organizations.org_id` | CASCADE | Members belong to an org |
+| `org_members.user_id` | `users.user_id` | CASCADE | Members belong to a user |
+| `bills.org_id` | `organizations.org_id` | SET NULL | Org optional; deleting org doesn't delete bills |
 | `bills.vendor_id` | `vendors.vendor_id` | SET NULL | Vendor is optional; deleting vendor doesn't delete bills |
 | `bill_parts.bill_id` | `bills.bill_id` | CASCADE | Parts are owned by a bill; no orphans |
 | `api_keys.user_id` | `users.user_id` | CASCADE | Keys are owned by a user |
@@ -363,6 +438,7 @@ Single row (`id = 1`). Stores pipeline config, pricing, and email intake setting
 ## Schema Management
 
 - **ORM:** Sequelize 6 with `sync({ alter: true })` on startup
+- **Init order:** Organization → Vendor → User → OrgMember → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential
 - **Extension:** `pg_trgm` created automatically for trigram search
 - **NUMERIC handling:** pg type parser overrides OID 1700 → `parseFloat()` so all decimal columns return JS numbers (not strings)
 - **Timestamps:** Managed by application code, not Sequelize auto-timestamps

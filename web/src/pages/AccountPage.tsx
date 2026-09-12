@@ -1,21 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Key, Plus, Trash2, Copy, CheckCircle } from 'lucide-react';
 import { api, type ApiKeyInfo, type TokenTransaction } from '../api/client.js';
-import { T } from '../theme.js';
 import { costFmt } from '../lib/format.js';
 import { formatBalance } from '../lib/balance.js';
-
-const card: React.CSSProperties = {
-  background: T.panel, border: `1px solid ${T.border}`,
-  borderRadius: 10, padding: '18px 22px', marginBottom: 16,
-};
-const btn = (bg = T.accent, color = '#fff'): React.CSSProperties => ({
-  padding: '7px 14px', border: 'none', borderRadius: 7, background: bg, color,
-  fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
-});
-const inputStyle: React.CSSProperties = {
-  padding: '7px 10px', border: `1px solid ${T.border}`, borderRadius: 7,
-  fontSize: 13, fontFamily: T.font, outline: 'none',
-};
+import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card.js';
+import { Badge } from '@/components/ui/badge.js';
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
+import { EmptyState } from '@/components/ui/empty-state.js';
 
 export function AccountPage() {
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
@@ -30,20 +24,8 @@ export function AccountPage() {
     setTimeout(() => setMsg(''), 4000);
   };
 
-  const loadKeys = useCallback(async () => {
-    try {
-      const r = await api.listApiKeys();
-      setKeys(r.data);
-    } catch { /* ignore */ }
-  }, []);
-
-  const loadTxs = useCallback(async () => {
-    try {
-      const r = await api.accountTransactions(50);
-      setTxs(r.data);
-    } catch { /* ignore */ }
-  }, []);
-
+  const loadKeys = useCallback(async () => { try { const r = await api.listApiKeys(); setKeys(r.data); } catch { /* ignore */ } }, []);
+  const loadTxs = useCallback(async () => { try { const r = await api.accountTransactions(50); setTxs(r.data); } catch { /* ignore */ } }, []);
   useEffect(() => { void loadKeys(); void loadTxs(); }, [loadKeys, loadTxs]);
 
   const handleGenerate = async () => {
@@ -58,166 +40,135 @@ export function AccountPage() {
 
   const handleDelete = async (keyId: string) => {
     if (!confirm('Revoke this API key? Any integration using it will stop working.')) return;
-    try {
-      await api.deleteApiKey(keyId);
-      flash('API key revoked');
-      void loadKeys();
-    } catch (e) { flash((e as Error).message, 'err'); }
+    try { await api.deleteApiKey(keyId); flash('API key revoked'); void loadKeys(); } catch (e) { flash((e as Error).message, 'err'); }
   };
 
   let acct: { role: string; token_balance: number | null; total_ocr_count: number; total_cost_usd: number; name: string; email: string } | null = null;
-  try {
-    const raw = localStorage.getItem('session_user');
-    if (raw) acct = JSON.parse(raw);
-  } catch { /* ignore */ }
+  try { const raw = localStorage.getItem('session_user'); if (raw) acct = JSON.parse(raw); } catch { /* ignore */ }
 
   return (
-    <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 800 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>My Account</h1>
+    <div className="max-w-3xl px-7 py-6 font-sans">
+      <h1 className="font-heading text-xl font-bold mb-5">My Account</h1>
 
       {msg && (
-        <div style={{
-          padding: '10px 16px', borderRadius: 8, fontSize: 13, marginBottom: 14,
-          background: msgType === 'ok' ? '#e6f7ef' : '#fef2f2',
-          color: msgType === 'ok' ? T.green : T.red,
-          border: `1px solid ${msgType === 'ok' ? '#b7e8cf' : '#fecaca'}`,
-        }}>{msg}</div>
+        <div className={cn('mb-4 rounded-lg border px-4 py-2.5 text-sm', msgType === 'ok' ? 'bg-success-soft text-success border-success/20' : 'bg-danger-soft text-danger border-danger/20')}>
+          {msg}
+        </div>
       )}
 
-      {/* Account summary */}
+      {/* Account summary cards */}
       {acct && (
-        <div style={card}>
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            {[
-              { label: 'Balance', value: formatBalance(acct.role, acct.token_balance) },
-              { label: 'OCR Count', value: String(acct.total_ocr_count) },
-              { label: 'Total Spent', value: costFmt(acct.total_cost_usd) },
-              { label: 'Role', value: acct.role.toUpperCase() },
-            ].map((s) => (
-              <div key={s.label} style={{ minWidth: 100 }}>
-                <div style={{ fontSize: 10, color: T.muted, fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: T.accent, fontFamily: T.mono }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Card className="mb-4">
+          <CardContent className="pt-5">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {[
+                { label: 'Balance', value: formatBalance(acct.role, acct.token_balance) },
+                { label: 'OCR Count', value: String(acct.total_ocr_count) },
+                { label: 'Total Spent', value: costFmt(acct.total_cost_usd) },
+                { label: 'Role', value: acct.role.toUpperCase() },
+              ].map((s) => (
+                <div key={s.label}>
+                  <p className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider mb-1">{s.label}</p>
+                  <p className="text-lg font-bold text-primary font-mono">{s.value}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* API Keys */}
-      <div style={card}>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>API Keys</div>
-        <p style={{ fontSize: 12, color: T.muted, marginTop: 0, marginBottom: 14 }}>
-          Generate API keys to use the OCR API directly (POST /api/ocr/sync or /api/ocr/async).
-        </p>
-
-        {/* Generate form */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
-          <input
-            value={newKeyLabel}
-            onChange={(e) => setNewKeyLabel(e.target.value)}
-            placeholder="Label (e.g. My App)"
-            style={{ ...inputStyle, width: 200 }}
-          />
-          <button onClick={() => void handleGenerate()} style={btn()}>Generate Key</button>
-        </div>
-
-        {/* Newly created key highlight */}
-        {newKeyResult && (
-          <div style={{
-            padding: '12px 14px', background: '#e6f7ef', border: '1px solid #b7e8cf',
-            borderRadius: 8, marginBottom: 14, fontSize: 12,
-          }}>
-            <div style={{ fontWeight: 700, color: T.green, marginBottom: 6 }}>New API Key created</div>
-            <div style={{
-              fontFamily: T.mono, fontSize: 12, padding: '8px 10px',
-              background: '#fff', border: `1px solid ${T.border}`, borderRadius: 6,
-              wordBreak: 'break-all', marginBottom: 8,
-            }}>
-              {newKeyResult}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { void navigator.clipboard.writeText(newKeyResult); flash('Full API key copied!'); }} style={btn(T.green)}>Copy Full Key</button>
-              <button onClick={() => setNewKeyResult(null)} style={btn('#666')}>Dismiss</button>
-            </div>
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Key className="h-4 w-4" /> API Keys</CardTitle>
+          <CardDescription>Generate API keys to use the OCR API directly (POST /api/ocr/sync or /api/ocr/async).</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2 mb-4">
+            <Input value={newKeyLabel} onChange={(e) => setNewKeyLabel(e.target.value)} placeholder="Label (e.g. My App)" className="w-48" />
+            <Button onClick={() => void handleGenerate()}><Plus className="h-4 w-4" /> Generate Key</Button>
           </div>
-        )}
 
-        {/* Existing keys table — full key always visible + copyable */}
-        {keys.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: `2px solid ${T.border}`, textAlign: 'left' }}>
-                <th style={{ padding: '6px 8px' }}>Label</th>
-                <th style={{ padding: '6px 8px' }}>API Key</th>
-                <th style={{ padding: '6px 8px' }}>Created</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Only the hash is stored server-side, so the full key can never be
-                  re-displayed — it is shown once, at creation, in the banner above. */}
-              {keys.map((k) => (
-                <tr key={k.key_id} style={{ borderBottom: `1px solid ${T.border}` }}>
-                  <td style={{ padding: '8px 8px', fontWeight: 600, verticalAlign: 'top' }}>{k.label}</td>
-                  <td style={{ padding: '8px 8px', fontFamily: T.mono, fontSize: 11, maxWidth: 360 }}>
-                    <div style={{ wordBreak: 'break-all', color: T.muted }}>
-                      {k.prefix}<span style={{ letterSpacing: 1 }}>••••••••••••••••</span>
-                    </div>
-                    <div style={{ fontSize: 10, color: T.faint, marginTop: 4 }}>
-                      Shown once at creation. Lost it? Revoke and generate a new one.
-                    </div>
-                  </td>
-                  <td style={{ padding: '8px 8px', fontSize: 12, color: T.muted, verticalAlign: 'top' }}>{new Date(k.created_at).toLocaleDateString()}</td>
-                  <td style={{ padding: '8px 8px', textAlign: 'right', verticalAlign: 'top' }}>
-                    <button onClick={() => void handleDelete(k.key_id)} style={{ ...btn(T.red), padding: '4px 10px', fontSize: 11 }}>Revoke</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div style={{ fontSize: 12, color: T.faint, padding: '10px 0' }}>No API keys yet. Generate one above.</div>
-        )}
-      </div>
+          {newKeyResult && (
+            <div className="mb-4 rounded-lg border border-success/20 bg-success-soft p-4">
+              <p className="text-sm font-bold text-success mb-2"><CheckCircle className="inline h-4 w-4 mr-1" /> New API Key created</p>
+              <div className="rounded-md border border-border bg-card px-3 py-2 font-mono text-xs break-all mb-3">{newKeyResult}</div>
+              <div className="flex gap-2">
+                <Button variant="success" size="sm" onClick={() => { void navigator.clipboard.writeText(newKeyResult); flash('Full API key copied!'); }}>
+                  <Copy className="h-3.5 w-3.5" /> Copy Full Key
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setNewKeyResult(null)}>Dismiss</Button>
+              </div>
+            </div>
+          )}
+
+          {keys.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow><TableHead>Label</TableHead><TableHead>API Key</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Actions</TableHead></TableRow>
+              </TableHeader>
+              <TableBody>
+                {keys.map((k) => (
+                  <TableRow key={k.key_id}>
+                    <TableCell className="font-semibold">{k.label}</TableCell>
+                    <TableCell>
+                      <span className="font-mono text-[11px] text-muted-foreground">{k.prefix}<span className="tracking-widest">••••••••</span></span>
+                      <p className="text-[10px] text-faint mt-1">Shown once at creation. Lost it? Revoke and generate a new one.</p>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{new Date(k.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="destructive" size="sm" onClick={() => void handleDelete(k.key_id)}>
+                        <Trash2 className="h-3.5 w-3.5" /> Revoke
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-xs text-faint py-2">No API keys yet. Generate one above.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Transaction history */}
-      <div style={card}>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Usage History</div>
-        {txs.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ borderBottom: `2px solid ${T.border}`, textAlign: 'left' }}>
-                <th style={{ padding: '6px 8px' }}>Date</th>
-                <th style={{ padding: '6px 8px' }}>Type</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Amount</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Balance</th>
-                <th style={{ padding: '6px 8px' }}>Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              {txs.map((tx) => (
-                <tr key={tx.tx_id} style={{ borderBottom: `1px solid ${T.border}` }}>
-                  <td style={{ padding: '6px 8px', fontFamily: T.mono, fontSize: 11 }}>{new Date(tx.created_at).toLocaleString()}</td>
-                  <td style={{ padding: '6px 8px' }}>
-                    <span style={{
-                      padding: '1px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700,
-                      background: tx.type === 'credit' ? '#e6f7ef' : '#fef2f2',
-                      color: tx.type === 'credit' ? T.green : T.red,
-                    }}>{tx.type === 'credit' ? 'CREDIT' : 'DEBIT'}</span>
-                  </td>
-                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, fontFamily: T.mono, color: tx.type === 'credit' ? T.green : T.red }}>
-                    {tx.type === 'credit' ? '+' : '-'}{costFmt(tx.amount)}
-                  </td>
-                  <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: T.mono }}>{costFmt(tx.balance_after)}</td>
-                  <td style={{ padding: '6px 8px', color: T.muted }}>{tx.description}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div style={{ fontSize: 12, color: T.faint, padding: '10px 0' }}>No transactions yet.</div>
-        )}
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Usage History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {txs.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead><TableHead>Type</TableHead>
+                  <TableHead className="text-right">Amount</TableHead><TableHead className="text-right">Balance</TableHead>
+                  <TableHead>Description</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {txs.map((tx) => (
+                  <TableRow key={tx.tx_id}>
+                    <TableCell className="font-mono text-[11px]">{new Date(tx.created_at).toLocaleString()}</TableCell>
+                    <TableCell>
+                      <Badge variant={tx.type === 'credit' ? 'success' : 'danger'} className="text-[10px]">
+                        {tx.type === 'credit' ? 'CREDIT' : 'DEBIT'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className={cn('text-right font-bold font-mono', tx.type === 'credit' ? 'text-success' : 'text-danger')}>
+                      {tx.type === 'credit' ? '+' : '-'}{costFmt(tx.amount)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">{costFmt(tx.balance_after)}</TableCell>
+                    <TableCell className="text-muted-foreground">{tx.description}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-xs text-faint py-2">No transactions yet.</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

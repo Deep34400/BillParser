@@ -1,6 +1,8 @@
 # Users Module
 
-Authentication, authorization, user management, and token-based billing. Follows the controller → service → repository pattern. Data lives in PostgreSQL; Sequelize models are defined in `users/models/` (not a central schema file).
+Authentication, authorization, user management, and token-based billing. Follows the controller → service → repository pattern. Data lives in PostgreSQL; Sequelize models are defined in `users/models/`.
+
+> **Multi-tenancy note:** Users belong to organizations via the `org_members` table (managed by the [tenant module](../tenant/README.md)). After authentication, the `tenantContext` middleware resolves `req.orgId` and `req.orgRole` from the user's org membership. RBAC permissions are defined in `shared/roles.ts`.
 
 ## Directory Structure
 
@@ -188,3 +190,19 @@ Admin creates a new user
 - **Admin routes**: `requireAdmin` preHandler rejects non-admin users
 - **Blocked users**: checked on every login and JWT verification
 - **Token debits**: atomic via `sequelize().transaction()` with `UPDATE … WHERE token_balance >= amount` — concurrent OCR runs cannot overdraw
+
+## Organization Membership
+
+After authentication, the `tenantContext` middleware looks up the user's `OrgMember` record:
+
+```
+Auth middleware sets req.appUser
+  → tenantContext middleware runs
+  → Looks up org_members WHERE user_id = req.appUser.user_id
+  → If found: req.orgId + req.orgRole are set
+  → If not found: req.orgId stays undefined (legacy mode)
+```
+
+Users belong to **one organization at a time**. Roles (owner, admin, reviewer, viewer, api_user) control what API endpoints they can access.
+
+For the full RBAC permission matrix and org management API, see [tenant module](../tenant/README.md).

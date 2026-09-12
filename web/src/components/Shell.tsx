@@ -1,24 +1,29 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import {
+  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, LogOut,
+} from 'lucide-react';
 import { api, type SessionUser } from '../api/client.js';
-import { T } from '../theme.js';
 import carrumLogo from '../assets/carrum-logo.svg';
 import { costFmt } from '../lib/format.js';
 import { hasUnlimitedBalance, formatBalance, balanceNumber } from '../lib/balance.js';
+import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/button.js';
+import { Separator } from '@/components/ui/separator.js';
 
 const PRIMARY_NAV = [
-  { label: 'Invoices', to: '/invoices' },
-  { label: 'Analytics', to: '/analytics' },
-  { label: 'Fraud', to: '/fraud' },
-  { label: 'Odometer', to: '/odometer' },
+  { label: 'Invoices', to: '/invoices', icon: FileText },
+  { label: 'Analytics', to: '/analytics', icon: BarChart3 },
+  { label: 'Fraud', to: '/fraud', icon: ShieldAlert },
+  { label: 'Odometer', to: '/odometer', icon: Gauge },
 ];
 
 const SECONDARY_NAV = [
-  { label: 'Settings', to: '/settings' },
-  { label: 'Account', to: '/account' },
+  { label: 'Settings', to: '/settings', icon: Settings },
+  { label: 'Account', to: '/account', icon: User },
 ];
 
-const ADMIN_NAV = { label: 'Admin', to: '/admin' };
+const ADMIN_NAV = { label: 'Admin', to: '/admin', icon: Shield };
 
 interface Props {
   children: React.ReactNode;
@@ -27,24 +32,18 @@ interface Props {
   onUserUpdate: (u: SessionUser) => void;
 }
 
-
-function NavItem({ to, label, active }: { to: string; label: string; active: boolean }) {
+function NavItem({ to, label, icon: Icon, active }: { to: string; label: string; icon: React.ElementType; active: boolean }) {
   return (
     <NavLink
       to={to}
-      style={{
-        display: 'block',
-        padding: '8px 12px',
-        borderRadius: 8,
-        textDecoration: 'none',
-        fontSize: 14,
-        fontWeight: active ? 600 : 500,
-        fontFamily: T.font,
-        background: active ? T.accentSoft : 'transparent',
-        color: active ? T.accent : T.inkSoft,
-        transition: 'background 0.15s, color 0.15s',
-      }}
+      className={cn(
+        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+        active
+          ? 'bg-secondary text-primary'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+      )}
     >
+      <Icon className="h-4 w-4" />
       {label}
     </NavLink>
   );
@@ -70,90 +69,69 @@ export function Shell({ children, user, onLogout, onUserUpdate }: Props) {
   const isAdmin = liveUser.role === 'admin';
   const balance = balanceNumber(liveUser.role, liveUser.token_balance);
   const unlimited = hasUnlimitedBalance(liveUser.role, liveUser.token_balance);
+  const isHealthy = unlimited || balance > 0;
 
   const isActive = (to: string) =>
     to === '/invoices' ? location.pathname.startsWith('/invoices') : location.pathname.startsWith(to);
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'row', minHeight: '100vh',
-      background: T.paper, color: T.ink, fontFamily: T.font,
-    }}>
-      <aside className="app-sidebar" style={{
-        width: 220, background: T.surface, borderRight: `1px solid ${T.border}`,
-        padding: '20px 14px', position: 'sticky', top: 0, height: '100vh',
-        overflow: 'auto', flexShrink: 0, display: 'flex', flexDirection: 'column',
-      }}>
-        <div style={{ marginBottom: 28, padding: '0 4px' }}>
-          <img
-            src={carrumLogo}
-            alt="Carrum"
-            style={{ width: 150, maxWidth: '100%', height: 'auto', display: 'block' }}
-          />
-          <div style={{ fontSize: 11, color: T.inkFaint, marginTop: 6 }}>Invoice OCR · Finance</div>
+    <div className="flex min-h-screen bg-background text-foreground font-sans">
+      {/* ─── Sidebar ─── */}
+      <aside className="app-sidebar sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-border bg-card overflow-auto">
+        {/* Logo */}
+        <div className="px-5 pt-5 pb-6">
+          <img src={carrumLogo} alt="Carrum" className="block h-auto w-36" />
+          <p className="mt-1.5 text-[11px] text-faint">Invoice OCR · Finance</p>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-          {PRIMARY_NAV.map(({ label, to }) => (
-            <NavItem key={to} to={to} label={label} active={isActive(to)} />
+        {/* Nav */}
+        <nav className="flex flex-1 flex-col gap-0.5 px-3">
+          {PRIMARY_NAV.map(({ label, to, icon }) => (
+            <NavItem key={to} to={to} label={label} icon={icon} active={isActive(to)} />
           ))}
-          <div style={{ height: 1, background: T.border, margin: '10px 8px' }} />
-          {secondary.map(({ label, to }) => (
-            <NavItem key={to} to={to} label={label} active={isActive(to)} />
+          <Separator className="my-2" />
+          {secondary.map(({ label, to, icon }) => (
+            <NavItem key={to} to={to} label={label} icon={icon} active={isActive(to)} />
           ))}
         </nav>
 
-        <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: T.ink, marginBottom: 2 }}>{liveUser.name}</div>
-          <div style={{
-            fontSize: 11, color: T.inkFaint, marginBottom: 10,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {liveUser.email}
-          </div>
-          <button onClick={onLogout} style={{
-            width: '100%', padding: '7px 10px', border: `1px solid ${T.border}`, borderRadius: 7,
-            background: 'transparent', color: T.inkSoft, fontSize: 12, cursor: 'pointer', fontFamily: T.font,
-          }}>
+        {/* User footer */}
+        <div className="mt-auto border-t border-border p-4">
+          <p className="text-xs font-semibold text-foreground truncate">{liveUser.name}</p>
+          <p className="text-[11px] text-faint truncate">{liveUser.email}</p>
+          <Button variant="outline" size="sm" className="mt-2.5 w-full gap-2" onClick={onLogout}>
+            <LogOut className="h-3.5 w-3.5" />
             Sign out
-          </button>
+          </Button>
         </div>
       </aside>
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          padding: '10px 24px', background: T.surface,
-          borderBottom: `1px solid ${T.border}`, flexShrink: 0,
-        }}>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '6px 14px', borderRadius: 999,
-            background: unlimited || balance > 0 ? T.successSoft : T.dangerSoft,
-            border: `1px solid ${unlimited || balance > 0 ? '#C5E5D4' : '#F0C9C7'}`,
-            fontSize: 12, color: unlimited || balance > 0 ? T.success : T.danger, fontWeight: 500,
-          }}>
-            <span style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: unlimited || balance > 0 ? T.success : T.danger,
-            }} />
+      {/* ─── Main content ─── */}
+      <div className="flex flex-1 min-w-0 flex-col">
+        {/* Top bar — balance indicator */}
+        <header className="flex items-center justify-end border-b border-border bg-card px-6 py-2.5 shrink-0">
+          <div className={cn(
+            'inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium border',
+            isHealthy
+              ? 'bg-success-soft text-success border-success/20'
+              : 'bg-danger-soft text-danger border-danger/20',
+          )}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', isHealthy ? 'bg-success' : 'bg-danger')} />
             <span>
               {isAdmin ? 'Balance' : 'Points'} · {formatBalance(liveUser.role, liveUser.token_balance)}
               {' · '}{liveUser.total_ocr_count} OCR · {costFmt(liveUser.total_cost_usd)} spent
             </span>
           </div>
-        </div>
+        </header>
 
+        {/* Low balance warning */}
         {!isAdmin && balance <= 0 && (
-          <div style={{
-            padding: '8px 24px', background: T.dangerSoft, borderBottom: `1px solid #F0C9C7`,
-            fontSize: 12, color: T.danger, fontWeight: 600, textAlign: 'center',
-          }}>
+          <div className="bg-danger-soft border-b border-danger/20 px-6 py-2 text-center text-xs font-semibold text-danger">
             Insufficient balance — contact admin to add points before uploading
           </div>
         )}
 
-        <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
+        <main className="flex-1 min-w-0">{children}</main>
       </div>
     </div>
   );

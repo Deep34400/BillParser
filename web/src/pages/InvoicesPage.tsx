@@ -1,13 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Upload, Search, SlidersHorizontal, Download, X, Mail, Copy, Square, CheckSquare, RotateCcw, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client.js';
 import type { Invoice, Batch } from '../types/index.js';
-import { T } from '../theme.js';
 import { money, dateFmt, costFmt } from '../lib/format.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { DocumentPreview } from '../components/DocumentPreview.js';
 import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
+import { cn } from '@/lib/utils.js';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
+import { Badge } from '@/components/ui/badge.js';
+import { Card } from '@/components/ui/card.js';
+import { Textarea } from '@/components/ui/textarea.js';
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
+import { EmptyState } from '@/components/ui/empty-state.js';
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -15,10 +23,6 @@ type SortKey = 'none' | 'status' | 'vendorName' | 'invoiceDate' | 'confidence' |
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'ALL' | 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NEEDS_REVIEW';
 
-// Accept a file as a PDF if its MIME type says so OR its name ends in .pdf.
-// Browsers frequently report an empty or non-standard MIME type for PDFs
-// (depends on OS, file source, and file associations), so the extension is a
-// necessary fallback — otherwise valid PDFs get silently dropped on selection.
 export function filterPdfs(files: FileList | File[]): File[] {
   return Array.from(files).filter(
     (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name),
@@ -33,8 +37,6 @@ function buildQs(params: Record<string, string | undefined>): string {
   const s = p.toString();
   return s ? '?' + s : '';
 }
-
-// Status comes from API (DB ocr_status) — no runtime needs-review heuristics.
 
 const STATUS_PILLS: { key: StatusFilter; label: string }[] = [
   { key: 'ALL', label: 'All' },
@@ -63,7 +65,6 @@ function isDuplicate(inv: Invoice): boolean {
 export function InvoicesPage() {
   const navigate = useNavigate();
 
-  // Data state
   const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -75,7 +76,6 @@ export function InvoicesPage() {
   });
   const [reviewCodeCounts, setReviewCodeCounts] = useState<Record<string, number>>({});
 
-  // Filter / sort state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [reviewCodeFilter, setReviewCodeFilter] = useState<ReviewCodeFilter>('');
   const [q, setQ] = useState('');
@@ -91,21 +91,14 @@ export function InvoicesPage() {
   const [importText, setImportText] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // UI toggle state
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [dragging, setDragging] = useState(false);
-
-  // Selection state (bulk checkboxes)
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Row focused in the right-hand document preview panel
   const [previewId, setPreviewId] = useState<string | null>(null);
-
-  // Toast / banner state
   const [toast, setToast] = useState('');
   const [duplicateBanner, setDuplicateBanner] = useState<{ count: number } | null>(null);
-
-  // Debounce ref
+  const [intakeEmail, setIntakeEmail] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const statusToApiParams = (sf: StatusFilter): Record<string, string | undefined> => {
@@ -113,7 +106,7 @@ export function InvoicesPage() {
       case 'DRAFT': return { status: 'DRAFT' };
       case 'PENDING': return { status: 'UPLOADED' };
       case 'PROCESSING': return { status: 'PROCESSING' };
-      case 'COMPLETED': return { completed: '1' }; // OCR_COMPLETED + VERIFIED
+      case 'COMPLETED': return { completed: '1' };
       case 'FAILED': return { status: 'FAILED' };
       case 'NEEDS_REVIEW': return { status: 'NEED_REVIEW' };
       default: return {};
@@ -121,22 +114,14 @@ export function InvoicesPage() {
   };
 
   const fetchPage = useCallback(async (
-    page: number,
-    size: number,
-    search?: string,
-    status?: StatusFilter,
-    reviewCode?: ReviewCodeFilter,
+    page: number, size: number, search?: string, status?: StatusFilter, reviewCode?: ReviewCodeFilter,
   ) => {
     setLoading(true);
     setAllInvoices([]);
     try {
       const statusParams = statusToApiParams(status ?? 'ALL');
       const code = reviewCode ?? '';
-      const params: Record<string, string | undefined> = {
-        page: String(page),
-        pageSize: String(size),
-        ...statusParams,
-      };
+      const params: Record<string, string | undefined> = { page: String(page), pageSize: String(size), ...statusParams };
       if (search) params.q = search;
       if (code && (status ?? 'ALL') === 'NEEDS_REVIEW') params.review_code = code;
       const qs = buildQs(params);
@@ -160,12 +145,10 @@ export function InvoicesPage() {
     try {
       const res = await api.counts();
       applyCountsToState(res.counts);
-    } catch (_e) { /* ignore */ }
+    } catch { /* ignore */ }
   }, []);
 
   const applyCountsToState = useCallback((c: Record<string, number>) => {
-    // Persisted NEED_REVIEW only — ignore legacy `needs_review` / `completed_clean`
-    // (older API responses used runtime heuristics and inflated the pill to ~6.5k).
     setGlobalCounts({
       ALL: c['all'] ?? c['ALL'] ?? 0,
       DRAFT: c['DRAFT'] ?? 0,
@@ -188,211 +171,74 @@ export function InvoicesPage() {
     await fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter);
   }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
 
-  // Fetch when page, pageSize, search, status, or review code changes
-  useEffect(() => {
-    void fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter);
-  }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
+  useEffect(() => { void fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter); }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
+  useEffect(() => { void fetchGlobalCounts(); }, [fetchGlobalCounts]);
+  useEffect(() => { api.config().then((cfg) => { if (cfg.emailIntake?.enabled && cfg.emailIntake.address) setIntakeEmail(cfg.emailIntake.address); }).catch(() => {}); }, []);
 
-  // Fetch global counts on mount
-  useEffect(() => {
-    void fetchGlobalCounts();
-  }, [fetchGlobalCounts]);
-
-  const [intakeEmail, setIntakeEmail] = useState<string | null>(null);
-
-  // Also call api.config on mount (as per spec / test mock)
-  useEffect(() => {
-    api.config().then((cfg) => {
-      if (cfg.emailIntake?.enabled && cfg.emailIntake.address) {
-        setIntakeEmail(cfg.emailIntake.address);
-      }
-    }).catch(() => {});
-  }, []);
-
-  // Debounced search — reset to page 1 on new search
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setQ(searchInput);
-      setCurrentPage(1);
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    debounceRef.current = setTimeout(() => { setQ(searchInput); setCurrentPage(1); }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [searchInput]);
 
-  // Polling: refetch when some rows are PENDING or PROCESSING
-  const refetchWithCounts = useCallback(async () => {
-    await Promise.all([refetch(), fetchGlobalCounts()]);
-  }, [refetch, fetchGlobalCounts]);
-
-  usePolling(
-    refetchWithCounts,
-    () => allInvoices.some((r) => r.status === 'PENDING' || r.status === 'PROCESSING'),
-    3000,
-  );
+  const refetchWithCounts = useCallback(async () => { await Promise.all([refetch(), fetchGlobalCounts()]); }, [refetch, fetchGlobalCounts]);
+  usePolling(refetchWithCounts, () => allInvoices.some((r) => r.status === 'PENDING' || r.status === 'PROCESSING'), 3000);
 
   const counts = globalCounts;
-
   const hasAdvancedFilters = !!(minTotal || dateFrom || dateTo);
   const hasSearch = !!q;
 
   const displayedRows: Invoice[] = (() => {
     let rows = [...allInvoices];
     if (batchFilter) rows = rows.filter((inv) => inv.batchId === batchFilter);
-
-    if (minTotal) {
-      const min = parseFloat(minTotal);
-      if (!isNaN(min)) rows = rows.filter((inv) => ((inv.netAmount ?? inv.totalAmount) ?? 0) >= min);
-    }
-    if (dateFrom) {
-      rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate >= dateFrom);
-    }
-    if (dateTo) {
-      rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate <= dateTo);
-    }
-
-    // Sort (none = server order = latest updated first)
+    if (minTotal) { const min = parseFloat(minTotal); if (!isNaN(min)) rows = rows.filter((inv) => ((inv.netAmount ?? inv.totalAmount) ?? 0) >= min); }
+    if (dateFrom) rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate >= dateFrom);
+    if (dateTo) rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate <= dateTo);
     if (sort !== 'none') {
-    rows = [...rows].sort((a, b) => {
-      let av: string | number | null | undefined;
-      let bv: string | number | null | undefined;
-      switch (sort) {
-        case 'status':
-          av = a.status;
-          bv = b.status;
-          break;
-        case 'vendorName':
-          av = a.vendorName ?? '';
-          bv = b.vendorName ?? '';
-          break;
-        case 'invoiceDate':
-          av = a.invoiceDate ?? '';
-          bv = b.invoiceDate ?? '';
-          break;
-        case 'confidence':
-          av = a.confidence ?? -1;
-          bv = b.confidence ?? -1;
-          break;
-        case 'totalAmount':
-          av = (a.netAmount ?? a.totalAmount) ?? 0;
-          bv = (b.netAmount ?? b.totalAmount) ?? 0;
-          break;
-      }
-      if (av === null || av === undefined) av = '';
-      if (bv === null || bv === undefined) bv = '';
-      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-      return dir === 'asc' ? cmp : -cmp;
-    });
+      rows = [...rows].sort((a, b) => {
+        let av: string | number | null | undefined;
+        let bv: string | number | null | undefined;
+        switch (sort) {
+          case 'status': av = a.status; bv = b.status; break;
+          case 'vendorName': av = a.vendorName ?? ''; bv = b.vendorName ?? ''; break;
+          case 'invoiceDate': av = a.invoiceDate ?? ''; bv = b.invoiceDate ?? ''; break;
+          case 'confidence': av = a.confidence ?? -1; bv = b.confidence ?? -1; break;
+          case 'totalAmount': av = (a.netAmount ?? a.totalAmount) ?? 0; bv = (b.netAmount ?? b.totalAmount) ?? 0; break;
+        }
+        if (av === null || av === undefined) av = '';
+        if (bv === null || bv === undefined) bv = '';
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return dir === 'asc' ? cmp : -cmp;
+      });
     }
-
     return rows;
   })();
 
-  // Sort toggle
-  function toggleSort(key: SortKey) {
-    if (sort === key) {
-      setDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSort(key);
-      setDir('desc');
-    }
-  }
+  function toggleSort(key: SortKey) { if (sort === key) setDir((d) => d === 'asc' ? 'desc' : 'asc'); else { setSort(key); setDir('desc'); } }
+  function toggleRow(id: string) { setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; }); }
+  function toggleAll() { if (selected.size === displayedRows.length) setSelected(new Set()); else setSelected(new Set(displayedRows.map((r) => r.id))); }
 
-  // Selection helpers
-  function toggleRow(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  async function handleBulkReextract() { try { await api.bulk('reextract', [...selected]); setToast('Re-extraction queued'); setSelected(new Set()); await refetch(); } catch (e) { setToast('Error: ' + (e instanceof Error ? e.message : 'unknown')); } }
+  async function handleCancel(id: string) { try { await api.cancel(id); setToast('Cancelling extraction…'); await refetch(); } catch (e) { setToast('Error: ' + (e instanceof Error ? e.message : 'unknown')); } }
+  async function handleProcessOcr(id: string) { try { await api.processOcr(id); setToast('OCR processing started…'); await refetch(); } catch (e) { setToast('Error: ' + (e instanceof Error ? e.message : 'unknown')); } }
+  async function handleBulkDelete() { try { await api.bulk('delete', [...selected]); setSelected(new Set()); setToast('Deleted selected invoices'); await refetch(); } catch (e) { setToast('Error: ' + (e instanceof Error ? e.message : 'unknown')); } }
 
-  function toggleAll() {
-    if (selected.size === displayedRows.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(displayedRows.map((r) => r.id)));
-    }
-  }
-
-  // Bulk actions
-  async function handleBulkReextract() {
-    try {
-      await api.bulk('reextract', [...selected]);
-      setToast('Re-extraction queued');
-      setSelected(new Set());
-      await refetch();
-    } catch (e) {
-      setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
-    }
-  }
-
-  async function handleCancel(id: string) {
-    try {
-      await api.cancel(id);
-      setToast('Cancelling extraction…');
-      await refetch();
-    } catch (e) {
-      setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
-    }
-  }
-
-  async function handleProcessOcr(id: string) {
-    try {
-      await api.processOcr(id);
-      setToast('OCR processing started…');
-      await refetch();
-    } catch (e) {
-      setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
-    }
-  }
-
-  async function handleBulkDelete() {
-    try {
-      await api.bulk('delete', [...selected]);
-      setSelected(new Set());
-      setToast('Deleted selected invoices');
-      await refetch();
-    } catch (e) {
-      setToast('Error: ' + (e instanceof Error ? e.message : 'unknown'));
-    }
-  }
-
-  // Export CSV — must use fetch with JWT (window.open cannot send Authorization)
   async function exportCsv(path: string) {
     const qs = buildQs({ q: q || undefined, minTotal: minTotal || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
     try {
       const token = localStorage.getItem('session_token');
-      const res = await fetch(path + qs, {
-        headers: token ? { authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`);
-      }
+      const res = await fetch(path + qs, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error((body as { message?: string }).message ?? `Export failed (${res.status})`); }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = path.includes('line-items') ? 'line-items.csv' : 'invoices.csv';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      setToast('Export failed: ' + (e instanceof Error ? e.message : 'unknown'));
-    }
+      const a = document.createElement('a'); a.href = url; a.download = path.includes('line-items') ? 'line-items.csv' : 'invoices.csv';
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch (e) { setToast('Export failed: ' + (e instanceof Error ? e.message : 'unknown')); }
   }
 
-  // Upload handler
   async function handleFiles(files: FileList | File[]) {
     const pdfs = filterPdfs(files);
-    if (pdfs.length === 0) {
-      setToast('No PDF files selected');
-      return;
-    }
+    if (pdfs.length === 0) { setToast('No PDF files selected'); return; }
     if (busy) return;
     setBusy(true);
     try {
@@ -401,33 +247,17 @@ export function InvoicesPage() {
       const dupes = result?.duplicates?.length ?? 0;
       const rejectedList = (result?.rejected ?? []) as Array<string | { name: string; reason?: string }>;
       const rejected = rejectedList.length;
-      const rejectDetail = rejectedList
-        .map((r) => (typeof r === 'string' ? r : `${r.name}${r.reason ? `: ${r.reason}` : ''}`))
-        .slice(0, 3)
-        .join('; ');
+      const rejectDetail = rejectedList.map((r) => (typeof r === 'string' ? r : `${r.name}${r.reason ? `: ${r.reason}` : ''}`)).slice(0, 3).join('; ');
       if (dupes > 0) setDuplicateBanner({ count: dupes });
       await refetch();
-      setToast(
-        `Uploaded ${created} file${created === 1 ? '' : 's'}` +
-        `${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}` +
-        `${rejected ? `, ${rejected} rejected${rejectDetail ? ` (${rejectDetail})` : ''}` : ''}`,
-      );
-      setShowUpload(false);
-      setBatchName('');
-    } catch (e) {
-      setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown'));
-    } finally {
-      setBusy(false);
-    }
+      setToast(`Uploaded ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected${rejectDetail ? ` (${rejectDetail})` : ''}` : ''}`);
+      setShowUpload(false); setBatchName('');
+    } catch (e) { setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown')); } finally { setBusy(false); }
   }
 
-  // Import handler — paste URLs / server file paths, one per line.
   async function handleImport() {
     const sources = importText.split('\n').map((s) => s.trim()).filter(Boolean);
-    if (sources.length === 0) {
-      setToast('Paste at least one URL or file path');
-      return;
-    }
+    if (sources.length === 0) { setToast('Paste at least one URL or file path'); return; }
     if (busy) return;
     setBusy(true);
     try {
@@ -437,279 +267,185 @@ export function InvoicesPage() {
       const rejected = result?.rejected?.length ?? 0;
       if (dupes > 0) setDuplicateBanner({ count: dupes });
       await refetch();
-      setToast(
-        `Imported ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`,
-      );
-      setShowUpload(false);
-      setImportText('');
-      setBatchName('');
-    } catch (e) {
-      setToast('Import failed: ' + (e instanceof Error ? e.message : 'unknown'));
-    } finally {
-      setBusy(false);
-    }
+      setToast(`Imported ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`);
+      setShowUpload(false); setImportText(''); setBatchName('');
+    } catch (e) { setToast('Import failed: ' + (e instanceof Error ? e.message : 'unknown')); } finally { setBusy(false); }
   }
 
-  // Drag-and-drop
-  function onDragOver(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(true);
-  }
-  function onDragLeave() {
-    setDragging(false);
-  }
-  function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    if (e.dataTransfer.files.length > 0) void handleFiles(e.dataTransfer.files);
-  }
+  function onDragOver(e: React.DragEvent) { e.preventDefault(); setDragging(true); }
+  function onDragLeave() { setDragging(false); }
+  function onDrop(e: React.DragEvent) { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length > 0) void handleFiles(e.dataTransfer.files); }
 
   const isAllSelected = displayedRows.length > 0 && selected.size === displayedRows.length;
   const isPartialSelected = selected.size > 0 && selected.size < displayedRows.length;
 
-  // Keep preview on a visible row
   useEffect(() => {
-    if (displayedRows.length === 0) {
-      setPreviewId(null);
-      return;
-    }
-    if (!previewId || !displayedRows.some((r) => r.id === previewId)) {
-      setPreviewId(displayedRows[0].id);
-    }
+    if (displayedRows.length === 0) { setPreviewId(null); return; }
+    if (!previewId || !displayedRows.some((r) => r.id === previewId)) setPreviewId(displayedRows[0].id);
   }, [displayedRows, previewId]);
 
-  const previewInvoice =
-    displayedRows.find((r) => r.id === previewId) ?? displayedRows[0] ?? null;
+  const previewInvoice = displayedRows.find((r) => r.id === previewId) ?? displayedRows[0] ?? null;
 
-  const skeletonRows = Array.from({ length: 5 });
-
-  const btnSecondary: React.CSSProperties = {
-    padding: '7px 14px',
-    border: `1px solid ${T.border}`,
-    borderRadius: 8,
-    background: T.surface,
-    color: T.ink,
-    fontSize: 13,
-    fontWeight: 500,
-    cursor: 'pointer',
-    fontFamily: T.font,
-  };
+  const sortIcon = (key: SortKey) => sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
 
   return (
-    <div style={{ background: T.paper, minHeight: '100%', fontFamily: T.font }}>
+    <div className="min-h-full bg-background font-sans">
+      {/* Duplicate banner */}
       {duplicateBanner && (
-        <div style={{
-          background: T.warnSoft, borderBottom: `1px solid #E8D4B0`,
-          padding: '10px 28px', display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between', fontSize: 13, color: T.warn, fontWeight: 500,
-        }}>
-          <span>
-            {duplicateBanner.count} duplicate{duplicateBanner.count !== 1 ? 's' : ''} skipped — these files were already uploaded.
-          </span>
-          <button onClick={() => setDuplicateBanner(null)} aria-label="Dismiss" style={{
-            background: 'none', border: 'none', cursor: 'pointer', color: T.warn, fontWeight: 700, fontSize: 16,
-          }}>×</button>
+        <div className="flex items-center justify-between border-b border-warning/20 bg-warning-soft px-7 py-2.5 text-sm font-medium text-warning">
+          <span>{duplicateBanner.count} duplicate{duplicateBanner.count !== 1 ? 's' : ''} skipped — these files were already uploaded.</span>
+          <button onClick={() => setDuplicateBanner(null)} className="text-warning font-bold text-base hover:opacity-70 cursor-pointer">
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
-      {/* Header */}
-      <div style={{
-        padding: '22px 28px 16px', display: 'flex', alignItems: 'flex-start',
-        justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
-      }}>
+      {/* ─── Header ─── */}
+      <div className="flex flex-wrap items-start justify-between gap-4 px-7 pt-6 pb-4">
         <div>
-          <div style={{ fontFamily: T.heading, fontSize: 26, fontWeight: 600, color: T.ink, lineHeight: 1.2 }}>
-            Invoices
-          </div>
-          <div style={{ fontSize: 13, color: T.inkSoft, marginTop: 4 }}>
+          <h1 className="font-heading text-2xl font-semibold text-foreground">Invoices</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             {loading && allInvoices.length === 0
               ? 'Loading…'
               : statusFilter === 'ALL'
                 ? `${(globalCounts.ALL || totalRecords).toLocaleString()} invoice${(globalCounts.ALL || totalRecords) !== 1 ? 's' : ''}`
                 : `${(globalCounts[statusFilter] ?? totalRecords).toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${(globalCounts.ALL || totalRecords).toLocaleString()} total`}
-          </div>
+          </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <input
-            type="text"
-            placeholder="Search vendor, invoice #, file"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            style={{
-              width: 260, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8,
-              fontSize: 13, fontFamily: T.font, color: T.ink, background: T.surface, outline: 'none',
-            }}
-          />
-          <select
-            aria-label="Filter by batch"
-            value={batchFilter}
-            onChange={(e) => setBatchFilter(e.target.value)}
-            style={{ ...btnSecondary, maxWidth: 180 }}
-          >
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+            <Input
+              type="text" placeholder="Search vendor, invoice #, file"
+              value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              className="w-64 pl-9"
+            />
+          </div>
+
+          <select aria-label="Filter by batch" value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}
+            className="h-9 rounded-md border border-input bg-card px-3 text-sm cursor-pointer">
             <option value="">All batches</option>
-            {batches.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
+            {batches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
-          <button onClick={() => setShowFilters((v) => !v)} style={{
-            ...btnSecondary,
-            background: showFilters ? T.accentSoft : T.surface,
-            color: showFilters ? T.accent : T.ink,
-          }}>
+
+          <Button variant={showFilters ? 'secondary' : 'outline'} size="default" onClick={() => setShowFilters((v) => !v)}>
+            <SlidersHorizontal className="h-4 w-4" />
             Filters
             {hasAdvancedFilters && (
-              <span style={{
-                marginLeft: 6, background: T.accent, color: '#fff', borderRadius: 10,
-                fontSize: 11, fontWeight: 700, padding: '1px 6px',
-              }}>
+              <Badge variant="default" className="ml-1 h-5 px-1.5 text-[10px]">
                 {[minTotal, dateFrom, dateTo].filter(Boolean).length}
-              </span>
+              </Badge>
             )}
-          </button>
-          <button onClick={() => void exportCsv('/api/invoices/export/csv')} style={btnSecondary}>
-            Export CSV
-          </button>
-          <button onClick={() => void exportCsv('/api/invoices/export/line-items.csv')} style={btnSecondary}>
-            Items CSV
-          </button>
-          <button
-            onClick={() => setShowUpload((v) => !v)}
-            style={{
-              padding: '8px 16px', border: 'none', borderRadius: 8,
-              background: showUpload ? T.accentHover : T.accent, color: '#fff',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
-            }}
-          >
-            Upload bills
-          </button>
+          </Button>
+
+          <Button variant="outline" onClick={() => void exportCsv('/api/invoices/export/csv')}>
+            <Download className="h-4 w-4" /> CSV
+          </Button>
+          <Button variant="outline" onClick={() => void exportCsv('/api/invoices/export/line-items.csv')}>
+            <Download className="h-4 w-4" /> Items
+          </Button>
+
+          <Button onClick={() => setShowUpload((v) => !v)}>
+            <Upload className="h-4 w-4" /> Upload bills
+          </Button>
         </div>
       </div>
 
-      {/* Advanced filters */}
+      {/* ─── Advanced filters ─── */}
       {showFilters && (
-        <div style={{
-          margin: '0 28px 12px', padding: '16px 20px', background: T.surface,
-          border: `1px solid ${T.border}`, borderRadius: 10,
-          display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap',
-        }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>MIN TOTAL</div>
-            <input type="number" placeholder="0" value={minTotal} onChange={(e) => setMinTotal(e.target.value)}
-              style={{ padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, fontFamily: T.font, width: 120 }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>ISSUED FROM</div>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-              style={{ padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, fontFamily: T.font }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>ISSUED TO</div>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-              style={{ padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: 6, fontSize: 13, fontFamily: T.font }} />
-          </div>
-          <button onClick={() => { setMinTotal(''); setDateFrom(''); setDateTo(''); }} style={btnSecondary}>
-            Clear filters
-          </button>
-        </div>
-      )}
-
-      {/* Email intake info banner */}
-      {showUpload && intakeEmail && (
-        <div style={{
-          margin: '0 28px 8px', padding: '12px 18px',
-          background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10,
-          display: 'flex', alignItems: 'center', gap: 10,
-        }}>
-          <span style={{ fontSize: 18 }}>📧</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#1E40AF' }}>Email invoices directly</div>
-            <div style={{ fontSize: 12, color: '#3B82F6', marginTop: 2 }}>
-              Send PDF/image attachments to <strong>{intakeEmail}</strong> — they'll be picked up automatically and processed via OCR.
+        <Card className="mx-7 mb-3 p-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase text-muted-foreground">Min total</label>
+              <Input type="number" placeholder="0" value={minTotal} onChange={(e) => setMinTotal(e.target.value)} className="w-28" />
             </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase text-muted-foreground">Issued from</label>
+              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase text-muted-foreground">Issued to</label>
+              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => { setMinTotal(''); setDateFrom(''); setDateTo(''); }}>
+              Clear filters
+            </Button>
           </div>
-          <button
-            onClick={() => { navigator.clipboard.writeText(intakeEmail); setToast('Email copied!'); }}
-            style={{ padding: '6px 12px', fontSize: 11, fontWeight: 600, background: '#DBEAFE', border: '1px solid #93C5FD', borderRadius: 6, cursor: 'pointer', color: '#1E40AF', fontFamily: T.font }}
-          >
-            Copy
-          </button>
-        </div>
+        </Card>
       )}
 
-      {/* Upload */}
+      {/* ─── Email intake banner ─── */}
+      {showUpload && intakeEmail && (
+        <Card className="mx-7 mb-2 border-info/20 bg-info-soft">
+          <div className="flex items-center gap-3 p-4">
+            <Mail className="h-5 w-5 text-primary shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-primary">Email invoices directly</p>
+              <p className="mt-0.5 text-xs text-primary/70">
+                Send PDF/image attachments to <strong>{intakeEmail}</strong> — they'll be picked up automatically and processed via OCR.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(intakeEmail); setToast('Email copied!'); }}>
+              <Copy className="h-3.5 w-3.5" /> Copy
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* ─── Upload panel ─── */}
       {showUpload && (
         <div
           onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
-          style={{
-            margin: '0 28px 12px', padding: '28px 24px',
-            border: `2px dashed ${dragging ? T.accent : T.border}`, borderRadius: 10,
-            background: dragging ? T.accentSoft : T.surface, textAlign: 'center',
-          }}
+          className={cn(
+            'mx-7 mb-3 rounded-xl border-2 border-dashed p-7 text-center transition-colors',
+            dragging ? 'border-primary bg-secondary' : 'border-border bg-card',
+          )}
         >
-          <div style={{ fontSize: 15, fontWeight: 600, color: T.ink, marginBottom: 6 }}>Drop PDF invoices here</div>
-          <div style={{ fontSize: 13, color: T.inkSoft, marginBottom: 16 }}>or browse to select files</div>
-          <input type="text" aria-label="Batch name" placeholder="Batch name (optional)" value={batchName}
-            onChange={(e) => setBatchName(e.target.value)}
-            style={{ display: 'block', margin: '0 auto 14px', maxWidth: 280, width: '100%', padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 13, fontFamily: T.font }} />
-          <label style={{
-            display: 'inline-block', padding: '8px 20px', background: T.accent, color: '#fff',
-            borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
-          }}>
+          <p className="text-base font-semibold text-foreground mb-1">Drop PDF invoices here</p>
+          <p className="text-sm text-muted-foreground mb-4">or browse to select files</p>
+
+          <Input type="text" aria-label="Batch name" placeholder="Batch name (optional)" value={batchName}
+            onChange={(e) => setBatchName(e.target.value)} className="mx-auto mb-3 max-w-[280px]" />
+
+          <label className={cn('inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary-hover transition-colors', busy && 'opacity-60 cursor-default')}>
+            <Upload className="h-4 w-4" />
             {busy ? 'Uploading…' : 'Browse files'}
-            <input type="file" multiple accept="application/pdf,.pdf" disabled={busy} style={{ display: 'none' }}
-              onChange={(e) => {
-                const input = e.currentTarget;
-                if (input.files?.length) void handleFiles(input.files);
-                input.value = '';
-              }}
-            />
+            <input type="file" multiple accept="application/pdf,.pdf" disabled={busy} className="hidden"
+              onChange={(e) => { const input = e.currentTarget; if (input.files?.length) void handleFiles(input.files); input.value = ''; }} />
           </label>
-          <div style={{ marginTop: 18, borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
-            <div style={{ fontSize: 12, color: T.inkSoft, marginBottom: 8 }}>…or paste URLs / server file paths, one per line</div>
-            <textarea aria-label="Import URLs or paths" value={importText} onChange={(e) => setImportText(e.target.value)} rows={3}
-              placeholder={'https://bucket.s3.amazonaws.com/invoice.pdf\n/data/import/invoice.pdf'}
-              style={{ width: '100%', maxWidth: 480, padding: '8px 12px', border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12, fontFamily: T.mono, resize: 'vertical' }}
-            />
-            <div>
-              <button onClick={() => void handleImport()} disabled={busy} style={{
-                marginTop: 10, padding: '8px 20px', background: T.accent, color: '#fff', border: 'none',
-                borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, fontFamily: T.font,
-              }}>
-                {busy ? 'Importing…' : 'Import'}
-              </button>
-            </div>
+
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="mb-2 text-xs text-muted-foreground">…or paste URLs / server file paths, one per line</p>
+            <Textarea aria-label="Import URLs or paths" value={importText} onChange={(e) => setImportText(e.target.value)}
+              rows={3} placeholder={'https://bucket.s3.amazonaws.com/invoice.pdf\n/data/import/invoice.pdf'}
+              className="mx-auto max-w-lg font-mono text-xs" />
+            <Button onClick={() => void handleImport()} disabled={busy} className="mt-3">
+              {busy ? 'Importing…' : 'Import'}
+            </Button>
           </div>
         </div>
       )}
 
-      {/* Status pills */}
-      <div style={{ padding: '4px 28px 0', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {/* ─── Status pills ─── */}
+      <div className="flex flex-wrap gap-1.5 px-7 pt-1">
         {STATUS_PILLS.map(({ key, label }) => {
           const active = statusFilter === key;
           return (
-            <button
-              key={key}
-              onClick={() => {
-                setStatusFilter(key);
-                setReviewCodeFilter('');
-                setCurrentPage(1);
-              }}
-              style={{
-              padding: '6px 14px', borderRadius: 999,
-              border: `1px solid ${active ? T.accent : T.border}`,
-              background: active ? T.accent : T.surface,
-              color: active ? '#fff' : T.inkSoft,
-              fontSize: 13, fontWeight: active ? 600 : 500, cursor: 'pointer', fontFamily: T.font,
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
+            <button key={key}
+              onClick={() => { setStatusFilter(key); setReviewCodeFilter(''); setCurrentPage(1); }}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors cursor-pointer',
+                active
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-card text-muted-foreground hover:bg-muted',
+              )}
+            >
               {label}
-              <span style={{
-                fontSize: 11, fontWeight: 600,
-                color: active ? '#fff' : T.inkFaint,
-                background: active ? 'rgba(255,255,255,0.22)' : '#F0EEE6',
-                borderRadius: 10, padding: '1px 7px', minWidth: 18, textAlign: 'center',
-              }}>
+              <span className={cn(
+                'rounded-full px-1.5 py-px text-[11px] font-semibold min-w-[18px] text-center',
+                active ? 'bg-white/20 text-primary-foreground' : 'bg-muted text-faint',
+              )}>
                 {counts[key]}
               </span>
             </button>
@@ -717,36 +453,25 @@ export function InvoicesPage() {
         })}
       </div>
 
-      {/* Needs-review reason chips */}
+      {/* ─── Review code chips ─── */}
       {statusFilter === 'NEEDS_REVIEW' && (
-        <div style={{ padding: '8px 28px 0', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: T.inkFaint, marginRight: 4 }}>Why:</span>
+        <div className="flex flex-wrap items-center gap-1.5 px-7 pt-2">
+          <span className="mr-1 text-xs text-faint">Why:</span>
           {REVIEW_CODE_CHIPS.map(({ key, label, countKey }) => {
             const active = reviewCodeFilter === key;
             const n = reviewCodeCounts[countKey] ?? 0;
             return (
-              <button
-                key={key || 'all'}
-                onClick={() => {
-                  setReviewCodeFilter(key);
-                  setCurrentPage(1);
-                }}
-                style={{
-                  padding: '4px 12px', borderRadius: 999,
-                  border: `1px solid ${active ? T.accent : T.border}`,
-                  background: active ? '#E8F0FE' : T.surface,
-                  color: active ? T.accent : T.inkSoft,
-                  fontSize: 12, fontWeight: active ? 600 : 500, cursor: 'pointer', fontFamily: T.font,
-                  display: 'flex', alignItems: 'center', gap: 5,
-                }}
+              <button key={key || 'all'}
+                onClick={() => { setReviewCodeFilter(key); setCurrentPage(1); }}
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer',
+                  active
+                    ? 'border-primary bg-secondary text-primary'
+                    : 'border-border bg-card text-muted-foreground hover:bg-muted',
+                )}
               >
                 {label}
-                <span style={{
-                  fontSize: 10, fontWeight: 600,
-                  color: active ? T.accent : T.inkFaint,
-                  background: active ? 'rgba(26,115,232,0.12)' : '#F0EEE6',
-                  borderRadius: 8, padding: '0 6px',
-                }}>
+                <span className={cn('rounded-md px-1.5 text-[10px] font-semibold', active ? 'text-primary' : 'text-faint')}>
                   {n}
                 </span>
               </button>
@@ -755,316 +480,201 @@ export function InvoicesPage() {
         </div>
       )}
 
+      {/* ─── Batch progress ─── */}
       {batchFilter && (() => {
         const b = batches.find((x) => x.id === batchFilter);
         if (!b) return null;
         const pct = b.total ? Math.round((b.completed / b.total) * 100) : 0;
         return (
-          <div style={{ margin: '12px 28px 0', padding: '12px 16px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+          <Card className="mx-7 mt-3 p-4">
+            <div className="mb-2 flex justify-between text-sm font-semibold">
               <span>{b.name}</span>
-              <span style={{ color: T.inkSoft, fontWeight: 500 }}>
+              <span className="font-medium text-muted-foreground">
                 {b.completed}/{b.total} done{b.failed ? ` · ${b.failed} failed` : ''}{b.processing ? ` · ${b.processing} in progress` : ''}
               </span>
             </div>
-            <div style={{ height: 6, borderRadius: 3, background: T.border, overflow: 'hidden' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: T.accent, transition: 'width 0.3s' }} />
+            <div className="h-1.5 overflow-hidden rounded-full bg-border">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
-          </div>
+          </Card>
         );
       })()}
 
+      {/* ─── Bulk action bar ─── */}
       {selected.size > 0 && (
-        <div style={{
-          margin: '12px 28px 0', padding: '10px 16px', background: T.ink, borderRadius: 8,
-          display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{selected.size} selected</span>
-          <button onClick={() => void handleBulkReextract()} style={bulkBtn}>Re-extract</button>
-          <button onClick={() => void exportCsv('/api/invoices/export/csv')} style={bulkBtn}>Export CSV</button>
-          <button onClick={() => void handleBulkDelete()} style={{ ...bulkBtn, color: '#ffb0a8' }}>Delete</button>
-          <button onClick={() => setSelected(new Set())} style={{ ...bulkBtn, marginLeft: 'auto' }}>Clear</button>
+        <div className="mx-7 mt-3 flex items-center gap-3 rounded-lg bg-foreground px-4 py-2.5">
+          <span className="text-sm font-semibold text-card">{selected.size} selected</span>
+          <Button variant="ghost" size="sm" className="text-card/80 hover:text-card hover:bg-white/10" onClick={() => void handleBulkReextract()}>
+            <RotateCcw className="h-3.5 w-3.5" /> Re-extract
+          </Button>
+          <Button variant="ghost" size="sm" className="text-card/80 hover:text-card hover:bg-white/10" onClick={() => void exportCsv('/api/invoices/export/csv')}>
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+          <Button variant="ghost" size="sm" className="text-danger-soft hover:text-danger hover:bg-white/10" onClick={() => void handleBulkDelete()}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+          <Button variant="ghost" size="sm" className="ml-auto text-card/60 hover:text-card hover:bg-white/10" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
         </div>
       )}
 
-      {/* Two-column: table + preview */}
-      <div className="inv-split" style={{
-        padding: '16px 28px 40px', display: 'flex', gap: 16, alignItems: 'flex-start',
-      }}>
-        <div style={{
-          flex: '1.35 1 0', minWidth: 0, background: T.surface,
-          border: `1px solid ${T.border}`, borderRadius: 10, overflow: 'hidden',
-          display: 'flex', flexDirection: 'column',
-        }}>
-          <div style={{ flex: 1, overflowY: 'auto', maxHeight: 'calc(100vh - 280px)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontFamily: T.font }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}`, background: '#FAF9F5' }}>
-                <th style={thBase}>
-                  <input
-                    type="checkbox"
-                    checked={isAllSelected}
-                    ref={(el) => { if (el) el.indeterminate = isPartialSelected; }}
-                    onChange={toggleAll}
-                    style={{ cursor: 'pointer' }}
-                  />
-                </th>
-                <th style={{ ...thBase, cursor: 'pointer' }} onClick={() => toggleSort('status')}>
-                  Status {sort === 'status' ? (dir === 'asc' ? '▲' : '▼') : ''}
-                </th>
-                <th style={{ ...thBase, cursor: 'pointer' }} onClick={() => toggleSort('vendorName')}>
-                  Vendor {sort === 'vendorName' ? (dir === 'asc' ? '▲' : '▼') : ''}
-                </th>
-                <th style={{ ...thBase, cursor: 'pointer' }} onClick={() => toggleSort('invoiceDate')}>
-                  Date {sort === 'invoiceDate' ? (dir === 'asc' ? '▲' : '▼') : ''}
-                </th>
-                <th style={thBase}>Pipeline</th>
-                <th style={{ ...thBase, textAlign: 'right' }}>Items</th>
-                <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer' }} onClick={() => toggleSort('totalAmount')}>
-                  Total {sort === 'totalAmount' ? (dir === 'asc' ? '▲' : '▼') : ''}
-                </th>
-                <th style={{ ...thBase, textAlign: 'right' }}>Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && allInvoices.length === 0 && skeletonRows.map((_, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                  <td style={tdBase} />
-                  {Array.from({ length: 7 }).map((__, j) => (
-                    <td key={j} style={tdBase}>
-                      <div style={{ height: 14, borderRadius: 4, background: '#EDEAE2', width: j === 1 ? '70%' : '55%' }} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
+      {/* ─── Two-column: table + preview ─── */}
+      <div className="inv-split flex items-start gap-4 px-7 pt-4 pb-10">
+        <Card className="flex min-w-0 flex-[1.35] flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="w-9">
+                    <input type="checkbox" checked={isAllSelected}
+                      ref={(el) => { if (el) el.indeterminate = isPartialSelected; }}
+                      onChange={toggleAll} className="cursor-pointer" />
+                  </TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => toggleSort('status')}>Status{sortIcon('status')}</TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => toggleSort('vendorName')}>Vendor{sortIcon('vendorName')}</TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => toggleSort('invoiceDate')}>Date{sortIcon('invoiceDate')}</TableHead>
+                  <TableHead>Pipeline</TableHead>
+                  <TableHead className="text-right">Items</TableHead>
+                  <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('totalAmount')}>Total{sortIcon('totalAmount')}</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {/* Loading skeleton */}
+                {loading && allInvoices.length === 0 && Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell />
+                    {Array.from({ length: 7 }).map((__, j) => (
+                      <TableCell key={j}><div className={cn('h-3.5 rounded bg-muted animate-pulse', j === 1 ? 'w-3/4' : 'w-1/2')} /></TableCell>
+                    ))}
+                  </TableRow>
+                ))}
 
-              {!loading && displayedRows.length === 0 && (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '56px 24px' }}>
-                    {allInvoices.length === 0 && !hasSearch && !hasAdvancedFilters && statusFilter === 'ALL' ? (
-                      <div>
-                        <div style={{ fontFamily: T.heading, fontSize: 16, fontWeight: 600, color: T.ink, marginBottom: 8 }}>No invoices yet</div>
-                        <div style={{ fontSize: 13, color: T.inkSoft, marginBottom: 20 }}>Upload your first invoice to get started.</div>
-                        <button onClick={() => setShowUpload(true)} style={{
-                          padding: '9px 20px', background: T.accent, color: '#fff', border: 'none',
-                          borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
-                        }}>
-                          Upload bills
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ color: T.inkSoft, fontSize: 13 }}>No invoices match this filter.</div>
-                    )}
-                  </td>
-                </tr>
-              )}
-
-              {displayedRows.map((row) => {
-                const isChecked = selected.has(row.id);
-                const isPreview = previewInvoice?.id === row.id;
-                return (
-                  <tr
-                    key={row.id}
-                    tabIndex={0}
-                    onClick={() => setPreviewId(row.id)}
-                    onDoubleClick={() => navigate('/invoices/' + row.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') navigate('/invoices/' + row.id);
-                      if (e.key === ' ') { e.preventDefault(); setPreviewId(row.id); }
-                    }}
-                    style={{
-                      borderBottom: `1px solid ${T.border}`,
-                      background: isPreview ? T.accentSoft : undefined,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <td style={{ ...tdBase, width: 36 }} onClick={(e) => { e.stopPropagation(); toggleRow(row.id); }}>
-                      <input type="checkbox" checked={isChecked} onChange={() => toggleRow(row.id)}
-                        onClick={(e) => e.stopPropagation()} style={{ cursor: 'pointer' }} />
-                    </td>
-                    <td style={tdBase}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <StatusDot status={row.status} />
-                        {isDuplicate(row) && (
-                          <span style={{
-                            fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
-                            padding: '1px 5px', borderRadius: 3,
-                            background: '#FEF3CD', color: '#8B6914', border: '1px solid #F0C040',
-                          }}>DUP</span>
-                        )}
-                        {(row.status === 'PROCESSING' || row.status === 'PENDING') && (
-                          <button onClick={(e) => { e.stopPropagation(); void handleCancel(row.id); }}
-                            title="Stop this extraction" style={stopBtn}>Stop</button>
-                        )}
-                        {row.status === 'DRAFT' && (
-                          <button onClick={(e) => { e.stopPropagation(); void handleProcessOcr(row.id); }}
-                            title="Start OCR for this email draft"
-                            style={{
-                              padding: '3px 10px', border: 'none', borderRadius: 5,
-                              background: T.accent, color: '#fff',
-                              fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                              fontFamily: T.font, whiteSpace: 'nowrap',
-                            }}>Process OCR</button>
-                        )}
-                      </div>
-                    </td>
-                    <td style={tdBase}>
-                      <div style={{ fontWeight: 600, color: T.accent }}>{row.vendorName ?? '—'}</div>
-                      {row.fileName && (
-                        <div style={{ fontSize: 11, color: T.inkFaint, marginTop: 2, fontFamily: T.mono }}>
-                          {row.fileName}
-                        </div>
+                {/* Empty state */}
+                {!loading && displayedRows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8}>
+                      {allInvoices.length === 0 && !hasSearch && !hasAdvancedFilters && statusFilter === 'ALL' ? (
+                        <EmptyState
+                          icon={<Upload className="h-10 w-10" />}
+                          title="No invoices yet"
+                          description="Upload your first invoice to get started."
+                          action={<Button onClick={() => setShowUpload(true)}>Upload bills</Button>}
+                        />
+                      ) : (
+                        <EmptyState title="No invoices match this filter" />
                       )}
-                    </td>
-                    <td style={{ ...tdBase, color: T.inkSoft }}>{dateFmt(row.invoiceDate)}</td>
-                    <td style={tdBase}>
-                      {row.extractionProvider || row.provider ? (
-                        <div>
-                          <span style={{
-                            display: 'inline-block', padding: '2px 8px',
-                            background: row.pipelineMode === 'single' ? T.accentSoft : '#F3F2EC',
-                            border: `1px solid ${row.pipelineMode === 'single' ? '#C5D4E4' : T.border}`,
-                            borderRadius: 5, fontSize: 11, fontWeight: 600,
-                            color: row.pipelineMode === 'single' ? T.accent : T.inkSoft,
-                          }}>
-                            {row.pipelineMode === 'single' ? 'Single' : 'Split'}
-                          </span>
-                          {(row.fallbackAttempts ?? 0) > 1 && (
-                            <span style={{
-                              display: 'inline-block', marginLeft: 4, padding: '2px 6px',
-                              background: T.warnSoft, border: `1px solid ${T.border}`,
-                              borderRadius: 5, fontSize: 10, fontWeight: 700, color: T.amber,
-                            }} title="Primary failed — result from fallback model">
-                              via fallback
-                            </span>
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {/* Data rows */}
+                {displayedRows.map((row) => {
+                  const isChecked = selected.has(row.id);
+                  const isPreview = previewInvoice?.id === row.id;
+                  return (
+                    <TableRow key={row.id} tabIndex={0}
+                      onClick={() => setPreviewId(row.id)}
+                      onDoubleClick={() => navigate('/invoices/' + row.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') navigate('/invoices/' + row.id); if (e.key === ' ') { e.preventDefault(); setPreviewId(row.id); } }}
+                      className={cn('cursor-pointer', isPreview && 'bg-secondary')}
+                    >
+                      <TableCell className="w-9" onClick={(e) => { e.stopPropagation(); toggleRow(row.id); }}>
+                        <input type="checkbox" checked={isChecked} onChange={() => toggleRow(row.id)}
+                          onClick={(e) => e.stopPropagation()} className="cursor-pointer" />
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusDot status={row.status} />
+                          {isDuplicate(row) && (
+                            <Badge variant="warning" className="text-[9px] px-1.5 py-0">DUP</Badge>
                           )}
-                          <div style={{ fontSize: 10, color: T.inkFaint, marginTop: 2, fontFamily: T.mono }}>
-                            {(() => {
-                              const prov = row.extractionProvider ?? row.provider;
-                              const model = row.extractionModel ?? row.structuringModel;
-                              if (prov === 'azapi') return 'AzAPI OCR';
-                              if (prov && model && !model.startsWith(prov)) return `${prov} · ${model}`;
-                              return model ?? prov ?? '—';
-                            })()}
-                          </div>
+                          {(row.status === 'PROCESSING' || row.status === 'PENDING') && (
+                            <Button variant="outline" size="sm" className="h-5 px-2 text-[11px] text-danger border-danger/30"
+                              onClick={(e) => { e.stopPropagation(); void handleCancel(row.id); }}>Stop</Button>
+                          )}
+                          {row.status === 'DRAFT' && (
+                            <Button size="sm" className="h-5 px-2 text-[11px]"
+                              onClick={(e) => { e.stopPropagation(); void handleProcessOcr(row.id); }}>Process OCR</Button>
+                          )}
                         </div>
-                      ) : <span style={{ color: T.inkFaint }}>—</span>}
-                    </td>
-                    <td style={{ ...tdBase, textAlign: 'right', color: T.inkSoft, fontFamily: T.mono }}>
-                      {row.itemCount ?? '—'}
-                    </td>
-                    <td style={{ ...tdBase, textAlign: 'right', fontWeight: 600, fontFamily: T.mono, color: T.ink }}>
-                      {money(row.netAmount ?? row.totalAmount, row.currency ?? 'INR')}
-                    </td>
-                    <td style={{ ...tdBase, textAlign: 'right', fontFamily: T.mono, color: T.inkSoft }}
-                      title={
-                        row.totalInputTokens != null
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="font-semibold text-primary">{row.vendorName ?? '—'}</div>
+                        {row.fileName && <div className="mt-0.5 font-mono text-[11px] text-faint truncate max-w-[200px]">{row.fileName}</div>}
+                      </TableCell>
+
+                      <TableCell className="text-muted-foreground">{dateFmt(row.invoiceDate)}</TableCell>
+
+                      <TableCell>
+                        {row.extractionProvider || row.provider ? (
+                          <div>
+                            <Badge variant={row.pipelineMode === 'single' ? 'info' : 'muted'} className="text-[11px]">
+                              {row.pipelineMode === 'single' ? 'Single' : 'Split'}
+                            </Badge>
+                            {(row.fallbackAttempts ?? 0) > 1 && (
+                              <Badge variant="warning" className="ml-1 text-[10px]">via fallback</Badge>
+                            )}
+                            <div className="mt-0.5 font-mono text-[10px] text-faint">
+                              {(() => {
+                                const prov = row.extractionProvider ?? row.provider;
+                                const model = row.extractionModel ?? row.structuringModel;
+                                if (prov === 'azapi') return 'AzAPI OCR';
+                                if (prov && model && !model.startsWith(prov)) return `${prov} · ${model}`;
+                                return model ?? prov ?? '—';
+                              })()}
+                            </div>
+                          </div>
+                        ) : <span className="text-faint">—</span>}
+                      </TableCell>
+
+                      <TableCell className="text-right font-mono text-muted-foreground">{row.itemCount ?? '—'}</TableCell>
+                      <TableCell className="text-right font-mono font-semibold">{money(row.netAmount ?? row.totalAmount, row.currency ?? 'INR')}</TableCell>
+                      <TableCell className="text-right font-mono text-muted-foreground"
+                        title={row.totalInputTokens != null
                           ? `Input: ${row.totalInputTokens.toLocaleString()} tkn = ${costFmt(row.totalInputCostUsd ?? 0)}  +  Output: ${row.totalOutputTokens?.toLocaleString() ?? 0} tkn = ${costFmt(row.totalOutputCostUsd ?? 0)}  =  Total: ${costFmt(row.costEstimate)}`
                           : `${(row.totalTokens ?? 0).toLocaleString()} tokens · ${costFmt(row.costEstimate)}`
-                      }
-                    >
-                      {costFmt(row.costEstimate)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                        }
+                      >
+                        {costFmt(row.costEstimate)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
 
-          {/* Pagination bar */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '12px 16px', borderTop: '1px solid #E4E1D3', fontSize: 13, color: '#67665D',
-          }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
-              Showing page {currentPage} of {totalPages} ({totalRecords.toLocaleString()} records)
+          {/* ─── Pagination ─── */}
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted-foreground">
+            <span className="font-mono text-xs">
+              Page {currentPage} of {totalPages} ({totalRecords.toLocaleString()} records)
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                Page size
-                <select
-                  value={pageSize}
-                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1);  }}
-                  style={{
-                    padding: '4px 8px', border: '1px solid #E4E1D3', borderRadius: 4,
-                    fontSize: 13, background: '#fff', cursor: 'pointer',
-                  }}
-                >
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-xs">
+                Per page
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                  className="h-7 rounded border border-input bg-card px-2 text-xs cursor-pointer">
                   {[10, 25, 50, 100].map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </label>
-              <button
-                disabled={currentPage <= 1 || loading}
-                onClick={() => { setCurrentPage((p) => p - 1);  }}
-                style={{
-                  padding: '6px 16px', fontSize: 13, fontWeight: 500, borderRadius: 4,
-                  border: '1px solid #E4E1D3', background: currentPage <= 1 ? '#f5f5f0' : '#fff',
-                  color: currentPage <= 1 ? '#aaa' : '#1B1D19', cursor: currentPage <= 1 ? 'default' : 'pointer',
-                }}
-              >
-                Previous
-              </button>
-              <button
-                disabled={currentPage >= totalPages || loading}
-                onClick={() => { setCurrentPage((p) => p + 1);  }}
-                style={{
-                  padding: '6px 16px', fontSize: 13, fontWeight: 500, borderRadius: 4,
-                  border: '1px solid #E4E1D3', background: currentPage >= totalPages ? '#f5f5f0' : '#fff',
-                  color: currentPage >= totalPages ? '#aaa' : '#1B1D19', cursor: currentPage >= totalPages ? 'default' : 'pointer',
-                }}
-              >
-                Next
-              </button>
+              <Button variant="outline" size="sm" disabled={currentPage <= 1 || loading} onClick={() => setCurrentPage((p) => p - 1)}>
+                <ChevronLeft className="h-4 w-4" /> Prev
+              </Button>
+              <Button variant="outline" size="sm" disabled={currentPage >= totalPages || loading} onClick={() => setCurrentPage((p) => p + 1)}>
+                Next <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
           </div>
-        </div>
+        </Card>
 
         <DocumentPreview invoice={previewInvoice} />
       </div>
 
-      {toast && (
-        <Toast message={toast} actionLabel="Dismiss" onAction={() => setToast('')} />
-      )}
+      {toast && <Toast message={toast} onClose={() => setToast('')} />}
     </div>
   );
 }
-
-const thBase: React.CSSProperties = {
-  padding: '10px 14px',
-  textAlign: 'left',
-  fontSize: 11,
-  fontWeight: 600,
-  color: '#67665D',
-  letterSpacing: '0.04em',
-  textTransform: 'uppercase',
-  whiteSpace: 'nowrap',
-};
-
-const tdBase: React.CSSProperties = {
-  padding: '12px 14px',
-  verticalAlign: 'middle',
-  color: '#1B1D19',
-};
-
-const stopBtn: React.CSSProperties = {
-  background: 'transparent',
-  border: '1px solid #E8B4B0',
-  color: '#B3261E',
-  borderRadius: 5,
-  fontSize: 11,
-  fontWeight: 600,
-  padding: '2px 8px',
-  cursor: 'pointer',
-};
-
-const bulkBtn: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.1)',
-  border: '1px solid rgba(255,255,255,0.2)',
-  color: '#fff',
-  borderRadius: 6,
-  fontSize: 12,
-  fontWeight: 500,
-  padding: '5px 12px',
-  cursor: 'pointer',
-};

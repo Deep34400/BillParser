@@ -7,6 +7,7 @@ Index for how the backend is wired. Table columns live in [DATABASE.md](./DATABA
 | Tables, FKs, indexes | [DATABASE.md](./DATABASE.md) |
 | OCR pipeline | [src/ocr/README.md](./src/ocr/README.md) |
 | OCR cost math | [src/ocr/COST.md](./src/ocr/COST.md) |
+| Multi-tenancy & RBAC | [src/tenant/README.md](./src/tenant/README.md) |
 | Auth / tokens | [src/users/README.md](./src/users/README.md) |
 | Vendor registry | [src/vendor/README.md](./src/vendor/README.md) |
 | Analytics | [src/analytics/README.md](./src/analytics/README.md) |
@@ -37,17 +38,36 @@ Index for how the backend is wired. Table columns live in [DATABASE.md](./DATABA
 platform/src/
 ├── config/          # db.ts (Sequelize + NUMERIC parser), env.ts, gcs.ts
 ├── db/              # schema.ts (initModels + associations), migrate.ts
-├── ocr/             # pipeline, providers, parser, transformer, models, repo, routes
+├── middleware/
+│   ├── auth.ts            # JWT + API key authentication
+│   ├── tenantContext.ts   # Resolves req.orgId + req.orgRole from OrgMember
+│   └── errorHandler.ts   # Global Fastify error handler (AppError → HTTP)
+├── ocr/             # pipeline, providers, parser, transformer, models, repo
+│   ├── route.ts           # Thin HTTP controller (338 lines)
+│   └── service/           # Business logic
+│       ├── invoiceService.ts  # All invoice operations (388 lines)
+│       └── exportService.ts   # CSV export logic
+├── tenant/          # Multi-tenancy (Phase 2)
+│   ├── models/            # Organization, OrgMember Sequelize models
+│   ├── repository.ts      # Org + member CRUD
+│   ├── service.ts         # Org lifecycle, member invite, role changes
+│   └── route.ts           # /api/orgs/* endpoints
 ├── users/           # auth, API keys, token ledger
 ├── vendor/          # vendor upsert from invoices
 ├── analytics/       # spend / cost KPIs
 ├── fraud/           # duplicate, GST, price, odometer checks
 ├── email-intake/    # IMAP → DRAFT bills
 ├── odometerOcr/     # standalone odometer extract
-├── shared/          # constants, settings, storage, cache, types
-├── middleware/      # JWT + API key
+├── shared/
+│   ├── constants.ts       # Bill types, OCR statuses, roles
+│   ├── errors.ts          # AppError hierarchy (NotFound, Validation, Forbidden, etc.)
+│   ├── roles.ts           # RBAC permission matrix (can() + permissionsFor())
+│   ├── settings.ts        # Pipeline settings
+│   ├── storage.ts         # GCS upload/download
+│   ├── cache.ts           # Analytics cache
+│   └── types.ts           # BillDoc, ParsedInvoiceData, etc.
 ├── routes/          # settings + config
-├── app.ts
+├── app.ts           # Fastify factory (auth → tenant → errorHandler → routes)
 └── index.ts         # init DB, seed admin, listen
 ```
 
@@ -58,11 +78,39 @@ Models live in `{domain}/models/`. `db/schema.ts` is the only place that calls `
 ## Database Layer (code)
 
 - **`config/db.ts`** — singleton Sequelize from `DATABASE_URL`. Pool `max: 2` (Cloud Run). `pg` OID 1700 parser so NUMERIC is a JS number.
-- **`db/schema.ts`** — init order: Vendor → User → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential. Associations: Bill↔Vendor, Bill↔BillPart, User↔ApiKey, User↔TokenTransaction.
+- **`db/schema.ts`** — init order: Organization → Vendor → User → OrgMember → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential. Associations: Org↔OrgMember, Org↔Bill, Bill↔Vendor, Bill↔BillPart, User↔OrgMember, User↔ApiKey, User↔TokenTransaction.
 - **`db/migrate.ts`** — `CREATE EXTENSION pg_trgm` + `sync({ alter: true })`. Prefer sequelize-cli migrations in production.
 - **`shared/constants.ts`** — bill types, OCR statuses, roles, pagination, pricing defaults.
 
-Route → repository → Sequelize model → PostgreSQL. Repositories map camelCase rows ↔ snake_case domain docs (`BillDoc`, `UserDoc`).
+Route → Service → Repository → Sequelize model → PostgreSQL. Repositories map camelCase rows ↔ snake_case domain docs (`BillDoc`, `UserDoc`, `OrgDoc`).
+
+## Request Lifecycle
+
+```
+HTTP Request
+  → authPlugin          (JWT/API key → req.appUser)
+  → tenantPlugin         (OrgMember lookup → req.orgId + req.orgRole)
+  → route handler        (thin controller — parse request, call service)
+  → service layer        (business logic, validation, RBAC checks)
+  → repository           (Sequelize CRUD, scoped by orgId when present)
+  → global errorHandler  (AppError → structured JSON response)
+```
+
+## Error Handling
+
+Custom error classes in `shared/errors.ts`:
+
+| Error Class | HTTP Status | Usage |
+|-------------|-------------|-------|
+| `NotFoundError` | 404 | Resource not found |
+| `ValidationError` | 400 | Invalid input |
+| `AuthenticationError` | 401 | Not logged in |
+| `ForbiddenError` | 403 | Insufficient permissions |
+| `InsufficientBalanceError` | 402 | Token balance too low |
+| `UnsupportedFileError` | 415 | Not a valid PDF/image |
+| `PipelineError` | 500 | OCR pipeline failure |
+
+The global error handler (`middleware/errorHandler.ts`) catches all errors and returns `{ success: false, message }` with the appropriate HTTP status.
 
 Full column list: [DATABASE.md](./DATABASE.md).
 
@@ -150,6 +198,18 @@ Gemini on Cloud Run uses Vertex + ADC (no `GEMINI_API_KEY`).
 | `GET/POST` | `/api/admin/users` | Admin |
 | `PATCH` | `/api/admin/users/:id/block` | Admin |
 | `POST` | `/api/admin/users/:id/tokens` | Admin |
+
+### Organizations (Multi-Tenancy)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/orgs` | Create organization (user becomes owner) |
+| `GET` | `/api/orgs/me` | Get current user's org + role |
+| `PATCH` | `/api/orgs` | Update org name/settings |
+| `GET` | `/api/orgs/members` | List org members |
+| `POST` | `/api/orgs/members` | Invite user to org |
+| `PATCH` | `/api/orgs/members/:userId/role` | Change member's role |
+| `DELETE` | `/api/orgs/members/:userId` | Remove member from org |
 
 ### Other
 
