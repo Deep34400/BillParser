@@ -1,19 +1,18 @@
 /**
- * Explicit migration runner — never auto-run on server boot (Cloud Run starts
- * many instances concurrently; auto-migrate risks concurrent DDL races).
- * Invoke via `npm run db:migrate`.
+ * Run Sequelize sync — creates tables if not present.
+ * In production, use sequelize-cli migrations instead of sync().
  */
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { db, closeDb } from '../config/db.js';
+import { sequelize } from '../config/db.js';
+import { initModels } from './schema.js';
 
-async function main() {
-  console.log('Running migrations...');
-  await migrate(db(), { migrationsFolder: './drizzle' });
-  console.log('Migrations complete.');
-  await closeDb();
+export async function runMigrations(): Promise<void> {
+  const seq = sequelize();
+  initModels(seq);
+
+  // Ensure pg_trgm extension for GIN trigram indexes
+  await seq.query('CREATE EXTENSION IF NOT EXISTS pg_trgm;');
+
+  // alter: true adds new columns but won't drop existing ones
+  await seq.sync({ alter: true });
+  console.log('[migrate] Sequelize sync complete');
 }
-
-main().catch((err) => {
-  console.error('Migration failed:', err);
-  process.exit(1);
-});

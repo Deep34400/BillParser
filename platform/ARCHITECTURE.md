@@ -1,1352 +1,228 @@
-# BillParser Platform — Complete Architecture Documentation
+# BillParser Platform — Architecture
 
-## Table of Contents
+Index for how the backend is wired. Table columns live in [DATABASE.md](./DATABASE.md). Module internals live in each domain README.
 
-1. [Tech Stack](#tech-stack)
-2. [Project Structure](#project-structure)
-3. [End-to-End Bill Processing Flow](#end-to-end-bill-processing-flow)
-4. [OCR Pipeline — Step by Step (What Happens in Parallel)](#ocr-pipeline--step-by-step)
-5. [Provider System — How to Change/Add Providers](#provider-system)
-6. [Settings & Configuration Flow](#settings--configuration-flow)
-7. [Firestore Database Design](#firestore-database-design)
-8. [API Reference](#api-reference)
-9. [Analytics Service & UI](#analytics-service--ui)
-10. [Fraud Detection Service & UI](#fraud-detection-service--ui)
-11. [Frontend Architecture](#frontend-architecture)
-12. [File-by-File Reference](#file-by-file-reference)
-13. [Local Development vs Production — What Changes](#local-vs-production)
-14. [Deployment](#deployment)
+| Topic | Doc |
+|-------|-----|
+| Tables, FKs, indexes | [DATABASE.md](./DATABASE.md) |
+| OCR pipeline | [src/ocr/README.md](./src/ocr/README.md) |
+| OCR cost math | [src/ocr/COST.md](./src/ocr/COST.md) |
+| Auth / tokens | [src/users/README.md](./src/users/README.md) |
+| Vendor registry | [src/vendor/README.md](./src/vendor/README.md) |
+| Analytics | [src/analytics/README.md](./src/analytics/README.md) |
+| Fraud | [src/fraud/README.md](./src/fraud/README.md) |
+| Email intake | [src/email-intake/README.md](./src/email-intake/README.md) |
+| Frontend | [../web/ARCHITECTURE.md](../web/ARCHITECTURE.md) |
 
 ---
 
 ## Tech Stack
 
-
-| Layer                | Technology                         | Why                                           |
-| -------------------- | ---------------------------------- | --------------------------------------------- |
-| **Runtime**          | Node.js 20 + TypeScript            | Type safety, ecosystem                        |
-| **API Framework**    | Fastify 5                          | Fast, schema validation, multipart            |
-| **Database**         | Cloud Firestore                    | Schemaless, auto-scaling, no connection pools |
-| **File Storage**     | Cloud Storage                      | Scalable blob storage for PDFs/images         |
-| **OCR Extraction**   | Mistral OCR (`mistral-ocr-latest`) | High accuracy PDF → markdown                  |
-| **AI Normalization** | Google Gemini (`gemini-2.5-flash`) | Markdown → structured JSON                    |
-| **Frontend**         | React 18 + Vite + TypeScript       | Fast dev, SPA                                 |
-| **Routing**          | React Router 6                     | Client-side routing                           |
-| **Testing**          | Vitest                             | Fast, TypeScript-native                       |
-| **Deployment**       | Docker + Cloud Run                 | Containerized, auto-scaling                   |
-
-
-### Key npm packages
-
-**Backend (platform/):**
-
-- `firebase-admin` — Firestore + Cloud Storage access
-- `@google/generative-ai` — Gemini API client
-- `@fastify/multipart` — PDF file upload handling
-- `dotenv` — Environment variable loading
-
-**Frontend (web/):**
-
-- `react`, `react-dom`, `react-router-dom`
-- `vite` — Build tooling
+| Layer | Technology |
+|-------|------------|
+| Runtime | Node.js 20 + TypeScript |
+| API | Fastify 5 |
+| Database | PostgreSQL + Sequelize 6 |
+| Files | Google Cloud Storage |
+| OCR / AI | Mistral OCR, Gemini / Claude / OpenAI |
+| Frontend | React 18 + Vite |
+| Tests | Vitest |
+| Deploy | Docker + Cloud Run + Cloud SQL |
 
 ---
 
 ## Project Structure
 
-Code is organized by **domain** — each service (OCR, Analytics, Fraud) owns its routes, services, and utilities in one folder. Shared infrastructure lives in `config/`, `models/`, `shared/`, and `middleware/`.
-
 ```
-├── platform/                         # Backend (GCP/Firebase)
-│   ├── src/
-│   │   ├── index.ts                  # Server entry — loads .env, seeds admin, starts Fastify
-│   │   ├── app.ts                    # Fastify app builder — registers all domain routes
-│   │   │
-│   │   ├── config/                   # Environment + Firebase setup
-│   │   │   ├── env.ts               # All env vars with defaults
-│   │   │   └── firebase.ts          # Firebase Admin SDK init (Firestore + Storage)
-│   │   │
-│   │   ├── models/                   # Firestore data layer (shared across domains)
-│   │   │   ├── types.ts             # ALL types (OCR contract, BillDoc, BillPartDoc, API envelope)
-│   │   │   ├── bills.ts             # CRUD for 'bills' collection
-│   │   │   ├── billParts.ts         # CRUD for 'bill_parts' collection + extraction
-│   │   │   └── settings.ts          # App settings + provider credentials
-│   │   │
-│   │   ├── middleware/               # Fastify plugins
-│   │   │   └── auth.ts              # JWT + API key authentication
-│   │   │
-│   │   ├── shared/                   # Shared utilities (used by multiple domains)
-│   │   │   ├── apiResponse.ts       # Standard {success, data, errors} envelope
-│   │   │   ├── cache.ts             # Server-side TTL cache (30s) for analytics
-│   │   │   ├── devStore.ts          # In-memory Maps for LOCAL_DEV mode
-│   │   │   └── storage.ts           # Cloud Storage upload/download + file detection
-│   │   │
-│   │   ├── ocr/                      # ★ OCR Domain — invoice processing pipeline
-│   │   │   ├── route.ts             # /api/invoices/* (14 endpoints) + /api/parse, /api/ocr/*
-│   │   │   ├── structuringService.ts # Pipeline orchestrator (single/split mode + fallback)
-│   │   │   ├── processingService.ts  # Upload → OCR → Store orchestration
-│   │   │   ├── providers/            # LLM API clients
-│   │   │   │   ├── geminiClient.ts  # Vertex AI Gemini via ADC
-│   │   │   │   ├── llmSingle.ts     # Single-call OCR+structure (Gemini/Claude/OpenAI/Mistral)
-│   │   │   │   ├── llmNormalize.ts  # Multi-provider structuring (markdown → JSON)
-│   │   │   │   ├── mistralOcr.ts    # Mistral OCR API (PDF → markdown)
-│   │   │   │   ├── resolveKey.ts    # API key + model resolution per provider
-│   │   │   │   └── types.ts         # OcrCostInfo, OcrStepCost, LlmUsage
-│   │   │   ├── mapper.ts             # All data transformations (ParsedData→BillDoc, BillDoc→FrontendInvoice, toApiParsed)
-│   │   │   ├── parsing/             # LLM response → structured data
-│   │   │   │   ├── parse.ts         # JSON → ParsedInvoiceData coercion + structureFromLlmResponse
-│   │   │   │   ├── coerce.ts        # Type coercion + JSON repair
-│   │   │   │   ├── validate.ts      # Business validation rules
-│   │   │   │   ├── prompt.ts        # STRUCTURING_PROMPT (instructions for LLM)
-│   │   │   │   ├── legacy.ts        # Legacy flat-JSON format parser
-│   │   │   │   └── types.ts         # Parsing-specific types + re-exports
-│   │   │   └── extraction/          # Field extraction from parsed data / markdown
-│   │   │       ├── billSummary.ts   # GST reconciliation + fillMissingGstAmounts
-│   │   │       ├── footerExtract.ts # Extract GST footer from OCR markdown
-│   │   │       ├── normalize.ts     # enrichParsedInvoice + vehicle/labour normalization
-│   │   │       ├── vendorExtract.ts # Vendor name extraction + junk detection
-│   │   │       ├── dateExtract.ts   # Fallback date extraction from markdown
-│   │   │       └── reviewFlags.ts   # Confidence flags for review
-│   │   │
-│   │   ├── analytics/                # ★ Analytics Domain — spend/cost analytics
-│   │   │   ├── route.ts             # /api/analytics/* (7 endpoints)
-│   │   │   └── analyticsService.ts  # Vehicle spend, cost/km, OCR cost summary
-│   │   │
-│   │   ├── fraud/                    # ★ Fraud Domain — anomaly detection
-│   │   │   ├── route.ts             # /api/fraud/* (5 endpoints)
-│   │   │   └── fraudDetectionService.ts # Duplicates, GST, price, odometer checks
-│   │   │
-│   │   ├── users/                    # ★ Users Domain — auth, account, admin
-│   │   │   ├── route.ts             # All user endpoints (login, API keys, admin CRUD)
-│   │   │   ├── service.ts           # Business logic (login, token ops, user admin)
-│   │   │   ├── repository.ts        # Firestore CRUD (users, api_keys, transactions)
-│   │   │   └── dto.ts               # clientUserView, sanitizeUser
-│   │   │
-│   │   └── routes/                   # Global config routes (not domain-specific)
-│   │       ├── settings.ts          # /api/settings/* (provider config)
-│   │       └── config.ts            # /api/config (provider list)
-│   │
-│   ├── tests/                        # 139 tests across 23 files (mirrors src/ layout)
-│   │   ├── ocr/                     # OCR tests
-│   │   │   ├── extraction/          # 9 test files (billing logic)
-│   │   │   ├── providers/           # 4 test files (LLM clients)
-│   │   │   ├── parsing/             # 2 test files (JSON parsing)
-│   │   │   ├── mapper/              # 3 test files (data mapping)
-│   │   │   └── services/            # 1 test file (structuring service)
-│   │   ├── shared/                  # 2 test files (utilities)
-│   │   ├── models/                  # 1 test file (billParts)
-│   │   └── middleware/              # 1 test file (auth)
-│   │
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── Dockerfile
-│
-├── web/                              # Frontend (React SPA)
-│   ├── src/
-│   │   ├── api/client.ts            # API client — 20+ endpoints
-│   │   ├── types/index.ts           # TypeScript interfaces
-│   │   ├── pages/                   # InvoicesPage, InvoiceDetailPage, AnalyticsPage, SettingsPage
-│   │   ├── components/              # Shell, StatusDot, ConfidenceBar, Toast, etc.
-│   │   ├── overlays/                # BakeoffOverlay, CompareOverlay
-│   │   ├── hooks/                   # usePolling
-│   │   └── lib/                     # format, summaryFromMarkdown, structuringModels
-│   ├── nginx.conf                   # Production proxy: /api/ → backend:4000
-│   └── Dockerfile
-│
-├── docker-compose.yml                # api + web
-└── .env                              # API keys + config
+platform/src/
+├── config/          # db.ts (Sequelize + NUMERIC parser), env.ts, gcs.ts
+├── db/              # schema.ts (initModels + associations), migrate.ts
+├── ocr/             # pipeline, providers, parser, transformer, models, repo, routes
+├── users/           # auth, API keys, token ledger
+├── vendor/          # vendor upsert from invoices
+├── analytics/       # spend / cost KPIs
+├── fraud/           # duplicate, GST, price, odometer checks
+├── email-intake/    # IMAP → DRAFT bills
+├── odometerOcr/     # standalone odometer extract
+├── shared/          # constants, settings, storage, cache, types
+├── middleware/      # JWT + API key
+├── routes/          # settings + config
+├── app.ts
+└── index.ts         # init DB, seed admin, listen
 ```
 
-### Why this structure?
-
-| Principle | How it's applied |
-|-----------|-----------------|
-| **Domain-first** | `ocr/`, `analytics/`, `fraud/` each own their route + service + utils |
-| **Easy navigation** | Want to fix OCR parsing? → `ocr/parsing/`. Want analytics? → `analytics/` |
-| **No over-nesting** | Max 3 levels deep (`ocr/providers/geminiClient.ts`) |
-| **Shared = explicit** | `shared/`, `models/`, `config/` are clearly cross-cutting |
-| **Tests mirror source** | `tests/ocr/extraction/` mirrors `src/ocr/extraction/` |
+Models live in `{domain}/models/`. `db/schema.ts` is the only place that calls `initModels()` and sets associations.
 
 ---
 
-## End-to-End Bill Processing Flow
+## Database Layer (code)
 
-This is what happens when a user uploads a PDF invoice:
+- **`config/db.ts`** — singleton Sequelize from `DATABASE_URL`. Pool `max: 2` (Cloud Run). `pg` OID 1700 parser so NUMERIC is a JS number.
+- **`db/schema.ts`** — init order: Vendor → User → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential. Associations: Bill↔Vendor, Bill↔BillPart, User↔ApiKey, User↔TokenTransaction.
+- **`db/migrate.ts`** — `CREATE EXTENSION pg_trgm` + `sync({ alter: true })`. Prefer sequelize-cli migrations in production.
+- **`shared/constants.ts`** — bill types, OCR statuses, roles, pagination, pricing defaults.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        FRONTEND (React)                          │
-│                                                                  │
-│  User clicks "Upload bills" → selects PDF                        │
-│       ↓                                                          │
-│  api.upload(files) → POST /api/invoices/upload (FormData)        │
-└──────────────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     BACKEND (platform/)                           │
-│                                                                  │
-│  ocr/route.ts                                                    │
-│    │  Receives multipart file, extracts Buffer                   │
-│    │  Validates: isPdf(buf) or isImage(buf)                      │
-│    ▼                                                             │
-│  ocr/processingService.ts → processUpload()                      │
-│    │                                                             │
-│    ├─ 1. UPLOAD: shared/storage.ts → uploadFile(buf)                │
-│    │     → Cloud Storage (or local:// in LOCAL_DEV)              │
-│    │     → Returns { storagePath, publicUrl }                    │
-│    │                                                             │
-│    ├─ 2. CREATE BILL: models/bills.ts → createBill()             │
-│    │     → Firestore 'bills' collection                          │
-│    │     → Status: UPLOADED                                      │
-│    │                                                             │
-│    ├─ 3. STATUS UPDATE → PROCESSING                              │
-│    │                                                             │
-│    ├─ 4. OCR: ocr/providers/mistralOcr.ts → mistralOcr(buf)          │
-│    │     → POST https://api.mistral.ai/v1/ocr                   │
-│    │     → model: mistral-ocr-latest                             │
-│    │     → Sends PDF as base64 data URL                          │
-│    │     → Returns: markdown string                              │
-│    │                                                             │
-│    ├─ 5. NORMALIZE: ocr/providers/llmNormalize.ts                │
-│    │     → llmNormalize(rawOcr, provider, model)                 │
-│    │     → Uses STRUCTURING_PROMPT from ocr/parsing/prompt.ts    │
-│    │     → Gemini returns JSON matching the invoice schema       │
-│    │     → ocr/parsing/index.ts → structureFromLlmResponse()      │
-│    │       → ocr/parsing/parse.ts → coerces JSON to types        │
-│    │       → ocr/parsing/validate.ts → validates fields           │
-│    │       → ocr/extraction/normalize.ts → enrichParsedInvoice()  │
-│    │         → ocr/extraction/footerExtract.ts → GST footer       │
-│    │         → ocr/extraction/billSummary.ts → GST reconciliation │
-│    │     → Returns: ParsedInvoiceData                            │
-│    │                                                             │
-│    ├─ 6. SHAPE: ocr/mapper/toApiParsed.ts → toApiParsed(parsed)  │
-│    │     → Normalizes nulls, resolves GST rate sides             │
-│    │     → Returns immutable OCR response shape                  │
-│    │                                                             │
-│    ├─ 7. MAP: ocr/mapper/billMapper.ts                           │
-│    │     → mapParsedToBill() → creates BillDoc                   │
-│    │     → Status: OCR_COMPLETED                                 │
-│    │                                                             │
-│    ├─ 8. STORE BILL: models/bills.ts → updateBillStatus()        │
-│    │     → Firestore 'bills' — full bill with parsed_data        │
-│    │                                                             │
-│    ├─ 9. EXTRACT PARTS: models/billParts.ts                      │
-│    │     → extractPartsFromParsed() + saveBillParts()             │
-│    │     → Creates separate PART/LABOUR documents                │
-│    │     → Firestore 'bill_parts' collection                     │
-│    │                                                             │
-│    └─ 10. RETURN: { bill, partsCount }                           │
-└──────────────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Frontend receives { created: [bill_id], duplicates, rejected }  │
-│  Polls GET /api/invoices every 3 seconds                         │
-│  Bill appears in table with vendor, amount, status               │
-│  User clicks row → InvoiceDetailPage shows full breakdown        │
-└──────────────────────────────────────────────────────────────────┘
-```
+Route → repository → Sequelize model → PostgreSQL. Repositories map camelCase rows ↔ snake_case domain docs (`BillDoc`, `UserDoc`).
 
-### Status Flow
-
-```
-UPLOADED → PROCESSING → OCR_COMPLETED → VERIFIED
-                   ↘
-                    FAILED
-```
-
-
-| Status          | Meaning                      | Frontend shows      |
-| --------------- | ---------------------------- | ------------------- |
-| `UPLOADED`      | File stored, OCR not started | PENDING             |
-| `PROCESSING`    | Mistral OCR + Gemini running | PROCESSING          |
-| `OCR_COMPLETED` | Successfully parsed          | COMPLETED           |
-| `VERIFIED`      | Human reviewed & confirmed   | COMPLETED + ✓ badge |
-| `FAILED`        | OCR or normalization error   | FAILED + error msg  |
-
+Full column list: [DATABASE.md](./DATABASE.md).
 
 ---
 
-## OCR Pipeline — Step by Step
-
-### Two Pipeline Modes
-
-The pipeline mode is configured via **Settings UI** (stored in DB):
-
-| Mode | Steps | Use Case |
-|------|-------|----------|
-| **Split** (default) | Mistral OCR → Any LLM structuring | Best accuracy, most flexible |
-| **Single** | One multimodal LLM reads + structures in one call | Faster, fewer API calls |
-
-#### Split Mode Flow
+## End-to-End Upload Flow
 
 ```
-PDF/Image → [Mistral OCR] → markdown → [LLM Structuring] → JSON
-                                         ↑
-                                  Gemini / Mistral / Claude / OpenAI
+POST /api/invoices/upload
+  → validate PDF/image
+  → shared/storage.ts → GCS
+  → createBill(PROCESSING)
+  → return 202 + bill_id immediately
+
+Background:
+  runPipeline() → fallbackChain (single or split)
+  parser + enrichParsedInvoice + reconcileTotal
+  mapParsedToBill → updateBill (OCR_COMPLETED | NEED_REVIEW | FAILED)
+  saveBillParts
+  upsertVendorFromInvoice (fire-and-forget)
+  deductTokens (if user session)
 ```
 
-#### Single Mode Flow
+Frontend polls `GET /api/invoices`. Detail page uses `GET /api/invoices/:id`.
 
-```
-PDF/Image → [Gemini | Claude | OpenAI | Mistral Pixtral] → JSON (one call)
-```
+| Status | Meaning |
+|--------|---------|
+| `UPLOADED` | File stored, OCR not started |
+| `PROCESSING` | Pipeline running |
+| `OCR_COMPLETED` | Parsed, reconciliation OK |
+| `NEED_REVIEW` | Parsed with review flags |
+| `VERIFIED` | Human confirmed |
+| `FAILED` | Pipeline error |
+| `DRAFT` | Email-ingested, waiting for Process OCR |
 
-| Provider | PDF | Image | Notes |
-|----------|-----|-------|-------|
-| Gemini | Yes | Yes | ADC on Cloud Run |
-| Claude | Yes | Yes | Needs Anthropic API key |
-| OpenAI | No | Yes | gpt-4o vision; PDF → use Split |
-| Mistral | No | Yes | Pixtral; PDF → use Split (Mistral OCR) |
-
-#### Supported Structuring Providers
-
-| Provider | API | Models | Single Mode |
-|----------|-----|--------|-------------|
-| **Mistral** | `/v1/chat/completions` | mistral-small, medium, large | No |
-| **Gemini** | Generative Language API | gemini-2.5-flash, 2.5-pro, 2.0-flash | Yes |
-| **Claude** | Anthropic Messages API | claude-sonnet-4, 3.5-sonnet, 3-haiku | No |
-| **OpenAI** | `/v1/chat/completions` | gpt-4o, gpt-4o-mini, gpt-4-turbo | No |
-
-All providers use the **same STRUCTURING_PROMPT** and **same JSON parsing logic**.
-Only the API format differs — handled by `ocr/providers/llmNormalize.ts`.
-
-#### API Key Resolution
-
-```
-Settings DB (provider_credentials/{provider}.apiKey)
-    ↓ (if empty)
-Environment variable fallback (MISTRAL_API_KEY, GEMINI_API_KEY)
-```
-
-Managed via `ocr/providers/resolveKey.ts`.
-
-#### Automatic Fallback
-
-| Mode | On failure |
-|------|------------|
-| **Single** | Retry with **gemini-2.5-flash single** (one multimodal call). Never falls back to Mistral split. |
-| **Split** | If OCR/structure fails → fall back to **gemini-2.5-flash single**. Structuring-only failure may retry Gemini 2.5 on the same OCR markdown. |
-
-#### Single vs Split (what they mean)
-
-| | **Single** | **Split** |
-|--|------------|-----------|
-| **API calls** | **1** — model reads the PDF/image and returns JSON | **2** — Mistral OCR → markdown, then LLM → JSON |
-| **When to use** | Default. Faster, cheaper, one provider | When you want Mistral OCR + a separate structuring model |
-| **Fallback** | gemini-2.5-flash single | gemini-2.5-flash single |
-
-**Gemini auth:** All Gemini models use **Vertex global endpoint + ADC** (no API key).
-
-**Why Gemini single used to fall back to Mistral:** Gemini 3.x returns thinking in `parts[0]` and JSON later; old code only read `parts[0]`. Also truncated JSON missing a `}` before `]`. Fixed: skip thought parts, repair mismatched braces, fallback = Gemini 2.5 single only.
-
-### What happens when you upload a PDF
-
-Everything below runs in the **background** — the HTTP response returns in ~500ms. The frontend polls every 3 seconds to see the result.
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  STEP 1 — UPLOAD (instant, < 500ms)                                     │
-│  ocr/route.ts → POST /api/invoices/upload                               │
-│                                                                          │
-│  ① Receive multipart file → Buffer                                       │
-│  ② Validate: isPdf(buf) or isImage(buf)                                  │
-│  ③ Store file: uploadFile(buf) → Cloud Storage (or in-memory LOCAL_DEV)  │
-│  ④ Create bill record: createBill() → Firestore with status=PROCESSING   │
-│  ⑤ Return { created: [bill_id] } ← frontend gets this instantly         │
-│  ⑥ Fire background: processInBackground(billId, buf, ...)               │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼ (runs async, doesn't block HTTP response)
-┌──────────────────────────────────────────────────────────────────────────┐
-│  STEP 2 — MISTRAL OCR  (~1-8 seconds)                                   │
-│  ocr/providers/mistralOcr.ts                                             │
-│                                                                          │
-│  What: Converts PDF pages → markdown with tables                         │
-│  How:                                                                    │
-│    POST https://api.mistral.ai/v1/ocr                                    │
-│    model: "mistral-ocr-latest"                                           │
-│    document: { type: "document_url", document_url: "data:...base64" }    │
-│                                                                          │
-│  Input:  PDF buffer → base64 data URL                                    │
-│  Output: Raw markdown string (tables, headers, text)                     │
-│                                                                          │
-│  Example output:                                                         │
-│    | Part No. | Description | HSN | Qty | Rate | Amount |                │
-│    | L-0888   | ENGINE OIL  | 271 | 33  | 48.35| 1595.55|               │
-│    ...                                                                   │
-│    CGST @ 9%: 494.86                                                     │
-│    Grand Total: ₹6,488                                                   │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  STEP 3 — AI STRUCTURING  (~3-7 seconds)                                 │
-│  ocr/structuringService.ts → runPipeline()                               │
-│  ocr/providers/llmNormalize.ts (unified multi-provider interface)        │
-│                                                                          │
-│  What: Maps raw markdown → structured JSON (ParsedInvoiceData)           │
-│  Provider: Configured in Settings UI (DB), any of:                       │
-│    • Mistral: POST /v1/chat/completions                                  │
-│    • Gemini:  POST generativelanguage.googleapis.com                     │
-│    • Claude:  POST api.anthropic.com/v1/messages                         │
-│    • OpenAI:  POST api.openai.com/v1/chat/completions                    │
-│                                                                          │
-│  All use the same STRUCTURING_PROMPT (ocr/parsing/prompt.ts)             │
-│  Key rules in the prompt:                                                │
-│    • Return JSON matching ParsedInvoiceData schema                       │
-│    • Line items are GROSS (before discount)                              │
-│    • GST amounts copied from footer — never calculated                   │
-│    • CGST+SGST for intra-state, IGST for inter-state                     │
-│                                                                          │
-│  If selected provider fails → automatic Mistral fallback                 │
-│  If JSON is invalid → retry with error message → parse again             │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  STEP 4 — POST-PROCESSING  (< 100ms, no API calls)                      │
-│                                                                          │
-│  ① structureFromLlmResponse(text, rawOcr)   — ocr/parsing/index.ts      │
-│     ├─ parseStructuredOutput()              — ocr/parsing/parse.ts       │
-│     │    coerce JSON fields to correct types (toNum, toStr)              │
-│     ├─ validateParsedInvoice()              — ocr/parsing/validate.ts    │
-│     │    check business rules (valid dates, positive amounts)            │
-│                                                                          │
-│  ② toApiParsed(parsed)                      — ocr/mapper/toApiParsed.ts │
-│     normalize nulls, resolve GST rate sides (IGST vs CGST/SGST)         │
-│     THIS IS THE IMMUTABLE OCR CONTRACT — never modify this shape        │
-│                                                                          │
-│  ③ mapParsedToBill(billId, parsed)          — ocr/mapper/billMapper.ts  │
-│     extract header fields (vendor, GSTIN, PAN, dates, vehicle)           │
-│     calculate total_tax_amount from GST parts/labour fields              │
-│     embed parsed_data as the "source of truth"                           │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  STEP 5 — SAVE & COMPLETE  (< 50ms)                                     │
-│                                                                          │
-│  ① updateBillStatus(billId, 'OCR_COMPLETED', bill)                       │
-│     → Firestore 'bills' — full bill document with parsed_data            │
-│                                                                          │
-│  ② extractPartsFromParsed(billId, parsed)                                │
-│     → Separate PART/LABOUR line items into individual documents           │
-│     → saveBillParts() → Firestore 'bill_parts'                           │
-│                                                                          │
-│  ③ Console log: "[OCR] abc123 — DONE in 7.3s (6 parts)"                 │
-│                                                                          │
-│  IF ANY STEP FAILS:                                                      │
-│  → updateBillStatus(billId, 'FAILED', { processing_status: error.msg })  │
-│  → Frontend shows red "Failed" status with error message                 │
-└──────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  STEP 6 — FRONTEND DISPLAYS RESULT                                      │
-│                                                                          │
-│  Frontend polls GET /api/invoices every 3 seconds                        │
-│  When status changes PROCESSING → OCR_COMPLETED:                         │
-│    → Table row updates: vendor name, amount, status=Completed            │
-│    → Click row → InvoiceDetailPage shows:                                │
-│       Left: PDF preview (iframe from /api/invoices/:id/file)             │
-│       Right: parsed data (parts table, labour table, GST summary)        │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-### Timing breakdown (typical 2-page invoice)
-
-
-| Step                 | Time       | Where                           |
-| -------------------- | ---------- | ------------------------------- |
-| Upload + create bill | ~50ms      | `ocr/route.ts`                  |
-| Mistral OCR          | 1-8s       | Mistral API (network)           |
-| AI Normalization     | 3-7s       | Mistral or Gemini API (network) |
-| Post-processing      | <100ms     | Local CPU                       |
-| Save to DB           | <50ms      | Firestore or in-memory          |
-| **Total**            | **~5-15s** | Mostly API latency              |
-
-
-### What runs in parallel vs sequential
-
-```
-HTTP Request ──── Upload file ──── Create bill ──── Return response (500ms)
-                                        │
-                            Background async task:
-                                        │
-                          Mistral OCR ────────► AI Normalize ────────► Save
-                          (sequential — normalize needs OCR output)
-                                        
-                          Meanwhile: frontend polls every 3s
-                                    other uploads can happen in parallel
-```
-
-Multiple file uploads are **independent** — each gets its own background task.
+Pipeline internals: [src/ocr/README.md](./src/ocr/README.md).
 
 ---
 
-## Provider System
+## Settings
 
-### How to Change OCR Provider
+Stored in `app_settings` (singleton id=1) and `provider_credentials`.
 
-Currently: **Mistral OCR → Mistral normalization** (single API key)
+1. Settings UI → `PUT /api/settings` (fallback chain, pricing, FX)
+2. Credentials → `PUT /api/settings/providers/:name`
+3. Next OCR run reads `getSettings()` + `resolveKey()`
 
-### Switch normalization: Mistral ↔ Gemini
-
-Edit `platform/.env`:
-
-```bash
-NORMALIZE_PROVIDER=mistral   # default — uses MISTRAL_API_KEY
-NORMALIZE_PROVIDER=gemini    # needs valid GEMINI_API_KEY with billing credits
-```
-
-Where it's wired: `ocr/structuringService.ts` → reads Settings to pick provider.
-
-### Add a new OCR provider (code)
-
-1. Create `platform/src/ocr/providers/yourProvider.ts`:
-
-```typescript
-export async function yourOcr(buf: Buffer): Promise<string> {
-  // Call your OCR API, return markdown string
-}
-```
-
-1. Import in `platform/src/ocr/structuringService.ts` and add to the provider switch
-
-### Settings UI ([http://localhost:5173/settings](http://localhost:5173/settings))
-
-Saves provider preferences + API keys to Firestore. Currently the upload pipeline uses env vars, but the settings UI stores credentials for future provider-registry integration.
-
-### Available Providers (from Settings page)
-
-
-| Provider               | Kind       | Use for           | Required credentials                              |
-| ---------------------- | ---------- | ----------------- | ------------------------------------------------- |
-| Mistral OCR            | markdown   | OCR extraction    | `apiKey`                                          |
-| Google Gemini          | markdown   | OCR + Structuring | `apiKey`                                          |
-| Azure Doc Intelligence | structured | OCR extraction    | `apiKey`, `endpoint`                              |
-| Google Document AI     | structured | OCR extraction    | `keyJson`, `location`, `processorId`, `projectId` |
-| LlamaParse             | markdown   | OCR extraction    | `apiKey`                                          |
-| AWS Textract           | structured | OCR extraction    | `accessKeyId`, `secretAccessKey`, `region`        |
-| GLM-OCR (Ollama)       | markdown   | Local OCR         | `baseUrl`, `model`                                |
-
-
-### Provider Configuration Flow
-
-```
-Settings Page
-    → PUT /api/settings { extractionProvider, structuringProvider, structuringModel }
-    → Stored in Firestore 'settings/app_settings'
-
-Credentials Page
-    → PUT /api/settings/providers/{provider} { apiKey: "..." }
-    → Stored in Firestore 'provider_credentials/{provider}'
-
-GET /api/config
-    → Returns provider list + configured status
-    → Frontend shows which providers have keys set
-```
-
----
-
-## Settings & Configuration Flow
-
-```
-┌─────────────────────────────────────────────┐
-│           Settings Page (Frontend)           │
-│                                              │
-│  ┌──────────────────────────────┐            │
-│  │ Selections                    │            │
-│  │ • Active extraction provider  │──────┐     │
-│  │ • Structuring model provider  │      │     │
-│  │ • Structuring model name      │      │     │
-│  │ [Save selections]             │      │     │
-│  └──────────────────────────────┘      │     │
-│                                         │     │
-│  ┌──────────────────────────────┐      │     │
-│  │ Provider Credentials          │      │     │
-│  │ • Mistral: API key [****]    │──┐   │     │
-│  │ • Gemini: API key [****]     │  │   │     │
-│  │ • Azure: key + endpoint      │  │   │     │
-│  │ [Save] [Clear]               │  │   │     │
-│  └──────────────────────────────┘  │   │     │
-└─────────────────────────────────────│───│─────┘
-                                      │   │
-                                      ▼   ▼
-┌─────────────────────────────────────────────┐
-│              Backend API                     │
-│                                              │
-│  PUT /api/settings                           │
-│    → models/settings.ts → saveSettings()     │
-│    → Firestore: settings/app_settings        │
-│                                              │
-│  PUT /api/settings/providers/mistral         │
-│    → saveProviderCredentials('mistral', {})   │
-│    → Firestore: provider_credentials/mistral │
-│                                              │
-│  GET /api/config                             │
-│    → Reads settings + checks each provider   │
-│    → Returns { providers, activeProvider }   │
-└─────────────────────────────────────────────┘
-```
-
----
-
-## Firestore Database Design
-
-### Collection: `bills`
-
-Each document = one invoice. Document ID = `bill_id` (UUID).
-
-
-| Field                 | Type    | Source     | Description                                       |
-| --------------------- | ------- | ---------- | ------------------------------------------------- |
-| `bill_id`             | string  | Generated  | UUID primary key                                  |
-| `fleet_id`            | string? | Input      | Fleet identifier                                  |
-| `vehicle_id`          | string? | Input      | Vehicle identifier                                |
-| `bill_type`           | enum    | Input      | MAINTENANCE, FUEL, INSURANCE, TYRE, TOLL, etc.    |
-| `bill_category`       | string? | Input      | Sub-category                                      |
-| `vendor_name`         | string? | OCR        | Company name from invoice                         |
-| `vendor_gstin`        | string? | OCR        | GSTIN from invoice                                |
-| `company_name`        | string? | OCR        | Same as vendor_name (from parsed_data)            |
-| `gstin`               | string? | OCR        | GSTIN                                             |
-| `pan`                 | string? | OCR        | PAN number                                        |
-| `irn`                 | string? | OCR        | Invoice Reference Number                          |
-| `invoice_number`      | string? | OCR        | Invoice number                                    |
-| `invoice_date`        | string? | OCR        | Date as printed (DD/MM/YYYY, etc.)                |
-| `invoice_time`        | string? | OCR        | Time as printed                                   |
-| `subtotal_amount`     | number? | OCR        | sub_total_calculated                              |
-| `parts_amount`        | number? | OCR        | parts_total                                       |
-| `labour_amount`       | number? | OCR        | labour_total                                      |
-| `parts_cgst_amount`   | number? | OCR        | Parts CGST amount                                 |
-| `parts_sgst_amount`   | number? | OCR        | Parts SGST amount                                 |
-| `parts_igst_amount`   | number? | OCR        | Parts IGST amount                                 |
-| `parts_cgst_rate`     | number? | OCR        | Parts CGST rate %                                 |
-| `parts_sgst_rate`     | number? | OCR        | Parts SGST rate %                                 |
-| `parts_igst_rate`     | number? | OCR        | Parts IGST rate %                                 |
-| `labour_cgst_amount`  | number? | OCR        | Labour CGST amount                                |
-| `labour_sgst_amount`  | number? | OCR        | Labour SGST amount                                |
-| `labour_igst_amount`  | number? | OCR        | Labour IGST amount                                |
-| `labour_cgst_rate`    | number? | OCR        | Labour CGST rate %                                |
-| `labour_sgst_rate`    | number? | OCR        | Labour SGST rate %                                |
-| `labour_igst_rate`    | number? | OCR        | Labour IGST rate %                                |
-| `total_tax_amount`    | number? | Calculated | Sum of all GST fields                             |
-| `grand_total_amount`  | number? | OCR        | grand_total_invoice                               |
-| `deductibles`         | number? | OCR        | Deductible amount                                 |
-| `salvage`             | number? | OCR        | Salvage amount                                    |
-| `odometer_reading`    | number? | OCR        | Mileage reading                                   |
-| `registration_number` | string? | OCR        | Vehicle registration                              |
-| `chassis_number`      | string? | OCR        | Chassis number                                    |
-| `ocr_status`          | enum    | System     | UPLOADED/PROCESSING/OCR_COMPLETED/VERIFIED/FAILED |
-| `processing_status`   | string? | System     | Error message on failure                          |
-| `confidence_score`    | number? | OCR        | 0-1 confidence                                    |
-| `file_url`            | string? | System     | Cloud Storage public URL                          |
-| `storage_path`        | string? | System     | Cloud Storage path                                |
-| `raw_ocr_reference`   | string? | System     | First 10KB of raw OCR markdown                    |
-| `parsed_data`         | object  | OCR        | **IMMUTABLE** — complete OCR response             |
-| `schema_version`      | number  | System     | Currently 1                                       |
-| `created_at`          | string  | System     | ISO timestamp                                     |
-| `updated_at`          | string  | System     | ISO timestamp                                     |
-
-
-**GST Handling Rules:**
-
-- Store GST values **as-is** from OCR — never recalculate
-- If rate is present but amount is unclear → store rate, leave amount null
-- `parsed_data` is the **immutable source of truth** — never modify
-- Bill is either intra-state (CGST+SGST) or inter-state (IGST), never both
-
-### Collection: `bill_parts`
-
-Each document = one line item (part or labour). Document ID = `part_id` (UUID).
-
-
-| Field              | Type    | Source     | Description                                 |
-| ------------------ | ------- | ---------- | ------------------------------------------- |
-| `part_id`          | string  | Generated  | UUID primary key                            |
-| `bill_id`          | string  | Reference  | Links to bills collection                   |
-| `line_type`        | enum    | Extracted  | `PART` or `LABOUR`                          |
-| `name`             | string? | OCR        | item_name_description or labour_description |
-| `description`      | string? | OCR        | Same as name                                |
-| `quantity`         | number? | OCR        | Quantity (1 for labour)                     |
-| `rate`             | number? | OCR        | Unit rate or labour_charges                 |
-| `amount`           | number? | OCR        | taxable_amount or labour_charges            |
-| `tax_percentage`   | number? | OCR        | GST % for this line                         |
-| `tax_amount`       | number? | Calculated | Tax on this line                            |
-| `part_number`      | string? | OCR        | part_number_item_code or labour_code        |
-| `hsn_sac_code`     | string? | OCR        | HSN/SAC code                                |
-| `manufacturer`     | string? | Future     | Part manufacturer                           |
-| `normalized_name`  | string? | Future     | Normalized name for analytics               |
-| `confidence_score` | number? | OCR        | Line-level confidence                       |
-| `created_at`       | string  | System     | ISO timestamp                               |
-
-
-**Why separate?** Enables per-part analytics: cost/km, vendor comparison, part lifecycle, price benchmarking.
-
-### Collection: `settings`
-
-Single document `app_settings`:
-
-
-| Field                 | Type    | Description                          |
-| --------------------- | ------- | ------------------------------------ |
-| `extractionProvider`  | string  | Active OCR provider (e.g. "mistral") |
-| `structuringProvider` | string  | Active AI normalizer (e.g. "gemini") |
-| `structuringModel`    | string  | Model name (e.g. "gemini-2.5-flash") |
-| `extractionModel`     | string? | OCR model override                   |
-
-
-### Collection: `provider_credentials`
-
-One document per provider (e.g. `mistral`, `gemini`):
-
-
-| Field      | Type   | Description                                       |
-| ---------- | ------ | ------------------------------------------------- |
-| `apiKey`   | string | API key                                           |
-| *(varies)* | string | Provider-specific fields (endpoint, region, etc.) |
-
+Gemini on Cloud Run uses Vertex + ADC (no `GEMINI_API_KEY`).
 
 ---
 
 ## API Reference
 
-### Bill Endpoints
+### Bills / OCR
 
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/invoices` | Paginated list |
+| `GET` | `/api/invoices/counts` | Status counts |
+| `GET` | `/api/invoices/:id` | Detail + parts |
+| `GET` | `/api/invoices/:id/file` | PDF/image |
+| `POST` | `/api/invoices/upload` | Upload (async OCR) |
+| `POST` | `/api/invoices/import` | Import from URLs |
+| `POST` | `/api/invoices/:id/reextract` | Re-run OCR |
+| `POST` | `/api/invoices/:id/cancel` | Cancel |
+| `POST` | `/api/invoices/:id/process-ocr` | OCR a DRAFT |
+| `PATCH` | `/api/invoices/:id` | Human edit |
+| `DELETE` | `/api/invoices/:id` | Delete bill + parts |
+| `POST` | `/api/invoices/bulk` | Bulk actions |
+| `POST` | `/api/invoices/reconcile-range` | Batch reconcile |
+| `GET` | `/api/invoices/export/csv` | Bills CSV |
+| `GET` | `/api/invoices/export/line-items.csv` | Line items CSV |
+| `POST` | `/api/parse` | Stateless parse |
+| `POST` | `/api/ocr/sync` | Sync OCR (API key) |
+| `POST` | `/api/ocr/async` | Async OCR (API key) |
 
-| Method   | Path                                  | Description              | Request                   | Response                            |
-| -------- | ------------------------------------- | ------------------------ | ------------------------- | ----------------------------------- |
-| `GET`    | `/api/invoices`                       | List all bills           | —                         | `{ invoices: Invoice[] }`           |
-| `GET`    | `/api/invoices/:id`                   | Get single bill + parts  | —                         | `Invoice`                           |
-| `GET`    | `/api/invoices/:id/file`              | Redirect to PDF          | —                         | 302 redirect                        |
-| `POST`   | `/api/invoices/upload`                | Upload PDFs              | multipart                 | `{ created, duplicates, rejected }` |
-| `POST`   | `/api/invoices/import`                | Import from URLs         | `{ sources, batchName? }` | `{ created, duplicates, rejected }` |
-| `POST`   | `/api/invoices/:id/reextract`         | Re-run OCR               | `{ provider? }`           | `{ ok }`                            |
-| `POST`   | `/api/invoices/:id/cancel`            | Cancel extraction        | `{}`                      | `{ ok }`                            |
-| `PATCH`  | `/api/invoices/:id`                   | Edit fields (verify)     | `{ vendorName, ... }`     | `Invoice`                           |
-| `DELETE` | `/api/invoices/:id`                   | Delete bill + parts      | —                         | `{ ok }`                            |
-| `POST`   | `/api/invoices/bulk`                  | Bulk reextract/delete    | `{ action, ids }`         | `{ ok }`                            |
-| `GET`    | `/api/invoices/export/csv`            | Export bills CSV         | query params              | CSV file                            |
-| `GET`    | `/api/invoices/export/line-items.csv` | Export parts CSV         | query params              | CSV file                            |
-| `POST`   | `/api/parse`                          | One-shot stateless parse | multipart or `{ source }` | `{ output: { entries } }`           |
+### Auth / Account / Admin
 
+| Method | Path | Auth |
+|--------|------|------|
+| `POST` | `/api/auth/login` | Public |
+| `GET/POST/DELETE` | `/api/auth/api-keys` | JWT |
+| `GET` | `/api/account` | JWT / key |
+| `GET` | `/api/account/transactions` | JWT / key |
+| `GET/POST` | `/api/admin/users` | Admin |
+| `PATCH` | `/api/admin/users/:id/block` | Admin |
+| `POST` | `/api/admin/users/:id/tokens` | Admin |
 
-### Authentication Endpoints
+### Other
 
-| Method   | Path                       | Auth    | Description                                       |
-| -------- | -------------------------- | ------- | ------------------------------------------------- |
-| `POST`   | `/api/auth/login`          | Public  | Email + password → JWT token (7-day session)      |
-| `POST`   | `/api/auth/api-keys`       | JWT     | Generate a new API key for current user            |
-| `GET`    | `/api/auth/api-keys`       | JWT     | List current user's API keys (no secrets)          |
-| `DELETE` | `/api/auth/api-keys/:id`   | JWT     | Revoke an API key                                 |
+| Area | Paths |
+|------|-------|
+| Vendors | `GET /api/vendors`, `GET /api/vendors/:id` |
+| Analytics | `/api/analytics/kpis`, `/workshops`, `/vehicles`, `/months`, `/costkm`, `/costs` |
+| Fraud | `/api/fraud/scan`, `/duplicates`, `/gst-anomalies`, `/price-anomalies`, `/odometer`, `/summary` |
+| Settings | `/api/settings`, `/api/settings/providers/:name`, `/api/config` |
+| Odometer | `POST /api/odometer/extract`, `POST /api/odometer/batch` |
+| Health | `GET /api/health` |
 
-### Account Endpoints
+---
 
-| Method | Path                     | Auth      | Description                    |
-| ------ | ------------------------ | --------- | ------------------------------ |
-| `GET`  | `/api/account`           | JWT / Key | Current user profile + balance |
-| `GET`  | `/api/account/transactions` | JWT / Key | Token usage history         |
+## Local Development
 
-### Admin Endpoints (admin role only)
-
-| Method   | Path                                | Description                          |
-| -------- | ----------------------------------- | ------------------------------------ |
-| `GET`    | `/api/admin/users`                  | List all users                       |
-| `POST`   | `/api/admin/users`                  | Create user (email, name, password)  |
-| `GET`    | `/api/admin/users/:id`              | Get single user                      |
-| `PATCH`  | `/api/admin/users/:id/block`        | Block user                           |
-| `PATCH`  | `/api/admin/users/:id/unblock`      | Unblock user                         |
-| `POST`   | `/api/admin/users/:id/tokens`       | Add balance to user                  |
-| `GET`    | `/api/admin/users/:id/transactions` | User's transaction history           |
-| `PATCH`  | `/api/admin/users/:id/reset-password` | Reset user's password              |
-
-### OCR API Endpoints (for direct API usage)
-
-| Method | Path             | Auth     | Description                                         |
-| ------ | ---------------- | -------- | --------------------------------------------------- |
-| `POST` | `/api/ocr/sync`  | API Key  | Synchronous OCR — waits for result, returns parsed data |
-| `POST` | `/api/ocr/async` | API Key  | Async OCR — returns bill_id, poll for result         |
-
-**Sync OCR** (`POST /api/ocr/sync`):
-- Accepts: multipart file upload OR `{ "url": "https://..." }`
-- Waits for full OCR pipeline (5-15s)
-- Returns: `{ success, data: { parsed_data, raw_ocr, cost, latency_ms } }`
-- Cost is deducted from user balance automatically
-
-**Async OCR** (`POST /api/ocr/async`):
-- Accepts: same as sync
-- Returns immediately (HTTP 202): `{ success, data: { bill_id, status, poll_url } }`
-- Poll `GET /api/invoices/:bill_id` for result
-- Cost is deducted after OCR completes
+Always PostgreSQL — no in-memory DB.
 
 ```bash
-# Sync example (waits for result)
-curl -X POST http://localhost:4000/api/ocr/sync \
-  -H "Authorization: Bearer inv_your_api_key" \
-  -F "file=@invoice.pdf"
-
-# Sync with URL
-curl -X POST http://localhost:4000/api/ocr/sync \
-  -H "Authorization: Bearer inv_your_api_key" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://s3.example.com/invoice.pdf"}'
-
-# Async example (returns bill_id, poll later)
-curl -X POST http://localhost:4000/api/ocr/async \
-  -H "Authorization: Bearer inv_your_api_key" \
-  -F "file=@invoice.pdf"
-# → { "data": { "bill_id": "abc-123", "poll_url": "/api/invoices/abc-123" } }
-
-# Poll for result
-curl http://localhost:4000/api/invoices/abc-123 \
-  -H "Authorization: Bearer inv_your_api_key"
-```
-
-### Analytics Endpoints
-
-All analytics endpoints are **server-side cached** (30s TTL, invalidated on bill create/delete).
-
-| Method | Path                     | Response                                                                        | Notes                          |
-| ------ | ------------------------ | ------------------------------------------------------------------------------- | ------------------------------ |
-| `GET`  | `/api/analytics/kpis`    | `{ totalSpend, completedCount, ..., byVendor, byMonth, vendorCount, vehicleCount }` | Fast KPIs — loaded first       |
-| `GET`  | `/api/analytics/workshops` | `{ workshops: [{name, amount}] }`                                             | Supports `?q=` search          |
-| `GET`  | `/api/analytics/vehicles`  | `{ vehicles: VehicleSpend[] }`                                                | Supports `?q=` search          |
-| `GET`  | `/api/analytics/months`    | `{ months: [{label, amount}] }`                                               | Monthly spend                  |
-| `GET`  | `/api/analytics/costkm`    | `{ costPerKm: CostPerKm[] }`                                                 | Needs 2+ odometer readings     |
-| `GET`  | `/api/analytics/costs`     | `OcrCostSummary`                                                              | OCR API cost breakdown         |
-| `GET`  | `/api/analytics`           | Full combined response (legacy, backward compat)                               | Slower — loads everything      |
-| `GET`  | `/api/batches`             | `{ batches: [] }` (stub)                                                       |                                |
-
-
-### Fraud Detection Endpoints
-
-All return: `{ success, message, data: FraudAlert[], metadata, errors }`
-
-
-| Method | Path                         | Description                        |
-| ------ | ---------------------------- | ---------------------------------- |
-| `GET`  | `/api/fraud/scan`            | Run ALL fraud checks               |
-| `GET`  | `/api/fraud/duplicates`      | Same invoice_number + vendor_gstin |
-| `GET`  | `/api/fraud/gst-anomalies`   | Tax ≠ rate × base                  |
-| `GET`  | `/api/fraud/price-anomalies` | Parts priced >50% above median     |
-| `GET`  | `/api/fraud/odometer`        | Odometer going backward            |
-
-
-### Config & Settings Endpoints
-
-
-| Method   | Path                            | Description                                |
-| -------- | ------------------------------- | ------------------------------------------ |
-| `GET`    | `/api/config`                   | Provider list + active selections          |
-| `GET`    | `/api/settings`                 | Current settings + provider status         |
-| `PUT`    | `/api/settings`                 | Save extraction/structuring selections     |
-| `GET`    | `/api/settings/reveal`          | Get stored credentials (decrypted)         |
-| `PUT`    | `/api/settings/providers/:name` | Save provider credentials                  |
-| `DELETE` | `/api/settings/providers/:name` | Clear provider credentials                 |
-| `GET`    | `/api/health`                   | `{ success, data: { status: "healthy" } }` |
-
-
----
-
-## Analytics Service & UI
-
-**Backend:** `analytics/analyticsService.ts` + `analytics/route.ts`
-**Frontend:** `web/src/pages/AnalyticsPage.tsx`
-**Route:** [http://localhost:5173/analytics](http://localhost:5173/analytics)
-
-### Architecture: Split API + Two-Layer Cache
-
-```
-Frontend (React)
-  │
-  ├─ Client-side cache (30s TTL, per-endpoint)
-  │   cachedFetch('kpis', ...) → returns cached data if fresh
-  │
-  ├─ GET /api/analytics/kpis     ← Page load (KPI cards + workshop list)
-  ├─ GET /api/analytics/vehicles ← Lazy: only when "Vehicles" chip clicked
-  ├─ GET /api/analytics/months   ← Lazy: only when "By month" chip clicked
-  ├─ GET /api/analytics/costkm   ← Lazy: only when "Cost / km" chip clicked
-  └─ GET /api/analytics/costs    ← Lazy: only when "API Costs" tab clicked
-         │
-Backend (Fastify)
-  │
-  ├─ Server-side in-memory cache (30s TTL)
-  │   shared/cache.ts → cacheGet/cacheSet per endpoint
-  │   Invalidated on bill create/delete/update
-  │
-  └─ analytics/analyticsService.ts
-       └─ listBills() → single DB read per cache-miss
-```
-
-**Why split?** With lakhs/crores of records, loading all analytics in one call is slow.
-Each tab loads only what it needs, and both client + server cache the results.
-
-### Search
-
-Workshops and Vehicles endpoints support `?q=` query parameter for server-side filtering:
-- `GET /api/analytics/workshops?q=fort` → workshops containing "fort"
-- `GET /api/analytics/vehicles?q=MH01` → vehicles matching "MH01"
-
-Frontend debounces search input (300ms) and shows results instantly.
-
-### Cache Invalidation
-
-```
-Bill mutation (create/delete/bulk) → cacheInvalidate('analytics')
-                                      → Clears all analytics:* server cache keys
-                                      → Next request fetches fresh data
-```
-
-### What the Analytics page shows
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Analytics                                                       │
-│  15 invoices · 10 workshops · 11 vehicles                       │
-│                                                                  │
-│  [Spend Overview]  [API Costs]          ← Main tabs              │
-│                                                                  │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
-│  │TOTAL SPEND│ │  PARTS   │ │ LABOUR   │ │ TAX PAID │  ...      │
-│  │ ₹80.0K   │ │ ₹49.1K   │ │ ₹48.2K   │ │ ₹7.0K    │           │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
-│                                                                  │
-│  [Workshops (10)] [Vehicles (11)] [By month (14)] [Cost/km (0)] │
-│   ↑ default       ↑ lazy           ↑ lazy           ↑ lazy      │
-│                                                                  │
-│  🔍 Search workshops…                   ← Search input          │
-│  ┌────────────────────────────────────────────────┐              │
-│  │ # │ Workshop / Vendor           │ Spend  │ Share│             │
-│  │ 1 │ Vectrio Innovations         │ ₹17.7K │ 22% │             │
-│  │ 2 │ TYRESNMORE ONLINE           │ ₹16.4K │ 21% │             │
-│  └────────────────────────────────────────────────┘              │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Analytics API endpoints
-
-| Endpoint                 | Response                                                       | Cached | Searchable |
-| ------------------------ | -------------------------------------------------------------- | ------ | ---------- |
-| `GET /api/analytics/kpis`       | KPIs + byVendor + byMonth                                | Yes    | No         |
-| `GET /api/analytics/workshops`  | `{ workshops: [{name, amount}] }`                         | Via kpis | Yes (`?q=`) |
-| `GET /api/analytics/vehicles`   | `{ vehicles: VehicleSpend[] }`                            | Yes    | Yes (`?q=`) |
-| `GET /api/analytics/months`     | `{ months: [{label, amount}] }`                           | Via kpis | No         |
-| `GET /api/analytics/costkm`     | `{ costPerKm: CostPerKm[] }`                             | Yes    | No         |
-| `GET /api/analytics/costs`      | `OcrCostSummary` (provider breakdown, tokens, USD/INR)    | Yes    | No         |
-
-### Backend functions
-
-| Function               | File                  | What it does                                |
-| ---------------------- | --------------------- | ------------------------------------------- |
-| `computeKpis()`        | `analytics/route.ts`             | KPIs + vendor + month aggregation (cached)  |
-| `getVehicleSpend()`    | `analytics/analyticsService.ts`  | Groups bills by vehicle, sums amounts       |
-| `getCostPerKm()`       | `analytics/analyticsService.ts`  | min/max odometer → cost_per_km = spend / km |
-| `getOcrCostSummary()`  | `analytics/analyticsService.ts`  | OCR API cost breakdown by provider          |
-
-
----
-
-## Fraud Detection Service & UI
-
-**Backend:** `fraud/fraudDetectionService.ts` + `fraud/route.ts`
-**Frontend:** `web/src/pages/FraudPage.tsx`
-**Route:** [http://localhost:5173/fraud](http://localhost:5173/fraud)
-
-### What the Fraud page shows
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Fraud Detection                                                 │
-│  Scan invoices for anomalies, duplicates, suspicious patterns    │
-│                                                                  │
-│  ┌────────┐ ┌────────────────┐ ┌──────────────┐ ┌────────────┐ │
-│  │🔍 Full │ │📋 Duplicate   │ │📊 GST        │ │💰 Price    │ │
-│  │  Scan  │ │   Invoices    │ │   Anomalies  │ │  Anomalies │ │
-│  └────────┘ └────────────────┘ └──────────────┘ └────────────┘ │
-│                                                                  │
-│  ┌─ 3 Total alerts ─┐ ┌─ 1 HIGH ─┐ ┌─ 2 MEDIUM ─┐             │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │ [HIGH] [DUPLICATE INVOICE]                                   │ │
-│  │ Duplicate invoice: TXA26-01398 from Arpanna Motors          │ │
-│  │ 2 bills   ▶                                                  │ │
-│  │ ──── expanded ──────────────────────────────────────         │ │
-│  │ Bill IDs: f01f841f…, 3473a646…                               │ │
-│  │ Details: { invoice_number, vendor, amounts: [6488, 6488] }  │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │ [MEDIUM] [GST MISMATCH]                                     │ │
-│  │ GST mismatch on invoice DW21S25103620                       │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 4 Fraud Detection Algorithms
-
-
-| Check                  | Severity | How it works                                                                                                                                                                                                                  |
-| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Duplicate Invoices** | HIGH     | Groups by `invoice_number + vendor_gstin`. Count > 1 = alert                                                                                                                                                                  |
-| **GST Anomalies**      | MEDIUM   | Combines CGST+SGST+IGST → total GST. `taxable = gross − discount`, intra-state `total = CGST+SGST`, inter-state `total = IGST`. Alert if `|taxable × rate% − actual total GST| > max(₹1, 1%)`. Also checks CGST=SGST symmetry |
-| **Price Anomalies**    | MEDIUM   | Groups parts by name, finds median rate. Price >50% above median = alert (needs 3+ of same part)                                                                                                                              |
-| **Odometer Issues**    | HIGH     | Sorts bills by date per vehicle. Current odometer < previous = rollback alert                                                                                                                                                 |
-
-
-### Fraud API endpoints
-
-
-| Method | Path                         | What it runs             |
-| ------ | ---------------------------- | ------------------------ |
-| `GET`  | `/api/fraud/scan`            | All 4 checks in parallel |
-| `GET`  | `/api/fraud/duplicates`      | Duplicate invoices only  |
-| `GET`  | `/api/fraud/gst-anomalies`   | GST mismatches only      |
-| `GET`  | `/api/fraud/price-anomalies` | Price outliers only      |
-| `GET`  | `/api/fraud/odometer`        | Odometer rollbacks only  |
-
-
-All return: `{ success, message, data: FraudAlert[], metadata: { total, by_type, by_severity } }`
-
-### FraudAlert shape
-
-```json
-{
-  "type": "DUPLICATE_INVOICE",
-  "severity": "HIGH",
-  "message": "Duplicate invoice: TXA26-01398 from Arpanna Motors",
-  "bill_ids": ["f01f841f-...", "3473a646-..."],
-  "details": {
-    "invoice_number": "TXA26-01398",
-    "vendor": "Arpanna Motors",
-    "count": 2,
-    "amounts": [6488, 6488]
-  }
-}
-```
-
----
-
-## Frontend Architecture
-
-### Pages
-
-
-| Page                  | Route           | API calls                                                                  |
-| --------------------- | --------------- | -------------------------------------------------------------------------- |
-| **InvoicesPage**      | `/invoices`     | `list`, `batches`, `config`, `upload`, `import`, `bulk`, `cancel`          |
-| **InvoiceDetailPage** | `/invoices/:id` | `get`, `config`, `patch`, `reextract`, `del`, `fileUrl`, `bakeoff`         |
-| **AnalyticsPage**     | `/analytics`    | `analyticsKpis`, `analyticsVehicles`, `analyticsMonths`, `analyticsCostkm`, `analyticsCosts` (lazy per tab) |
-| **FraudPage**         | `/fraud`        | `fraudScan`, `fraudDuplicates`, `fraudGst`, `fraudPrices`, `fraudOdometer` |
-| **SettingsPage**      | `/settings`     | `settings`, `revealCreds`, `saveSettings`, `saveCreds`, `clearCreds`       |
-
-
-### Components
-
-
-| Component          | Purpose                                                                        |
-| ------------------ | ------------------------------------------------------------------------------ |
-| `Shell`            | Layout: left sidebar nav (Invoices, Analytics, Fraud, Settings) + content area |
-| `StatusDot`        | Colored status indicator (pulses for PENDING/PROCESSING)                       |
-| `ConfidenceBar`    | Confidence bar + "✓ Verified" badge                                            |
-| `Toast`            | Bottom toast notification                                                      |
-| `InvoiceBreakdown` | Parts/labour tables + parsed metadata + GST summary                            |
-| `SummaryBreakdown` | Single-column GST totals                                                       |
-| `SummaryColumns`   | Parts/Labour columnwise totals                                                 |
-
-
-### API Client (`api/client.ts`)
-
-All API calls go through a single `api` object. The Vite dev server proxies `/api/`* to `http://localhost:4000`.
-
-In production, nginx does the same proxy.
-
----
-
-## File-by-File Reference
-
-### What each file does
-
-#### Shared infrastructure
-
-| File                    | One-line purpose                                       |
-| ----------------------- | ------------------------------------------------------ |
-| `config/env.ts`         | All environment variables with defaults                |
-| `config/firebase.ts`    | Firebase Admin SDK initialization                      |
-| `middleware/auth.ts`    | JWT + API key authentication plugin                    |
-| `models/types.ts`       | Every type: OCR contract, Firestore docs, API envelope |
-| `models/bills.ts`       | Firestore CRUD for bills (with in-memory fallback)     |
-| `models/billParts.ts`   | Firestore CRUD for bill_parts + OCR→parts extraction   |
-| `models/settings.ts`    | Settings + credentials Firestore storage               |
-| `models/users.ts`       | User CRUD + password hashing + token balance           |
-| `shared/apiResponse.ts` | Standard `{success, data, errors}` helpers             |
-| `shared/cache.ts`       | Server-side TTL cache (30s) for analytics              |
-| `shared/clientUser.ts`  | User → frontend-safe shape                             |
-| `shared/devStore.ts`    | In-memory Maps for LOCAL_DEV mode                      |
-| `shared/storage.ts`     | Cloud Storage upload/download + file detection         |
-
-#### OCR domain (`ocr/`)
-
-| File                              | One-line purpose                                       |
-| --------------------------------- | ------------------------------------------------------ |
-| `ocr/route.ts`                    | 14 invoice HTTP endpoints + /api/parse, /api/ocr/*     |
-| `ocr/structuringService.ts`       | Pipeline orchestrator (single/split mode + fallback)   |
-| `ocr/processingService.ts`        | Upload → OCR → Store orchestration                     |
-| `ocr/providers/geminiClient.ts`   | Vertex AI Gemini via ADC                               |
-| `ocr/providers/llmSingle.ts`      | Single-call OCR+structure (Gemini/Claude/OpenAI/Mistral) |
-| `ocr/providers/llmNormalize.ts`   | Multi-provider structuring (markdown → JSON)           |
-| `ocr/providers/mistralOcr.ts`     | Mistral OCR API (PDF → markdown)                       |
-| `ocr/providers/resolveKey.ts`     | API key + model resolution per provider                |
-| `ocr/providers/types.ts`          | OcrCostInfo, OcrStepCost, LlmUsage                     |
-| `ocr/parsing/index.ts`            | structureFromLlmResponse — main entry                  |
-| `ocr/parsing/parse.ts`            | JSON coercion: raw LLM output → typed data             |
-| `ocr/parsing/coerce.ts`           | Type coercion + truncated JSON repair                  |
-| `ocr/parsing/validate.ts`         | Business validation on parsed data                     |
-| `ocr/parsing/prompt.ts`           | STRUCTURING_PROMPT (instructions for all LLMs)         |
-| `ocr/parsing/legacy.ts`           | Legacy flat-JSON format parser                         |
-| `ocr/extraction/billSummary.ts`   | GST reconciliation + fillMissingGstAmounts             |
-| `ocr/extraction/footerExtract.ts` | Extract GST footer from OCR markdown                   |
-| `ocr/extraction/normalize.ts`     | enrichParsedInvoice — post-processing                  |
-| `ocr/extraction/vendorExtract.ts` | Vendor name extraction + junk detection                |
-| `ocr/extraction/dateExtract.ts`   | Fallback date extraction from markdown                 |
-| `ocr/extraction/vehicleExtract.ts`| Registration/chassis normalization                     |
-| `ocr/extraction/lineItemFilter.ts`| Line item dedup + filtering                            |
-| `ocr/extraction/reviewFlags.ts`   | Confidence flags for review                            |
-| `ocr/mapper/billMapper.ts`        | ParsedInvoiceData → BillDoc for Firestore              |
-| `ocr/mapper/billToInvoice.ts`     | BillDoc → frontend Invoice shape                       |
-| `ocr/mapper/toApiParsed.ts`       | OCR response normalizer (IMMUTABLE contract)           |
-
-#### Analytics domain (`analytics/`)
-
-| File                          | One-line purpose                                       |
-| ----------------------------- | ------------------------------------------------------ |
-| `analytics/route.ts`          | /api/analytics/* (7 cached endpoints + search)         |
-| `analytics/analyticsService.ts` | Vehicle spend, cost/km, OCR cost summary             |
-
-#### Fraud domain (`fraud/`)
-
-| File                              | One-line purpose                                    |
-| --------------------------------- | --------------------------------------------------- |
-| `fraud/route.ts`                  | /api/fraud/* (5 scan endpoints)                     |
-| `fraud/fraudDetectionService.ts`  | Duplicates, GST, price, odometer checks             |
-
-#### Auth & settings routes (`routes/`)
-
-| File               | One-line purpose                         |
-| ------------------ | ---------------------------------------- |
-| `routes/auth.ts`   | /api/auth/* (login, API keys)            |
-| `routes/account.ts`| /api/account (profile, transactions)     |
-| `routes/admin.ts`  | /api/admin/* (user management)           |
-| `routes/settings.ts`| /api/settings/* (5 provider settings)   |
-| `routes/config.ts` | /api/config (provider list + status)     |
-
-
----
-
-## Local Development vs Production — What Changes
-
-### Quick comparison
-
-
-| Aspect               | Local (`LOCAL_DEV=true`)                       | Production (Cloud Run)               |
-| -------------------- | ---------------------------------------------- | ------------------------------------ |
-| **Database**         | In-memory Maps (resets on restart)             | Cloud Firestore                      |
-| **File storage**     | In-memory buffer (served from `/api/.../file`) | Cloud Storage bucket                 |
-| **OCR API**          | Real Mistral API (needs key)                   | Same — real Mistral API              |
-| **Normalization**    | Real Mistral or Gemini API                     | Same                                 |
-| **GCP credentials**  | Not needed                                     | Service account or workload identity |
-| **Data persistence** | Lost on server restart                         | Permanent                            |
-| **Frontend proxy**   | Vite dev server → `localhost:4000`             | Nginx → `backend:4000`               |
-| **PDF preview**      | Served from in-memory buffer                   | Redirect to Cloud Storage URL        |
-
-
-### What you change to go to production
-
-```
-platform/.env (LOCAL)              →    Cloud Run env vars (PRODUCTION)
-─────────────────────                   ─────────────────────────────────
-LOCAL_DEV=true                     →    (remove — defaults to false)
-MISTRAL_API_KEY=xxx                →    MISTRAL_API_KEY=xxx (same)
-NORMALIZE_PROVIDER=mistral         →    NORMALIZE_PROVIDER=mistral (same)
-                                   →    GCP_PROJECT_ID=your-project
-                                   →    STORAGE_BUCKET=your-bucket
-                                   →    (service account auto-detected on Cloud Run)
-```
-
-### Code that switches behavior
-
-
-| File                  | What changes                                                      |
-| --------------------- | ----------------------------------------------------------------- |
-| `config/env.ts`       | `localDev` flag — all behavior flows from this                    |
-| `models/bills.ts`     | `if (env.localDev) → devStore.bills.get()` else `→ Firestore`     |
-| `models/billParts.ts` | Same pattern                                                      |
-| `models/settings.ts`  | Same pattern                                                      |
-| `shared/storage.ts`   | `if (env.localDev) → devStore.files.set()` else `→ Cloud Storage` |
-| `shared/devStore.ts`  | In-memory Maps (only used when localDev=true)                     |
-| `ocr/route.ts`        | `/file` endpoint: streams from devStore or redirects to GCS       |
-| `fraud/`              | Uses `listBills()` model layer (works in both modes)              |
-| `analytics/`          | Uses `listBills()` model layer (works in both modes)              |
-
-
-### Local setup
-
-```bash
-# Terminal 1 — Backend
+# Terminal 1
 cd platform
-cp .env.example .env        # edit with your MISTRAL_API_KEY
-npm install && npm run dev   # → http://localhost:4000
+# DATABASE_URL=postgresql://billparser_app_dev:local_dev_password@localhost:5432/billparser_dev
+npm install && npm run dev    # http://localhost:4000
 
-# Terminal 2 — Frontend
+# Terminal 2
 cd web
-npm install && npm run dev   # → http://localhost:5173
+npm install && npm run dev    # http://localhost:5173
 ```
 
-### Run tests
+Or `docker compose up --build` (API :4000, web :8081).
+
+First boot seeds admin (`ADMIN_EMAIL` / `ADMIN_PASSWORD`, default `admin@praya.io` / `admin123` in non-prod).
 
 ```bash
-cd platform && npm test    # 139 tests across 23 files
-cd web && npm test         # Frontend tests
+cd platform && npm test
+cd web && npm test
 ```
 
 ---
 
 ## Deployment
 
-### Docker Compose (local production)
+Cloud Run + Cloud SQL + GCS. Do not set `GEMINI_API_KEY` in prod (Vertex ADC).
 
-```bash
-docker compose up --build
-# API: http://localhost:4000
-# Web: http://localhost:8081
-```
+Required env: `DATABASE_URL`, `GCP_PROJECT_ID`, `STORAGE_BUCKET`, `JWT_SECRET`, `ADMIN_PASSWORD`, `MISTRAL_API_KEY`, `NODE_ENV=production`.
 
-### Cloud Run (GCP) — Firestore + Vertex Gemini (ADC)
-
-**Gemini auth:** On Cloud Run, do **not** set `GEMINI_API_KEY`. The runtime service account
-uses Application Default Credentials (ADC) to call **Vertex AI Gemini**.
-
-```bash
-# 1. Enable APIs
-gcloud services enable run.googleapis.com firestore.googleapis.com \
-  storage.googleapis.com aiplatform.googleapis.com artifactregistry.googleapis.com \
-  --project=PROJECT_ID
-
-# 2. Create Firestore (Native mode) + Storage bucket if needed
-# 3. Grant Cloud Run SA roles:
-#    roles/datastore.user
-#    roles/storage.objectAdmin
-#    roles/aiplatform.user
-
-# 4. Build & push backend
-cd platform
-gcloud builds submit --tag gcr.io/PROJECT_ID/billparser-api
-
-# 5. Deploy backend (NO GEMINI_API_KEY — uses ADC)
-gcloud run deploy billparser-api \
-  --image gcr.io/PROJECT_ID/billparser-api \
-  --region asia-south1 \
-  --allow-unauthenticated \
-  --set-env-vars "GCP_PROJECT_ID=PROJECT_ID,STORAGE_BUCKET=your-bucket,VERTEX_LOCATION=asia-south1,GEMINI_MODEL=gemini-2.5-flash,JWT_SECRET=...,ADMIN_EMAIL=...,ADMIN_PASSWORD=..." \
-  --set-secrets "MISTRAL_API_KEY=mistral-api-key:latest"
-```
-
-**Local ADC test (no API key):**
-```bash
-gcloud auth application-default login
-# unset GEMINI_API_KEY in platform/.env
-# set LOCAL_DEV=false and use a real GCP project, OR keep LOCAL_DEV=true for DB but Gemini still needs ADC/key
-```
-
-### Environment Variables (Production)
-
-
-| Variable           | Required | Description |
-| ------------------ | -------- | ----------- |
-| `GCP_PROJECT_ID`   | Yes      | GCP project for Firestore + Vertex |
-| `STORAGE_BUCKET`   | Yes      | Cloud Storage bucket |
-| `MISTRAL_API_KEY`  | Yes      | Mistral OCR API key (Secret Manager) |
-| `GEMINI_API_KEY`   | No       | Optional. If set → AI Studio key. If empty → Vertex + ADC |
-| `GEMINI_MODEL`     | No       | Default: `gemini-2.5-flash` |
-| `VERTEX_LOCATION`  | No       | Vertex region, default `us-central1` |
-| `JWT_SECRET`       | Yes      | Session JWT secret |
-| `ADMIN_EMAIL`      | Yes      | Bootstrap admin |
-| `ADMIN_PASSWORD`   | Yes      | Bootstrap admin password |
-| `LOCAL_DEV`        | No       | Must be unset/`false` for Firestore |
-| `FIRESTORE_PREFIX` | No       | Multi-tenant collection prefix |
-| `PORT`             | No       | Default: `4000` (Cloud Run sets `$PORT`) |
-
+| Aspect | Local | Production |
+|--------|-------|------------|
+| Database | Local / Docker Postgres | Cloud SQL |
+| Files | GCS via ADC | GCS production bucket |
+| Gemini | ADC or API key | Vertex + ADC |
+| Admin seed | Default password allowed | Secret Manager only |
 
 ---
 
-## OCR Response Contract (IMMUTABLE)
+## OCR Response Contract (`parsed_data`)
 
-This is the `parsed_data` shape. **Do not rename fields or change nesting.**
+Do not rename fields. Consumed by UI, analytics, and fraud.
 
 ```json
 {
-  "irn": null,
-  "pan": null,
   "gstin": "07AAGCJ6656E1ZF",
   "company_name": "JSB MOBILITY PVT LTD",
-  "invoice_date": "19.03.2026",
-  "invoice_time": "19:53:29",
   "invoice_number": "DW21S25103620",
-  "service_details": {
-    "last_service": null,
-    "service_type": "Preventive Maintenance",
-    "next_service_due": null
-  },
-  "vehicle_details": {
-    "chassis_number": "M27GD5BEA8H024250",
-    "registration_number": "HR55AM4015",
-    "mileage_odometer_reading": 62341
-  },
-  "parts_line_items": [
-    {
-      "rate": 423.73,
-      "quantity": 1,
-      "hsn_sac_code": "84212300",
-      "tax_percentage": 18,
-      "taxable_amount": 423.73,
-      "item_name_description": "FILTER-POLLEN",
-      "part_number_item_code": "11668822"
-    }
-  ],
-  "labour_service_line_items": [
-    {
-      "labour_code": "EV4PM60",
-      "hsn_sac_code": "998729",
-      "labour_charges": 2700,
-      "tax_percentage": 18,
-      "labour_description": "Paid Service/60000 KM EV"
-    }
-  ],
+  "invoice_date": "19.03.2026",
+  "vehicle_details": { "registration_number": "HR55AM4015", "mileage_odometer_reading": 62341 },
+  "parts_line_items": [{ "item_name_description": "...", "quantity": 1, "rate": 423.73, "taxable_amount": 423.73, "tax_percentage": 18 }],
+  "labour_service_line_items": [{ "labour_description": "...", "labour_charges": 2700, "tax_percentage": 18 }],
   "totals_and_tax_summary": {
     "parts_total": 3527.12,
     "labour_total": 3965,
-    "parts_discount": 0,
-    "labour_discount": 126.5,
-    "parts_cgst_rate": 9,
-    "parts_igst_rate": null,
-    "parts_sgst_rate": 9,
-    "labour_cgst_rate": 9,
-    "labour_igst_rate": null,
-    "labour_sgst_rate": 9,
-    "parts_cgst_amount": 317.44,
-    "parts_igst_amount": null,
-    "parts_sgst_amount": 317.44,
-    "labour_cgst_amount": 345.47,
-    "labour_igst_amount": null,
-    "labour_sgst_amount": 345.47,
-    "sub_total_calculated": 8691.42,
-    "grand_total_invoice": 8691,
-    "deductibles": null,
-    "salvage": null
+    "grand_total_invoice": 8691
   },
   "confidence": 0.92
 }
 ```
-
-This contract is consumed by: Frontend, APIs, analytics, fraud detection.

@@ -51,7 +51,18 @@ async function seedAdmin() {
   console.log('[SEED] Change ADMIN_EMAIL and ADMIN_PASSWORD in .env for production.');
 }
 
+async function initDb() {
+  const { sequelize } = await import('./config/db.js');
+  const { initModels } = await import('./db/schema.js');
+  const seq = sequelize();
+  initModels(seq);
+  await seq.query('CREATE EXTENSION IF NOT EXISTS pg_trgm;');
+  await seq.sync({ alter: true });
+  console.log('[db] Sequelize sync complete');
+}
+
 async function main() {
+  await initDb();
   // Prevent IMAP socket timeouts from killing the whole server
   process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
     if (err?.code === 'ETIMEOUT' || /Socket timeout/i.test(err?.message ?? '')) {

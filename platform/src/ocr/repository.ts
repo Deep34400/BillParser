@@ -1,11 +1,10 @@
 /**
  * OCR Repository — data access layer for bills and bill parts.
- * Contains the actual Postgres CRUD. No re-exports — all DB code lives here.
+ * Sequelize-backed Postgres CRUD.
  */
 import { v4 as uuid } from 'uuid';
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from 'drizzle-orm';
-import { db } from '../config/db.js';
-import { bills, billParts } from '../db/schema.js';
+import { Op, fn, col, literal } from 'sequelize';
+import { Bill, BillPart } from './models/index.js';
 import { getSettings } from '../shared/settings.js';
 import type { BillDoc, BillPartDoc, BillType, BillStatus, ParsedInvoiceData, LineType } from '../shared/types.js';
 import type { AppSettings } from '../shared/settings.js';
@@ -15,7 +14,7 @@ export { getSettings };
 
 // ─── Row <-> Doc mapping ─────────────────────────────────────────────────────
 
-function billRowToDoc(row: typeof bills.$inferSelect): BillDoc {
+function billRowToDoc(row: Bill): BillDoc {
   return {
     bill_id: row.billId,
     fleet_id: row.fleetId,
@@ -99,7 +98,7 @@ function billRowToDoc(row: typeof bills.$inferSelect): BillDoc {
   };
 }
 
-function billDocToRow(b: BillDoc) {
+function billDocToRow(b: BillDoc): Record<string, unknown> {
   return {
     billId: b.bill_id,
     fleetId: b.fleet_id ?? null,
@@ -183,7 +182,7 @@ function billDocToRow(b: BillDoc) {
   };
 }
 
-function partRowToDoc(row: typeof billParts.$inferSelect): BillPartDoc {
+function partRowToDoc(row: BillPart): BillPartDoc {
   return {
     part_id: row.partId,
     bill_id: row.billId,
@@ -204,7 +203,7 @@ function partRowToDoc(row: typeof billParts.$inferSelect): BillPartDoc {
   };
 }
 
-function partDocToRow(p: BillPartDoc) {
+function partDocToRow(p: BillPartDoc): Record<string, unknown> {
   return {
     partId: p.part_id,
     billId: p.bill_id,
@@ -228,17 +227,17 @@ function partDocToRow(p: BillPartDoc) {
 // ─── Bill CRUD ──────────────────────────────────────────────────────────────
 
 export async function createBill(bill: BillDoc): Promise<BillDoc> {
-  await db().insert(bills).values(billDocToRow(bill));
+  await Bill.create(billDocToRow(bill) as any);
   return bill;
 }
 
 export async function getBill(billId: string): Promise<BillDoc | null> {
-  const [row] = await db().select().from(bills).where(eq(bills.billId, billId)).limit(1);
+  const row = await Bill.findByPk(billId);
   return row ? billRowToDoc(row) : null;
 }
 
-/** BillDoc (snake_case) key -> bills table (camelCase) column key. Excludes bill_id/created_at/updated_at. */
-const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, keyof typeof bills.$inferInsert>> = {
+/** BillDoc (snake_case) key -> Bill model (camelCase) attribute key. */
+const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, string>> = {
   fleet_id: 'fleetId', vehicle_id: 'vehicleId', bill_type: 'billType', bill_category: 'billCategory',
   vendor_name: 'vendorName', vendor_gstin: 'vendorGstin', company_name: 'companyName', gstin: 'gstin',
   pan: 'pan', irn: 'irn', invoice_number: 'invoiceNumber', invoice_date: 'invoiceDate',
@@ -250,8 +249,8 @@ const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, keyof typeof bills.$inferIns
   labour_igst_rate: 'labourIgstRate', total_tax_amount: 'totalTaxAmount', grand_total_amount: 'grandTotalAmount',
   deductibles: 'deductibles', salvage: 'salvage', odometer_reading: 'odometerReading',
   registration_number: 'registrationNumber', chassis_number: 'chassisNumber', ocr_status: 'ocrStatus',
-  processing_status: 'processingStatus', confidence_score: 'confidenceScore', review_reasons: 'reviewReasons', review_codes: 'reviewCodes',
-  total_reconciliation: 'totalReconciliation', fallback_attempts: 'fallbackAttempts',
+  processing_status: 'processingStatus', confidence_score: 'confidenceScore', review_reasons: 'reviewReasons',
+  review_codes: 'reviewCodes', total_reconciliation: 'totalReconciliation', fallback_attempts: 'fallbackAttempts',
   fallback_history: 'fallbackHistory',
   file_url: 'fileUrl', storage_path: 'storagePath', raw_ocr_reference: 'rawOcrReference',
   parsed_data: 'parsedData', pipeline_mode: 'pipelineMode', extraction_cost_usd: 'extractionCostUsd',
@@ -265,7 +264,9 @@ const BILL_FIELD_MAP: Partial<Record<keyof BillDoc, keyof typeof bills.$inferIns
   structuring_provider: 'structuringProvider', extraction_model: 'extractionModel',
   structuring_model: 'structuringModel', extraction_latency_ms: 'extractionLatencyMs',
   structuring_latency_ms: 'structuringLatencyMs', total_latency_ms: 'totalLatencyMs',
-  vendor_id: 'vendorId', input_rate_per_1m: 'inputRatePer1m', output_rate_per_1m: 'outputRatePer1m', fx_rate_usd_inr: 'fxRateUsdInr', schema_version: 'schemaVersion',
+  vendor_id: 'vendorId', input_rate_per_1m: 'inputRatePer1m', output_rate_per_1m: 'outputRatePer1m',
+  fx_rate_usd_inr: 'fxRateUsdInr', schema_version: 'schemaVersion',
+  extraction_pages: 'extractionPages',
 };
 
 export async function updateBill(billId: string, updates: Partial<BillDoc>): Promise<void> {
@@ -275,7 +276,7 @@ export async function updateBill(billId: string, updates: Partial<BillDoc>): Pro
     if (!column) continue;
     patch[column] = (updates as Record<string, unknown>)[key];
   }
-  await db().update(bills).set(patch).where(eq(bills.billId, billId));
+  await Bill.update(patch, { where: { billId } });
 }
 
 export async function updateBillStatus(billId: string, status: BillStatus, extra?: Partial<BillDoc>): Promise<void> {
@@ -288,39 +289,31 @@ export async function listBills(opts: {
   limit?: number;
   offset?: number;
 } = {}): Promise<BillDoc[]> {
-  const conditions = [];
-  if (opts.status) conditions.push(eq(bills.ocrStatus, opts.status));
-  if (opts.vehicleId) conditions.push(eq(bills.vehicleId, opts.vehicleId));
+  const where: Record<string, unknown> = {};
+  if (opts.status) where.ocrStatus = opts.status;
+  if (opts.vehicleId) where.vehicleId = opts.vehicleId;
 
-  const rows = await db().select().from(bills)
-    .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(desc(bills.createdAt))
-    .limit(opts.limit ?? 50)
-    .offset(opts.offset ?? 0);
+  const rows = await Bill.findAll({
+    where,
+    order: [['createdAt', 'DESC']],
+    limit: opts.limit ?? 50,
+    offset: opts.offset ?? 0,
+  });
   return rows.map(billRowToDoc);
 }
 
-/**
- * Fetch every bill (optionally filtered by status) for aggregation — analytics, fraud.
- * No document cap: the Firestore-era 25k-doc scan limit doesn't apply to a real query engine.
- */
 export async function fetchAllBills(opts: { status?: BillStatus } = {}): Promise<BillDoc[]> {
-  const rows = await db().select().from(bills)
-    .where(opts.status ? eq(bills.ocrStatus, opts.status) : undefined)
-    .orderBy(desc(bills.createdAt));
+  const where: Record<string, unknown> = {};
+  if (opts.status) where.ocrStatus = opts.status;
+
+  const rows = await Bill.findAll({ where, order: [['createdAt', 'DESC']] });
   return rows.map(billRowToDoc);
 }
 
-/**
- * Needs-review is now a persisted status rather than a runtime heuristic on
- * confidence + review_reasons. That makes it a plain indexed predicate in SQL
- * instead of something only decidable after loading every row.
- */
 export function billNeedsReview(b: BillDoc): boolean {
   return b.ocr_status === 'NEED_REVIEW';
 }
 
-/** Stable codes, persisted where available, inferred from legacy reason text otherwise. */
 export function billReviewCodes(b: BillDoc): string[] {
   if (b.review_codes?.length) return b.review_codes;
   const reasons = b.review_reasons ?? [];
@@ -338,9 +331,8 @@ export function billHasReviewCode(b: BillDoc, code: string): boolean {
   return billReviewCodes(b).includes(code);
 }
 
-export const REVIEW_CODE_KEYS = [
-  'MISSING_TAX_ID', 'TOTAL_MISMATCH', 'PARTS_BASE_MISMATCH', 'LABOUR_BASE_MISMATCH',
-] as const;
+import { REVIEW_CODE_KEYS } from '../shared/constants.js';
+export { REVIEW_CODE_KEYS };
 
 export interface PaginatedBills {
   bills: BillDoc[];
@@ -352,32 +344,33 @@ export interface PaginatedBills {
 
 const ALL_STATUSES: BillStatus[] = ['DRAFT', 'UPLOADED', 'PROCESSING', 'OCR_COMPLETED', 'NEED_REVIEW', 'VERIFIED', 'FAILED'];
 
-/** Count bills matching an optional status filter — real COUNT(*), no document reads. */
 export async function countBills(status?: BillStatus): Promise<number> {
-  const [row] = await db().select({ n: count() }).from(bills)
-    .where(status ? eq(bills.ocrStatus, status) : undefined);
-  return row?.n ?? 0;
+  const where: Record<string, unknown> = {};
+  if (status) where.ocrStatus = status;
+  return Bill.count({ where });
 }
 
-/** Count bills per status, plus needs-review / completed-clean, in a single GROUP BY. */
 export async function countAllStatuses(): Promise<Record<string, number>> {
-  const rows = await db().select({ status: bills.ocrStatus, n: count() }).from(bills).groupBy(bills.ocrStatus);
+  const rows = await Bill.findAll({
+    attributes: ['ocrStatus', [fn('COUNT', col('bill_id')), 'n']],
+    group: ['ocrStatus'],
+    raw: true,
+  }) as unknown as { ocrStatus: string; n: string }[];
+
   const counts: Record<string, number> = { all: 0 };
   for (const s of ALL_STATUSES) counts[s] = 0;
   for (const row of rows) {
-    counts[row.status] = row.n;
-    counts.all += row.n;
+    counts[row.ocrStatus] = Number(row.n);
+    counts.all += Number(row.n);
   }
 
   counts.needs_review = counts['NEED_REVIEW'] ?? 0;
   counts.completed_clean = (counts['OCR_COMPLETED'] ?? 0) + (counts['VERIFIED'] ?? 0);
 
-  // Review-code breakdown. Scoped to NEED_REVIEW rows only, and skipped entirely
-  // when there are none, so the common case costs nothing.
   for (const code of REVIEW_CODE_KEYS) counts[`review_${code}`] = 0;
   if (counts.needs_review > 0) {
-    const rows = await db().select().from(bills).where(eq(bills.ocrStatus, 'NEED_REVIEW'));
-    const docs = rows.map(billRowToDoc);
+    const needsReviewRows = await Bill.findAll({ where: { ocrStatus: 'NEED_REVIEW' } });
+    const docs = needsReviewRows.map(billRowToDoc);
     for (const code of REVIEW_CODE_KEYS) {
       counts[`review_${code}`] = docs.filter((b) => billHasReviewCode(b, code)).length;
     }
@@ -385,21 +378,13 @@ export async function countAllStatuses(): Promise<Record<string, number>> {
   return counts;
 }
 
-/**
- * Page-based pagination ordered by updated_at DESC.
- * Supports status, multi-status (statuses), needsReview, and text search (q).
- */
 export async function listBillsPaginated(opts: {
   page?: number;
   pageSize?: number;
   status?: BillStatus;
-  /** When set, match any of these statuses (e.g. OCR_COMPLETED + VERIFIED). */
   statuses?: BillStatus[];
-  /** Only bills with the persisted NEED_REVIEW status. */
   needsReview?: boolean;
-  /** Narrow Needs review to one stable code (MISSING_TAX_ID, TOTAL_MISMATCH, …). */
   reviewCode?: string;
-  /** When true with statuses=completed, exclude needs-review bills. */
   excludeNeedsReview?: boolean;
   q?: string;
 } = {}): Promise<PaginatedBills> {
@@ -408,35 +393,30 @@ export async function listBillsPaginated(opts: {
   const skip = (page - 1) * pageSize;
   const searchTerm = opts.q?.trim();
 
-  const conditions = [];
+  const where: any = {};
+
   if (opts.statuses?.length) {
-    conditions.push(inArray(bills.ocrStatus, opts.statuses));
+    where.ocrStatus = { [Op.in]: opts.statuses };
   } else if (opts.status) {
-    conditions.push(eq(bills.ocrStatus, opts.status));
+    where.ocrStatus = opts.status;
   }
+
   if (searchTerm) {
     const pattern = `%${searchTerm}%`;
-    conditions.push(or(
-      ilike(bills.vendorName, pattern),
-      ilike(bills.companyName, pattern),
-      ilike(bills.invoiceNumber, pattern),
-      ilike(bills.registrationNumber, pattern),
-    )!);
+    where[Op.or] = [
+      { vendorName: { [Op.iLike]: pattern } },
+      { companyName: { [Op.iLike]: pattern } },
+      { invoiceNumber: { [Op.iLike]: pattern } },
+      { registrationNumber: { [Op.iLike]: pattern } },
+    ];
   }
 
-  // needsReview is now the persisted NEED_REVIEW status, so it is an ordinary
-  // indexed predicate rather than something only decidable after loading rows.
-  if (opts.needsReview) conditions.push(eq(bills.ocrStatus, 'NEED_REVIEW'));
-  else if (opts.excludeNeedsReview) conditions.push(ne(bills.ocrStatus, 'NEED_REVIEW'));
+  if (opts.needsReview) where.ocrStatus = 'NEED_REVIEW';
+  else if (opts.excludeNeedsReview) where.ocrStatus = { [Op.ne]: 'NEED_REVIEW' };
 
-  // reviewCode still needs JS: codes may be persisted in review_codes or inferred
-  // from legacy review_reasons text, so it is not a single column predicate. Scoped
-  // to the (small) NEED_REVIEW set by the condition above.
   if (opts.reviewCode) {
-    const rows = await db().select().from(bills)
-      .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(desc(bills.updatedAt));
-    const docs = rows.map(billRowToDoc).filter((b) => billHasReviewCode(b, opts.reviewCode!));
+    const allRows = await Bill.findAll({ where, order: [['updatedAt', 'DESC']] });
+    const docs = allRows.map(billRowToDoc).filter((b) => billHasReviewCode(b, opts.reviewCode!));
     const total = docs.length;
     return {
       bills: docs.slice(skip, skip + pageSize), total, page, pageSize,
@@ -444,20 +424,16 @@ export async function listBillsPaginated(opts: {
     };
   }
 
-  const where = conditions.length ? and(...conditions) : undefined;
-  const [rows, [{ n: total }]] = await Promise.all([
-    db().select().from(bills).where(where).orderBy(desc(bills.updatedAt)).limit(pageSize).offset(skip),
-    db().select({ n: count() }).from(bills).where(where),
-  ]);
+  const { count: total, rows } = await Bill.findAndCountAll({
+    where,
+    order: [['updatedAt', 'DESC']],
+    limit: pageSize,
+    offset: skip,
+  });
 
   return { bills: rows.map(billRowToDoc), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
 }
 
-/**
- * Find existing bills with the same invoice_number (and optionally vendor_gstin).
- * Excludes the bill with excludeId so a bill doesn't match itself.
- * Returns [] if invoice_number is null/empty.
- */
 export async function findDuplicateBills(
   invoiceNumber: string | null | undefined,
   vendorGstin: string | null | undefined,
@@ -465,28 +441,26 @@ export async function findDuplicateBills(
 ): Promise<BillDoc[]> {
   if (!invoiceNumber) return [];
 
-  const conditions = [eq(bills.invoiceNumber, invoiceNumber)];
-  if (vendorGstin) conditions.push(eq(bills.vendorGstin, vendorGstin));
+  const where: any = { invoiceNumber };
+  if (vendorGstin) where.vendorGstin = vendorGstin;
 
-  const rows = await db().select().from(bills).where(and(...conditions)).limit(5);
+  const rows = await Bill.findAll({ where, limit: 5 });
   return rows.map(billRowToDoc).filter((b) => b.bill_id !== excludeId);
 }
 
-/** Cascade FK on bill_parts.bill_id removes parts automatically — no separate cleanup needed. */
 export async function deleteBill(billId: string): Promise<void> {
-  await db().delete(bills).where(eq(bills.billId, billId));
+  await Bill.destroy({ where: { billId } });
 }
 
 // ─── Bill Parts CRUD ────────────────────────────────────────────────────────
 
 export async function getPartsForBill(billId: string): Promise<BillPartDoc[]> {
-  const rows = await db().select().from(billParts).where(eq(billParts.billId, billId));
+  const rows = await BillPart.findAll({ where: { billId } });
   return rows.map(partRowToDoc);
 }
 
 export async function deletePartsForBill(billId: string): Promise<number> {
-  const deleted = await db().delete(billParts).where(eq(billParts.billId, billId)).returning({ id: billParts.partId });
-  return deleted.length;
+  return BillPart.destroy({ where: { billId } });
 }
 
 export function extractPartsFromParsed(billId: string, parsed: ParsedInvoiceData): BillPartDoc[] {
@@ -520,27 +494,23 @@ export function extractPartsFromParsed(billId: string, parsed: ParsedInvoiceData
   return parts;
 }
 
-/**
- * Bills created within an ISO instant range, oldest first.
- *
- * created_at is TIMESTAMPTZ here, so this is an indexed range scan
- * (bills_created_at_idx) rather than the capped document walk it had to be
- * against Firestore.
- */
 export async function listBillsByCreatedAtRange(
   startIso: string,
   endIso: string,
   maxDocs = 5_000,
 ): Promise<BillDoc[]> {
   const limit = Math.min(Math.max(maxDocs, 1), 5_000);
-  const rows = await db().select().from(bills)
-    .where(and(gte(bills.createdAt, new Date(startIso)), lte(bills.createdAt, new Date(endIso))))
-    .orderBy(asc(bills.createdAt))
-    .limit(limit);
+  const rows = await Bill.findAll({
+    where: {
+      createdAt: { [Op.between]: [new Date(startIso), new Date(endIso)] },
+    },
+    order: [['createdAt', 'ASC']],
+    limit,
+  });
   return rows.map(billRowToDoc);
 }
 
 export async function saveBillParts(parts: BillPartDoc[]): Promise<void> {
   if (!parts.length) return;
-  await db().insert(billParts).values(parts.map(partDocToRow));
+  await BillPart.bulkCreate(parts.map(partDocToRow) as any[]);
 }

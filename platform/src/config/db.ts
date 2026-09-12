@@ -1,39 +1,41 @@
 /**
- * Postgres connection — pool + Drizzle instance.
+ * Postgres connection — Sequelize instance.
  *
- * NUMERIC (oid 1700) is parsed to a JS number globally. This must happen before
- * any query runs, because raw `db.execute(sql\`...\`)` calls (used for analytics
- * aggregates) bypass Drizzle's own column-type mapping and would otherwise
- * return numeric columns as strings — silently turning `total += amount` into
- * string concatenation.
+ * Pool settings tuned for Cloud Run (max 2 per instance × 8 instances = 16 connections).
+ * NUMERIC columns returned as JS numbers via pg type parser override.
  */
+import { Sequelize } from 'sequelize';
 import pg from 'pg';
-import { drizzle } from 'drizzle-orm/node-postgres';
 import { env } from './env.js';
-import * as schema from '../db/schema.js';
 
-pg.types.setTypeParser(1700, (v: string) => (v === null ? null : parseFloat(v)));
+// pg returns NUMERIC (oid 1700) as strings by default.
+// Override globally so every query returns JS numbers.
+const NUMERIC_OID = 1700;
+pg.types.setTypeParser(NUMERIC_OID, (val: string) => parseFloat(val));
 
-let _pool: pg.Pool | undefined;
+let _sequelize: Sequelize | undefined;
 
-function pool(): pg.Pool {
-  if (!_pool) {
-    _pool = new pg.Pool({
-      connectionString: env.databaseUrl,
-      max: 2,
-      idleTimeoutMillis: 10_000,
+export function sequelize(): Sequelize {
+  if (!_sequelize) {
+    _sequelize = new Sequelize(env.databaseUrl, {
+      dialect: 'postgres',
+      logging: false,
+      pool: {
+        max: 2,
+        min: 0,
+        idle: 10_000,
+        acquire: 30_000,
+      },
+      define: {
+        timestamps: false,
+        underscored: true,
+        freezeTableName: true,
+      },
     });
   }
-  return _pool;
-}
-
-let _db: ReturnType<typeof drizzle<typeof schema>> | undefined;
-
-export function db() {
-  if (!_db) _db = drizzle(pool(), { schema });
-  return _db;
+  return _sequelize;
 }
 
 export async function closeDb(): Promise<void> {
-  if (_pool) await _pool.end();
+  if (_sequelize) await _sequelize.close();
 }

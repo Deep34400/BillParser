@@ -1,6 +1,24 @@
 # Users Module
 
-Authentication, authorization, user management, and token-based billing. Follows the controller → service → repository pattern.
+Authentication, authorization, user management, and token-based billing. Follows the controller → service → repository pattern. Data lives in PostgreSQL; Sequelize models are defined in `users/models/` (not a central schema file).
+
+## Directory Structure
+
+```
+users/
+├── models/
+│   ├── user.ts              # User Sequelize model
+│   ├── apiKey.ts            # ApiKey Sequelize model
+│   ├── tokenTransaction.ts  # TokenTransaction Sequelize model
+│   └── index.ts             # Barrel
+├── repository.ts            # PostgreSQL CRUD (Sequelize)
+├── service.ts               # Business logic
+├── dto.ts                   # Data transfer objects
+├── route.ts                 # HTTP endpoints
+└── README.md
+```
+
+Enum values (`USER_ROLES`, `USER_STATUSES`, `TX_TYPES`) are defined in `shared/constants.ts` and validated on the Sequelize models.
 
 ## How It Works — Full Flow
 
@@ -11,7 +29,7 @@ User submits email + password on the login page
   → Frontend calls POST /api/auth/login
   → route.ts validates that email and password are present
   → service.ts → login() is called:
-    1. Looks up the user by email in Postgres (repository.ts → getUserByEmail)
+    1. Looks up the user by email in PostgreSQL (repository.ts → getUserByEmail)
     2. Verifies password against stored scrypt hash (repository.ts → verifyPassword)
     3. Checks user status is not 'blocked'
     4. Returns the user object (or an error with HTTP status code)
@@ -30,11 +48,11 @@ Any API request arrives at the server
   → If token starts with "eyJ" → it's a JWT:
     - Verify signature with JWT_SECRET
     - Decode { user_id, role }
-    - Look up user from Postgres
+    - Look up user from PostgreSQL
     - Attach user to req.appUser
   → If token starts with "inv_" → it's an API key:
     - SHA-256 hash the key
-    - Look up the matching api_keys row
+    - Look up the matching api_keys row via Sequelize
     - Find the user who owns that key
     - Attach user to req.appUser
   → If neither → 401 Unauthorized (unless a public path)
@@ -48,15 +66,15 @@ User clicks "Generate API Key" in the Account page
   → service.ts → issueApiKey():
     1. Generates a random 32-byte key prefixed with "inv_"
     2. SHA-256 hashes it for storage
-    3. Saves the full key, hash, and prefix to the Postgres api_keys table
-    4. Returns the full key to the user (they can copy it from the UI anytime)
+    3. Saves the hash and prefix to the PostgreSQL api_keys table (ApiKey model)
+    4. Returns the full key to the user (shown once in the UI)
   → User can authenticate with: Authorization: Bearer inv_xxxx...
 
 User clicks "Revoke" on an API key
   → DELETE /api/auth/api-keys/:keyId
   → service.ts → revokeApiKey():
     1. Lists the user's keys to verify ownership
-    2. Deletes the key row from Postgres
+    2. Deletes the key row from PostgreSQL
     3. The key immediately stops working
 ```
 
@@ -66,19 +84,21 @@ User clicks "Revoke" on an API key
 OCR pipeline completes successfully
   → ocr/route.ts calculates the USD cost from token usage
   → Calls users/service.ts → deductTokens():
-    1. Looks up the user
-    2. Checks token_balance >= amount (throws if insufficient)
-    3. Subtracts from token_balance
-    4. Increments total_tokens_used and total_ocr_count
-    5. Creates a TokenTransactionDoc (debit) for audit trail
+    1. Calls repository.ts → applyTokenTransaction() (type: debit)
+    2. Inside a sequelize().transaction():
+       - UPDATE users SET token_balance = token_balance - amount
+         WHERE user_id = ? AND token_balance >= amount  (atomic — no race)
+       - Increments total_tokens_used and total_ocr_count on debit
+       - Inserts a TokenTransaction row for audit trail
+    3. Throws if insufficient balance (affected row count = 0)
   → Calls users/service.ts → trackOcrCost():
     1. Adds the USD cost to the user's lifetime total_cost_usd
 
 Admin tops up a user's balance
   → POST /api/admin/users/:id/tokens
   → service.ts → addTokens():
-    1. Adds to token_balance
-    2. Creates a TokenTransactionDoc (credit) for audit trail
+    1. Calls applyTokenTransaction() (type: credit)
+    2. Creates a TokenTransaction row (credit) for audit trail
 ```
 
 ### User Administration (Admin Only)
@@ -91,7 +111,7 @@ Admin creates a new user
     1. Validates password length >= 6
     2. Checks for duplicate email
     3. Hashes password with scrypt + random salt
-    4. Creates UserDoc in Postgres with initial balance
+    4. Creates User row in PostgreSQL with initial balance
   → Returns the sanitized user (no password_hash in response)
 ```
 
@@ -104,7 +124,7 @@ Admin creates a new user
 │  - Input validation (required fields, types)    │
 │  - Calls service functions                      │
 │  - Formats JSON response                        │
-│  - Never accesses the database directly            │
+│  - Never accesses the database directly         │
 ├─────────────────────────────────────────────────┤
 │  service.ts (Service)                           │
 │  - Business logic and domain rules              │
@@ -113,12 +133,18 @@ Admin creates a new user
 │  - Orchestrates repository calls                │
 │  - No HTTP or Fastify concerns                  │
 ├─────────────────────────────────────────────────┤
-│  repository.ts (Repository)                     │
-│  - Pure Postgres CRUD operations                │
+│  repository.ts (Repository)                   │
+│  - Sequelize CRUD for users, api_keys,          │
+│    token_transactions tables                    │
 │  - createUser, getUser, updateUser, listUsers   │
-│  - Password hashing (scrypt)                    │
+│  - Password hashing (scrypt + random salt)      │
 │  - API key hashing (SHA-256)                    │
-│  - Atomic balance debits (applyTokenTransaction)│
+│  - Atomic balance ops (applyTokenTransaction)   │
+├─────────────────────────────────────────────────┤
+│  models/ (Sequelize)                            │
+│  - User, ApiKey, TokenTransaction definitions   │
+│  - Column mappings + enum validation            │
+│  - Initialized via init*Model() at boot         │
 ├─────────────────────────────────────────────────┤
 │  dto.ts (Data Transfer Objects)                 │
 │  - clientUserView() → safe shape for logged-in  │
@@ -130,7 +156,7 @@ Admin creates a new user
 
 **Why this pattern:** Route.ts never imports from repository.ts directly. Service.ts is the single entry point for all business logic. This means:
 - You can unit test service.ts without HTTP
-- You can swap Postgres for another DB by only changing repository.ts
+- You can swap PostgreSQL access by only changing repository.ts and models/
 - Route handlers stay thin and predictable
 
 ## File Reference
@@ -139,13 +165,26 @@ Admin creates a new user
 |------|-------|-------------|
 | `route.ts` | Controller | All HTTP endpoints (auth + account + admin) |
 | `service.ts` | Service | login, issueApiKey, revokeApiKey, registerUser, blockUser, deductTokens, addTokens, trackOcrCost |
-| `repository.ts` | Repository | Postgres CRUD for users, api_keys, token_transactions tables |
+| `repository.ts` | Repository | Sequelize CRUD for `users`, `api_keys`, `token_transactions` tables |
+| `models/user.ts` | Model | User Sequelize model — maps to `users` table |
+| `models/apiKey.ts` | Model | ApiKey Sequelize model — maps to `api_keys` table |
+| `models/tokenTransaction.ts` | Model | TokenTransaction Sequelize model — maps to `token_transactions` table; validates `type` against `TX_TYPES` from `shared/constants.ts` |
+| `models/index.ts` | Model | Barrel export for all user models |
 | `dto.ts` | DTO | clientUserView (hide sensitive data), sanitizeUser (admin view) |
+
+## PostgreSQL Tables
+
+| Table | Model | Description |
+|-------|-------|-------------|
+| `users` | `User` | Accounts, password hash, token balance, role/status |
+| `api_keys` | `ApiKey` | SHA-256 hashed API keys with `inv_` prefix |
+| `token_transactions` | `TokenTransaction` | Credit/debit ledger (`TX_TYPES` in `shared/constants.ts`) |
 
 ## Security
 
 - **Passwords**: scrypt with random 16-byte salt (no external dependency)
-- **API keys**: `inv_` + 32 random bytes, stored as SHA-256 hash
+- **API keys**: `inv_` + 32 random bytes, stored as SHA-256 hash (plaintext never persisted)
 - **JWT**: 7-day expiry, signed with `JWT_SECRET` env var
 - **Admin routes**: `requireAdmin` preHandler rejects non-admin users
 - **Blocked users**: checked on every login and JWT verification
+- **Token debits**: atomic via `sequelize().transaction()` with `UPDATE … WHERE token_balance >= amount` — concurrent OCR runs cannot overdraw

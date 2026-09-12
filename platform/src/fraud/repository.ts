@@ -1,11 +1,8 @@
 /**
  * Fraud Repository — data access layer.
- * Bills live in OCR repository (OCR owns that data).
  */
-import { desc } from 'drizzle-orm';
 import { fetchAllBills } from '../ocr/repository.js';
-import { db } from '../config/db.js';
-import { billParts } from '../db/schema.js';
+import { BillPart } from '../ocr/models/index.js';
 import type { BillDoc, BillPartDoc } from '../shared/types.js';
 
 export type { BillDoc, BillPartDoc };
@@ -16,11 +13,10 @@ export async function fetchCompletedBills(): Promise<BillDoc[]> {
 }
 
 export async function fetchAllParts(): Promise<BillPartDoc[]> {
-  const rows = await db().select({
-    partId: billParts.partId, billId: billParts.billId, lineType: billParts.lineType,
-    name: billParts.name, normalizedName: billParts.normalizedName, rate: billParts.rate,
-    createdAt: billParts.createdAt,
-  }).from(billParts).orderBy(desc(billParts.createdAt));
+  const rows = await BillPart.findAll({
+    attributes: ['partId', 'billId', 'lineType', 'name', 'normalizedName', 'rate', 'createdAt'],
+    order: [['createdAt', 'DESC']],
+  });
 
   return rows.map((row) => ({
     part_id: row.partId, bill_id: row.billId, line_type: row.lineType as BillPartDoc['line_type'],

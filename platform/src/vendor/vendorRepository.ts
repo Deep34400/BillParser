@@ -1,13 +1,11 @@
 /**
- * Vendor Repository — Postgres CRUD for the `vendors` table.
- * Pure data-access layer. No business logic.
+ * Vendor Repository — Sequelize CRUD for the `vendors` table.
  */
-import { desc, eq, ilike, or, sql } from 'drizzle-orm';
-import { db } from '../config/db.js';
-import { vendors } from '../db/schema.js';
+import { Op, literal } from 'sequelize';
+import { Vendor } from './models/index.js';
 import type { VendorDoc } from './vendorTypes.js';
 
-function rowToDoc(row: typeof vendors.$inferSelect): VendorDoc {
+function rowToDoc(row: Vendor): VendorDoc {
   return {
     vendor_id: row.vendorId,
     legal_name: row.legalName,
@@ -23,31 +21,27 @@ function rowToDoc(row: typeof vendors.$inferSelect): VendorDoc {
   };
 }
 
-function docToRow(v: VendorDoc) {
-  return {
-    vendorId: v.vendor_id,
-    legalName: v.legal_name,
-    displayName: v.display_name,
-    gstin: v.gstin,
-    pan: v.pan,
-    invoiceCount: v.invoice_count,
-    firstSeen: new Date(v.first_seen),
-    lastSeen: new Date(v.last_seen),
-    parserName: v.parser_name,
-    createdAt: new Date(v.created_at),
-    updatedAt: new Date(v.updated_at),
-  };
-}
-
 // ─── CRUD ───────────────────────────────────────────────────────────────────
 
 export async function createVendor(vendor: VendorDoc): Promise<VendorDoc> {
-  await db().insert(vendors).values(docToRow(vendor));
+  await Vendor.create({
+    vendorId: vendor.vendor_id,
+    legalName: vendor.legal_name,
+    displayName: vendor.display_name,
+    gstin: vendor.gstin,
+    pan: vendor.pan,
+    invoiceCount: vendor.invoice_count,
+    firstSeen: new Date(vendor.first_seen),
+    lastSeen: new Date(vendor.last_seen),
+    parserName: vendor.parser_name,
+    createdAt: new Date(vendor.created_at),
+    updatedAt: new Date(vendor.updated_at),
+  } as any);
   return vendor;
 }
 
 export async function getVendor(vendorId: string): Promise<VendorDoc | null> {
-  const [row] = await db().select().from(vendors).where(eq(vendors.vendorId, vendorId)).limit(1);
+  const row = await Vendor.findByPk(vendorId);
   return row ? rowToDoc(row) : null;
 }
 
@@ -62,44 +56,49 @@ export async function updateVendor(vendorId: string, updates: Partial<VendorDoc>
   if (updates.last_seen !== undefined) patch.lastSeen = new Date(updates.last_seen);
   if (updates.parser_name !== undefined) patch.parserName = updates.parser_name;
 
-  await db().update(vendors).set(patch).where(eq(vendors.vendorId, vendorId));
+  await Vendor.update(patch, { where: { vendorId } });
 }
 
 export async function listVendors(opts: { limit?: number; offset?: number } = {}): Promise<VendorDoc[]> {
-  const rows = await db().select().from(vendors)
-    .orderBy(desc(vendors.invoiceCount))
-    .limit(opts.limit ?? 100)
-    .offset(opts.offset ?? 0);
+  const rows = await Vendor.findAll({
+    order: [['invoiceCount', 'DESC']],
+    limit: opts.limit ?? 100,
+    offset: opts.offset ?? 0,
+  });
   return rows.map(rowToDoc);
 }
 
-// ─── Lookup helpers (for matching) ──────────────────────────────────────────
+// ─── Lookup helpers ─────────────────────────────────────────────────────────
 
 export async function findByGstin(gstin: string): Promise<VendorDoc | null> {
-  const [row] = await db().select().from(vendors).where(eq(vendors.gstin, gstin)).limit(1);
+  const row = await Vendor.findOne({ where: { gstin } });
   return row ? rowToDoc(row) : null;
 }
 
 export async function findByPan(pan: string): Promise<VendorDoc | null> {
-  const [row] = await db().select().from(vendors).where(eq(vendors.pan, pan)).limit(1);
+  const row = await Vendor.findOne({ where: { pan } });
   return row ? rowToDoc(row) : null;
 }
 
 export async function findByLegalName(name: string): Promise<VendorDoc | null> {
-  const [row] = await db().select().from(vendors)
-    .where(sql`lower(${vendors.legalName}) = lower(${name})`).limit(1);
+  const row = await Vendor.findOne({
+    where: literal(`lower("legal_name") = lower('${name.replace(/'/g, "''")}')`),
+  });
   return row ? rowToDoc(row) : null;
 }
 
 export async function searchVendors(q: string, limit = 20): Promise<VendorDoc[]> {
   const pattern = `%${q}%`;
-  const rows = await db().select().from(vendors)
-    .where(or(
-      ilike(vendors.legalName, pattern),
-      ilike(vendors.displayName, pattern),
-      ilike(vendors.gstin, pattern),
-      ilike(vendors.pan, pattern),
-    ))
-    .limit(limit);
+  const rows = await Vendor.findAll({
+    where: {
+      [Op.or]: [
+        { legalName: { [Op.iLike]: pattern } },
+        { displayName: { [Op.iLike]: pattern } },
+        { gstin: { [Op.iLike]: pattern } },
+        { pan: { [Op.iLike]: pattern } },
+      ],
+    },
+    limit,
+  });
   return rows.map(rowToDoc);
 }
