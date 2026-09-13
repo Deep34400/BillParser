@@ -2,7 +2,8 @@
  * Webhook Routes — HTTP endpoints for webhook management.
  */
 import type { FastifyInstance } from 'fastify';
-import { createEndpoint, listEndpoints, toggleEndpoint, removeEndpoint } from './service.js';
+import { createEndpoint, listEndpoints, toggleEndpoint, removeEndpoint, getDeliveryLog } from './service.js';
+import { getWebhook } from './repository.js';
 import { WEBHOOK_EVENTS } from './models/index.js';
 
 export async function webhookRoutes(app: FastifyInstance) {
@@ -47,6 +48,26 @@ export async function webhookRoutes(app: FastifyInstance) {
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ success: false, message: (err as Error).message });
+    }
+  });
+
+  /** GET /api/webhooks/:id/deliveries — recent delivery attempts for an endpoint. */
+  app.get('/api/webhooks/:id/deliveries', async (req, reply) => {
+    try {
+      if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
+
+      const { id } = req.params as { id: string };
+      const ep = await getWebhook(id);
+      if (!ep || ep.user_id !== req.appUser.user_id) {
+        return reply.code(404).send({ success: false, message: 'Webhook endpoint not found' });
+      }
+
+      const query = req.query as { limit?: string };
+      const limit = query.limit ? parseInt(query.limit, 10) : 50;
+      const deliveries = await getDeliveryLog(id, Number.isFinite(limit) ? limit : 50);
+      return { success: true, data: deliveries };
+    } catch (err) {
+      return reply.code(500).send({ success: false, message: (err as Error).message });
     }
   });
 

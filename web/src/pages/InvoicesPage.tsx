@@ -20,6 +20,8 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@
 import { EmptyState } from '@/components/ui/empty-state.js';
 import { hasUnlimitedBalance, balanceNumber } from '../lib/balance.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { FeatureHint } from '../components/FeatureHint.js';
+import { UploadProgress, type UploadFileEntry } from '../components/UploadProgress.js';
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -105,6 +107,7 @@ export function InvoicesPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadFileEntry[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [toast, setToast] = useState('');
@@ -259,18 +262,59 @@ export function InvoicesPage() {
     if (pdfs.length === 0) { setToast('No PDF files selected'); return; }
     if (busy) return;
     setBusy(true);
+    setUploadProgress(pdfs.map((f) => ({ name: f.name, status: 'uploading' as const })));
+
+    let created = 0;
+    let dupes = 0;
+    const rejectedList: Array<string | { name: string; reason?: string }> = [];
+    const batch = batchName.trim() || undefined;
+
+    for (let i = 0; i < pdfs.length; i++) {
+      const file = pdfs[i];
+      setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'uploading' } : f)) ?? null);
+      try {
+        const result = await api.upload([file], i === 0 ? batch : undefined);
+        const fileCreated = result?.created?.length ?? 0;
+        const fileDupes = result?.duplicates?.length ?? 0;
+        const fileRejected = (result?.rejected ?? []) as Array<string | { name: string; reason?: string }>;
+
+        if (fileCreated > 0) {
+          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'processing' } : f)) ?? null);
+          await new Promise((r) => setTimeout(r, 400));
+          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'done' } : f)) ?? null);
+          created += fileCreated;
+        } else if (fileDupes > 0) {
+          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: 'Duplicate — already uploaded' } : f)) ?? null);
+          dupes += fileDupes;
+        } else if (fileRejected.length > 0) {
+          const reason = typeof fileRejected[0] === 'string'
+            ? fileRejected[0]
+            : fileRejected[0].reason ?? 'Rejected';
+          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: reason } : f)) ?? null);
+          rejectedList.push(...fileRejected);
+        } else {
+          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: 'Unknown error' } : f)) ?? null);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'unknown';
+        setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: msg } : f)) ?? null);
+        rejectedList.push({ name: file.name, reason: msg });
+      }
+    }
+
+    const rejected = rejectedList.length;
+    const rejectDetail = rejectedList.map((r) => (typeof r === 'string' ? r : `${r.name}${r.reason ? `: ${r.reason}` : ''}`)).slice(0, 3).join('; ');
+    if (dupes > 0) setDuplicateBanner({ count: dupes });
     try {
-      const result = await api.upload(pdfs, batchName.trim() || undefined);
-      const created = result?.created?.length ?? 0;
-      const dupes = result?.duplicates?.length ?? 0;
-      const rejectedList = (result?.rejected ?? []) as Array<string | { name: string; reason?: string }>;
-      const rejected = rejectedList.length;
-      const rejectDetail = rejectedList.map((r) => (typeof r === 'string' ? r : `${r.name}${r.reason ? `: ${r.reason}` : ''}`)).slice(0, 3).join('; ');
-      if (dupes > 0) setDuplicateBanner({ count: dupes });
       await refetch();
       setToast(`Uploaded ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected${rejectDetail ? ` (${rejectDetail})` : ''}` : ''}`);
-      setShowUpload(false); setBatchName('');
-    } catch (e) { setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown')); } finally { setBusy(false); }
+      setShowUpload(false);
+      setBatchName('');
+    } catch (e) {
+      setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleImport() {
@@ -290,9 +334,26 @@ export function InvoicesPage() {
     } catch (e) { setToast('Import failed: ' + (e instanceof Error ? e.message : 'unknown')); } finally { setBusy(false); }
   }
 
-  function onDragOver(e: React.DragEvent) { e.preventDefault(); setDragging(true); }
-  function onDragLeave() { setDragging(false); }
-  function onDrop(e: React.DragEvent) { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length > 0) void handleFiles(e.dataTransfer.files); }
+  function onDragOver(e: React.DragEvent) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragging(true); }
+  function onDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+  }
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const pdfs = filterPdfs(e.dataTransfer.files);
+    if (pdfs.length === 0) { setToast('Only PDF files are accepted'); return; }
+    void handleFiles(pdfs);
+  }
+
+  useEffect(() => {
+    if (!uploadProgress?.length) return;
+    const allSettled = uploadProgress.every((f) => f.status === 'done' || f.status === 'failed');
+    if (!allSettled) return;
+    const t = setTimeout(() => setUploadProgress(null), 3000);
+    return () => clearTimeout(t);
+  }, [uploadProgress]);
 
   const isAllSelected = displayedRows.length > 0 && selected.size === displayedRows.length;
   const isPartialSelected = selected.size > 0 && selected.size < displayedRows.length;
@@ -318,6 +379,15 @@ export function InvoicesPage() {
           <button onClick={() => setDuplicateBanner(null)} className="text-warning font-bold text-base hover:opacity-70 cursor-pointer">
             <X className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {globalCounts.ALL >= 3 && (
+        <div className="px-7 pt-4">
+          <FeatureHint
+            id="batch-upload"
+            message="Tip: You can batch-upload multiple PDFs at once. Just select multiple files or drag them in."
+          />
         </div>
       )}
 
@@ -419,11 +489,13 @@ export function InvoicesPage() {
         <div
           onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
           className={cn(
-            'mx-7 mb-3 rounded-xl border-2 border-dashed p-7 text-center transition-colors',
-            dragging ? 'border-primary bg-secondary' : 'border-border bg-card',
+            'mx-7 mb-3 rounded-xl border-2 p-7 text-center transition-colors',
+            dragging ? 'border-solid border-primary bg-secondary' : 'border-dashed border-border bg-card',
           )}
         >
-          <p className="text-base font-semibold text-foreground mb-1">Drop PDF invoices here</p>
+          <p className="text-base font-semibold text-foreground mb-1">
+            {dragging ? 'Drop PDFs here' : 'Drop PDF invoices here'}
+          </p>
           <p className="text-sm text-muted-foreground mb-4">or browse to select files</p>
 
           <Input type="text" aria-label="Batch name" placeholder="Batch name (optional)" value={batchName}
@@ -446,6 +518,10 @@ export function InvoicesPage() {
             </Button>
           </div>
         </div>
+      )}
+
+      {uploadProgress && uploadProgress.length > 0 && (
+        <UploadProgress files={uploadProgress} />
       )}
 
       {/* ─── Status pills ─── */}

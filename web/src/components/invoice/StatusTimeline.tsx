@@ -1,4 +1,4 @@
-import type { Invoice } from '../../types/index.js';
+import type { InvoiceStatus } from '../../types/index.js';
 import { cn } from '@/lib/utils.js';
 
 const STEPS = [
@@ -11,11 +11,13 @@ const STEPS = [
 
 type StepKey = (typeof STEPS)[number]['key'];
 
-function currentStep(inv: Invoice): StepKey {
-  if (inv.approvalStatus === 'approved') return 'approved';
-  if (inv.approvalStatus === 'pending' || inv.status === 'NEEDS_REVIEW') return 'review';
-  if (inv.status === 'COMPLETED' || inv.status === 'FAILED') return 'extracted';
-  if (inv.status === 'PENDING' || inv.status === 'PROCESSING') return 'processing';
+type ApprovalStatus = 'not_required' | 'pending' | 'approved' | 'rejected' | null | undefined;
+
+function currentStep(ocrStatus: InvoiceStatus, approvalStatus: ApprovalStatus): StepKey {
+  if (approvalStatus === 'approved') return 'approved';
+  if (approvalStatus === 'pending' || ocrStatus === 'NEEDS_REVIEW') return 'review';
+  if (ocrStatus === 'COMPLETED' || ocrStatus === 'FAILED') return 'extracted';
+  if (ocrStatus === 'PENDING' || ocrStatus === 'PROCESSING') return 'processing';
   return 'upload';
 }
 
@@ -23,8 +25,13 @@ function stepIndex(key: StepKey): number {
   return STEPS.findIndex((s) => s.key === key);
 }
 
-export function StatusTimeline({ inv }: { inv: Invoice }) {
-  const current = currentStep(inv);
+interface Props {
+  ocrStatus: InvoiceStatus;
+  approvalStatus?: ApprovalStatus;
+}
+
+export function StatusTimeline({ ocrStatus, approvalStatus }: Props) {
+  const current = currentStep(ocrStatus, approvalStatus);
   const currentIdx = stepIndex(current);
 
   return (
@@ -40,7 +47,7 @@ export function StatusTimeline({ inv }: { inv: Invoice }) {
                   className={cn(
                     'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
                     done && 'bg-success text-white',
-                    active && 'bg-primary text-primary-foreground ring-2 ring-primary/30',
+                    active && 'bg-warning text-white ring-2 ring-warning/30',
                     !done && !active && 'bg-muted text-faint',
                   )}
                 >
@@ -49,7 +56,7 @@ export function StatusTimeline({ inv }: { inv: Invoice }) {
                 <span
                   className={cn(
                     'text-[10px] font-semibold uppercase tracking-wide truncate w-full text-center',
-                    active ? 'text-primary' : done ? 'text-success' : 'text-faint',
+                    active ? 'text-warning' : done ? 'text-success' : 'text-faint',
                   )}
                 >
                   {step.label}

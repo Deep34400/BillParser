@@ -15,9 +15,13 @@ import {
   findActiveWebhooksForEvent,
   type WebhookEndpointDoc,
 } from './repository.js';
-import { WEBHOOK_EVENTS, type WebhookEvent } from './models/index.js';
+import { WEBHOOK_EVENTS, WebhookDelivery, type WebhookEvent } from './models/index.js';
 import { NotFoundError, ValidationError } from '../shared/errors.js';
 import { audit } from '../audit/service.js';
+
+/** Delays before each attempt: immediate, 10s, 30s. */
+const RETRY_DELAYS_MS = [0, 10_000, 30_000] as const;
+const MAX_ATTEMPTS = RETRY_DELAYS_MS.length;
 
 function isAllowedWebhookUrl(url: string): boolean {
   if (url.startsWith('https://')) return true;
@@ -77,11 +81,33 @@ export async function removeEndpoint(endpointId: string, userId: string): Promis
   audit('webhook:delete', { userId, resourceType: 'webhook', resourceId: endpointId, details: { url: ep.url } });
 }
 
+// ─── Delivery log ───────────────────────────────────────────────────────────
+
+export async function getDeliveryLog(endpointId: string, limit = 50) {
+  const rows = await WebhookDelivery.findAll({
+    where: { endpointId },
+    order: [['createdAt', 'DESC']],
+    limit: Math.min(Math.max(limit, 1), 200),
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    endpoint_id: row.endpointId,
+    event: row.event,
+    payload: row.payload,
+    status_code: row.statusCode,
+    response_body: row.responseBody,
+    attempt: row.attempt,
+    success: row.success,
+    error: row.error,
+    created_at: row.createdAt.toISOString(),
+  }));
+}
+
 // ─── Event Dispatch ─────────────────────────────────────────────────────────
 
 /**
  * Dispatch a webhook event to all subscribed endpoints.
- * Fire-and-forget — failures are logged but never block the caller.
+ * Fire-and-forget — failures are logged and retried but never block the caller.
  */
 export function dispatchWebhookEvent(
   userId: string,
@@ -91,9 +117,7 @@ export function dispatchWebhookEvent(
   findActiveWebhooksForEvent(userId, event)
     .then((endpoints) => {
       for (const ep of endpoints) {
-        sendWebhook(ep, event, payload).catch((err) => {
-          console.error(`[webhook] Failed to deliver ${event} to ${ep.url}:`, err);
-        });
+        scheduleWebhookDelivery(ep, event, payload);
       }
     })
     .catch((err) => {
@@ -101,21 +125,53 @@ export function dispatchWebhookEvent(
     });
 }
 
-async function sendWebhook(
+interface DeliveryAttemptResult {
+  success: boolean;
+  statusCode: number | null;
+  responseBody: string | null;
+  error: string | null;
+}
+
+function scheduleWebhookDelivery(
   endpoint: WebhookEndpointDoc,
   event: WebhookEvent,
   payload: Record<string, unknown>,
-): Promise<void> {
-  const body = JSON.stringify({
+  attempt = 1,
+): void {
+  const delayMs = RETRY_DELAYS_MS[attempt - 1] ?? 0;
+
+  setTimeout(() => {
+    executeDeliveryAttempt(endpoint, event, payload, attempt)
+      .then((result) => {
+        if (!result.success && attempt < MAX_ATTEMPTS) {
+          scheduleWebhookDelivery(endpoint, event, payload, attempt + 1);
+        }
+      })
+      .catch((err) => {
+        console.error(`[webhook] Failed to deliver ${event} to ${endpoint.url} (attempt ${attempt}):`, err);
+      });
+  }, delayMs);
+}
+
+async function executeDeliveryAttempt(
+  endpoint: WebhookEndpointDoc,
+  event: WebhookEvent,
+  payload: Record<string, unknown>,
+  attempt: number,
+): Promise<DeliveryAttemptResult> {
+  const envelope = {
     id: uuid(),
     event,
     timestamp: new Date().toISOString(),
     data: payload,
-  });
+  };
+  const body = JSON.stringify(envelope);
 
   const signature = createHmac('sha256', endpoint.secret)
     .update(body)
     .digest('hex');
+
+  let result: DeliveryAttemptResult;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -132,10 +188,56 @@ async function sendWebhook(
       signal: controller.signal,
     });
 
-    if (!res.ok) {
-      console.warn(`[webhook] ${endpoint.url} returned ${res.status} for ${event}`);
+    let responseBody: string | null = null;
+    try {
+      if (typeof res.text === 'function') {
+        const text = await res.text();
+        responseBody = text ? text.slice(0, 4096) : null;
+      }
+    } catch {
+      // Response body unreadable — still record status code.
     }
+    const success = res.ok;
+
+    if (!success) {
+      console.warn(`[webhook] ${endpoint.url} returned ${res.status} for ${event} (attempt ${attempt})`);
+    }
+
+    result = {
+      success,
+      statusCode: res.status,
+      responseBody: responseBody ? responseBody.slice(0, 4096) : null,
+      error: success ? null : `HTTP ${res.status}`,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[webhook] ${endpoint.url} delivery failed for ${event} (attempt ${attempt}): ${msg}`);
+    result = {
+      success: false,
+      statusCode: null,
+      responseBody: null,
+      error: msg,
+    };
   } finally {
     clearTimeout(timeout);
   }
+
+  try {
+    await WebhookDelivery.create({
+      id: uuid(),
+      endpointId: endpoint.endpoint_id,
+      event,
+      payload: envelope,
+      statusCode: result.statusCode,
+      responseBody: result.responseBody,
+      attempt,
+      success: result.success,
+      error: result.error,
+      createdAt: new Date(),
+    });
+  } catch (logErr) {
+    console.error(`[webhook] Failed to log delivery for ${endpoint.url}:`, logErr);
+  }
+
+  return result;
 }

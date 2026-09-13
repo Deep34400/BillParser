@@ -15,6 +15,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { odometerRoutes } from './odometerOcr/route.js';
 import { auditRoutes } from './audit/route.js';
 import { webhookRoutes } from './webhook/route.js';
+import { queueRoutes } from './routes/queue.js';
 
 const DEV_JWT_SECRET = 'dev-secret-change-in-production';
 
@@ -79,6 +80,7 @@ export async function buildApp() {
   await app.register(odometerRoutes);
   await app.register(auditRoutes);
   await app.register(webhookRoutes);
+  await app.register(queueRoutes);
 
   app.get('/api/health', async () => ({
     success: true,

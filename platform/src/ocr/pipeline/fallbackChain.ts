@@ -150,8 +150,11 @@ export async function runFallbackChain(
             contextId,
           );
 
-      // Single enrichment point — parser returns raw schema so resolveBillSummary
-      // runs here once with real OCR markdown (not LLM JSON).
+      // Single enrichment point — prefer ocrMarkdown over rawOcr for vendor/GSTIN correction.
+      // Split mode: rawOcr is real OCR markdown. Mistral PDF single: ocrMarkdown from mistralOcr.
+      // Other single providers (Gemini/Claude/OpenAI): rawOcr is LLM JSON only — no document
+      // text exists, so resolveVendorFromMarkdown cannot re-derive seller GSTIN from layout;
+      // GSTIN accuracy is inherently lower unless the LLM structured the correct seller field.
       const enriched = enrichParsedInvoice(result.parsed, result.ocrMarkdown ?? result.rawOcr);
       const recon = reconcileInvoiceTotal(enriched);
       const breakdown = buildReconBreakdown(enriched, recon);

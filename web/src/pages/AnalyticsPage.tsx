@@ -1,10 +1,15 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart3 } from 'lucide-react';
+import {
+  ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+} from 'recharts';
 import type { AnalyticsKpis, VehicleSpend, CostPerKm, OcrCostSummary } from '../types/index.js';
 import { api } from '../api/client.js';
 import { moneyCompact, moneyFull, countFmt, usdToInrRate } from '../lib/format.js';
 import { ErrorState } from '../components/ErrorState.js';
+import { FeatureHint } from '../components/FeatureHint.js';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
@@ -13,6 +18,19 @@ import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.js';
 import { Skeleton } from '@/components/ui/skeleton.js';
 import { EmptyState } from '@/components/ui/empty-state.js';
+
+const CHART_PRIMARY = '#2E5C8A';
+const CHART_SUCCESS = '#1F7A54';
+const CHART_DESTRUCTIVE = '#B3261E';
+const CHART_WARNING = '#B45309';
+const CHART_ORANGE = '#C77A1F';
+
+const STATUS_COLORS: Record<string, string> = {
+  COMPLETED: CHART_SUCCESS,
+  FAILED: CHART_DESTRUCTIVE,
+  PROCESSING: CHART_WARNING,
+  NEED_REVIEW: CHART_ORANGE,
+};
 
 type SpendView = 'workshops' | 'vehicles' | 'months' | 'costkm';
 const PAGE_SIZE = 20;
@@ -126,6 +144,13 @@ function OverviewTab({ kpis }: { kpis: AnalyticsKpis }) {
         {kpiCards.map((k) => <KpiCard key={k.label} {...k} />)}
       </div>
 
+      <FeatureHint
+        id="analytics-tabs"
+        message="Tip: Use the tabs below to see breakdowns by workshop, vehicle, or vendor."
+      />
+
+      <AnalyticsCharts kpis={kpis} />
+
       <div className="flex flex-wrap gap-2 mb-4">
         {([
           { key: 'workshops' as SpendView, label: `Workshops (${countFmt(kpis.vendorCount)})` },
@@ -144,6 +169,86 @@ function OverviewTab({ kpis }: { kpis: AnalyticsKpis }) {
       {spendView === 'months' && <MonthsView />}
       {spendView === 'costkm' && <CostKmView />}
     </>
+  );
+}
+
+function AnalyticsCharts({ kpis }: { kpis: AnalyticsKpis }) {
+  const [statusData, setStatusData] = useState<{ name: string; value: number }[]>([]);
+
+  useEffect(() => {
+    api.counts()
+      .then((res) => {
+        const c = res.counts;
+        const rows = [
+          { name: 'COMPLETED', value: (c['OCR_COMPLETED'] ?? 0) + (c['VERIFIED'] ?? 0) },
+          { name: 'FAILED', value: c['FAILED'] ?? 0 },
+          { name: 'PROCESSING', value: c['PROCESSING'] ?? 0 },
+          { name: 'NEED_REVIEW', value: c['NEED_REVIEW'] ?? 0 },
+        ].filter((r) => r.value > 0);
+        setStatusData(rows);
+      })
+      .catch(() => setStatusData([]));
+  }, []);
+
+  const spendBreakdown = useMemo(() => {
+    const parts = kpis.totalParts;
+    const labour = kpis.totalLabour;
+    if (parts <= 0 && labour <= 0) return [];
+    return [
+      { name: 'Parts', value: parts },
+      { name: 'Labour', value: labour },
+    ];
+  }, [kpis.totalParts, kpis.totalLabour]);
+
+  if (statusData.length === 0 && spendBreakdown.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+      {statusData.length > 0 && (
+        <Card className="p-4">
+          <h2 className="text-sm font-semibold mb-1">Invoice status</h2>
+          <p className="text-[11px] text-faint mb-3">OCR pipeline distribution</p>
+          <ResponsiveContainer width="100%" height={240}>
+            <PieChart>
+              <Pie
+                data={statusData}
+                dataKey="value"
+                nameKey="name"
+                cx="50%"
+                cy="50%"
+                innerRadius={50}
+                outerRadius={80}
+                paddingAngle={2}
+                label={({ name, value }) => `${String(name ?? '').replace('_', ' ')} (${value ?? 0})`}
+              >
+                {statusData.map((entry) => (
+                  <Cell key={entry.name} fill={STATUS_COLORS[entry.name] ?? CHART_PRIMARY} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(value, name) => [countFmt(Number(value ?? 0)), String(name ?? '').replace('_', ' ')]} />
+              <Legend formatter={(value: string) => value.replace('_', ' ')} />
+            </PieChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {spendBreakdown.length > 0 && (
+        <Card className="p-4">
+          <h2 className="text-sm font-semibold mb-1">Parts vs labour</h2>
+          <p className="text-[11px] text-faint mb-3">Spend breakdown from completed invoices</p>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={spendBreakdown} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E4E1D3" />
+              <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#67665D' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#67665D' }} tickFormatter={(v) => moneyCompact(v)} width={56} />
+              <Tooltip formatter={(value) => [moneyFull(Number(value ?? 0)), 'Amount']} labelFormatter={(label) => label} />
+              <Legend />
+              <Bar dataKey="value" name="Amount" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+    </div>
   );
 }
 

@@ -5,6 +5,14 @@ vi.mock('../../src/webhook/repository.js', () => ({
   findActiveWebhooksForEvent: vi.fn(),
 }));
 
+vi.mock('../../src/webhook/models/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/webhook/models/index.js')>();
+  return {
+    ...actual,
+    WebhookDelivery: { create: vi.fn().mockResolvedValue({}) },
+  };
+});
+
 import { dispatchWebhookEvent } from '../../src/webhook/service.js';
 import { findActiveWebhooksForEvent } from '../../src/webhook/repository.js';
 import type { WebhookEndpointDoc } from '../../src/webhook/repository.js';
@@ -32,7 +40,7 @@ describe('dispatchWebhookEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('fetch', mockFetch);
-    mockFetch.mockResolvedValue({ ok: true });
+    mockFetch.mockResolvedValue({ ok: true, text: async () => '' });
   });
 
   afterEach(() => {

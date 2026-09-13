@@ -260,7 +260,7 @@ export function InvoiceDetailPage() {
         </Button>
       </div>
 
-      <StatusTimeline inv={inv} />
+      <StatusTimeline ocrStatus={inv.status} approvalStatus={inv.approvalStatus} />
 
       <InvoiceHeader
         inv={inv}

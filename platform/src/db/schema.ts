@@ -14,6 +14,7 @@ export { AppSettingsModel as AppSettings, type AppSettingsAttributes } from '../
 export { ProviderCredential, type ProviderCredentialAttributes } from '../shared/models/index.js';
 export { AuditLog, type AuditLogAttributes } from '../audit/models/index.js';
 export { WebhookEndpoint, type WebhookEndpointAttributes } from '../webhook/models/index.js';
+export { WebhookDelivery, type WebhookDeliveryAttributes } from '../webhook/models/index.js';
 
 import { initBillModel, initBillPartModel, Bill, BillPart } from '../ocr/models/index.js';
 import { initUserModel, initApiKeyModel, initTokenTransactionModel, User, ApiKey, TokenTransaction } from '../users/models/index.js';
@@ -21,7 +22,7 @@ import { initVendorModel, Vendor } from '../vendor/models/index.js';
 import { initAppSettingsModel } from '../shared/models/index.js';
 import { initProviderCredentialModel } from '../shared/models/index.js';
 import { initAuditLogModel } from '../audit/models/index.js';
-import { initWebhookEndpointModel } from '../webhook/models/index.js';
+import { initWebhookEndpointModel, initWebhookDeliveryModel } from '../webhook/models/index.js';
 
 export function initModels(seq: Sequelize): void {
   initVendorModel(seq);
@@ -34,6 +35,7 @@ export function initModels(seq: Sequelize): void {
   initProviderCredentialModel(seq);
   initAuditLogModel(seq);
   initWebhookEndpointModel(seq);
+  initWebhookDeliveryModel(seq);
 
   Bill.belongsTo(Vendor, { foreignKey: 'vendorId', as: 'vendor' });
   Vendor.hasMany(Bill, { foreignKey: 'vendorId', as: 'bills' });

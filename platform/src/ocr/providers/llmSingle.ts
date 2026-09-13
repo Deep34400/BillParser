@@ -15,7 +15,11 @@ import { callVisionLlm, type VisionProviderConfig } from './visionCall.js';
 export interface SingleResult {
   parsed: import('../types/invoice.js').ParsedInvoiceData;
   rawOcr: string;
-  /** Real OCR markdown when available (Mistral PDF path). */
+  /**
+   * Real OCR markdown when a separate OCR step ran (Mistral PDF: mistralOcr → llmNormalize).
+   * Vision-only providers (Gemini/Claude/OpenAI/Mistral image) omit this — rawOcr is LLM JSON,
+   * so enrichParsedInvoice cannot apply layout-based vendor/GSTIN correction for those paths.
+   */
   ocrMarkdown?: string;
   cost: OcrStepCost;
 }

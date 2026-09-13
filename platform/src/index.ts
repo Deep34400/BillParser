@@ -86,12 +86,16 @@ async function main() {
   await app.listen({ port: env.port, host: '0.0.0.0' });
   console.log(`BillParser platform running on port ${env.port} (${env.nodeEnv})`);
 
+  const { initQueue, stopQueue } = await import('./queue/ocrQueue.js');
+  initQueue().catch((err) => console.error('[queue] Failed to start OCR queue:', err));
+
   // Start email intake poller (non-blocking, graceful)
   const { startEmailIntake, stopEmailIntake } = await import('./email-intake/poller.js');
   startEmailIntake().catch((err) => console.error('[email-intake] Failed to start:', err));
 
   const shutdown = async () => {
     console.log('\nShutting down...');
+    await stopQueue();
     await stopEmailIntake();
     await app.close();
     process.exit(0);
