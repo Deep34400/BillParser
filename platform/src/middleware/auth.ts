@@ -14,7 +14,7 @@ declare module 'fastify' {
   }
 }
 
-const PUBLIC_PATHS = ['/api/health', '/api/config', '/api/auth/login'];
+const PUBLIC_PATHS = ['/api/health', '/api/config', '/api/auth/login', '/api/docs'];
 
 function isPublic(path: string): boolean {
   return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));

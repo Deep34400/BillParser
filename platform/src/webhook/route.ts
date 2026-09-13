@@ -5,6 +5,8 @@ import type { FastifyInstance } from 'fastify';
 import { createEndpoint, listEndpoints, toggleEndpoint, removeEndpoint, getDeliveryLog } from './service.js';
 import { getWebhook } from './repository.js';
 import { WEBHOOK_EVENTS } from './models/index.js';
+import { validateBody, webhookCreateBodySchema } from '../shared/validation.js';
+import { ValidationError } from '../shared/errors.js';
 
 export async function webhookRoutes(app: FastifyInstance) {
 
@@ -24,9 +26,7 @@ export async function webhookRoutes(app: FastifyInstance) {
     try {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
 
-      const body = req.body as { url: string; events: string[]; description?: string };
-      if (!body.url) return reply.code(400).send({ success: false, message: 'url is required' });
-      if (!body.events?.length) return reply.code(400).send({ success: false, message: 'events array is required' });
+      const body = validateBody(webhookCreateBodySchema, req.body);
 
       const endpoint = await createEndpoint(req.appUser.user_id, body.url, body.events, body.description);
       return { success: true, data: endpoint };

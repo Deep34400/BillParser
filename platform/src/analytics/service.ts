@@ -19,8 +19,10 @@ export interface KpiResult {
   avgConfidence: number;
   vendorCount: number;
   vehicleCount: number;
-  byVendor: { name: string; amount: number }[];
-  byMonth: { label: string; amount: number }[];
+  totalInvoiceCount: number;
+  avgProcessingTimeMs: number | null;
+  byVendor: { name: string; amount: number; parts_amount: number; labour_amount: number }[];
+  byMonth: { label: string; amount: number; count: number }[];
 }
 
 export interface VehicleSpendSummary {
@@ -69,31 +71,45 @@ export async function computeKpis(): Promise<KpiResult> {
 
   let totalSpend = 0, completedCount = 0, confidenceSum = 0, needsReview = 0;
   let totalParts = 0, totalLabour = 0, totalTax = 0;
-  const vendorTotals = new Map<string, number>();
-  const monthTotals = new Map<string, number>();
+  let latencySum = 0, latencyCount = 0;
+  const vendorTotals = new Map<string, { amount: number; parts: number; labour: number }>();
+  const monthTotals = new Map<string, { amount: number; count: number }>();
   const vehicleIds = new Set<string>();
 
   for (const bill of bills) {
     const vid = bill.vehicle_id ?? bill.registration_number;
     if (vid) vehicleIds.add(vid);
 
-      if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
+    if (bill.total_latency_ms != null && bill.total_latency_ms > 0) {
+      latencySum += bill.total_latency_ms;
+      latencyCount++;
+    }
+
+    if (bill.ocr_status === 'OCR_COMPLETED' || bill.ocr_status === 'VERIFIED') {
       completedCount++;
       const amount = toNum(bill.grand_total_amount) ?? 0;
+      const parts = toNum(bill.parts_amount) ?? 0;
+      const labour = toNum(bill.labour_amount) ?? 0;
       totalSpend += amount;
-      totalParts += toNum(bill.parts_amount) ?? 0;
-      totalLabour += toNum(bill.labour_amount) ?? 0;
+      totalParts += parts;
+      totalLabour += labour;
       totalTax += toNum(bill.total_tax_amount) ?? 0;
       if (bill.confidence_score != null) confidenceSum += bill.confidence_score;
 
       const vendor = bill.vendor_name ?? bill.company_name ?? 'Unknown';
       if (!isJunkVendorName(vendor)) {
-        vendorTotals.set(vendor, (vendorTotals.get(vendor) ?? 0) + amount);
+        const prev = vendorTotals.get(vendor) ?? { amount: 0, parts: 0, labour: 0 };
+        vendorTotals.set(vendor, {
+          amount: prev.amount + amount,
+          parts: prev.parts + parts,
+          labour: prev.labour + labour,
+        });
       }
 
       if (bill.invoice_date) {
         const mk = bill.invoice_date.slice(0, 7);
-        monthTotals.set(mk, (monthTotals.get(mk) ?? 0) + amount);
+        const prev = monthTotals.get(mk) ?? { amount: 0, count: 0 };
+        monthTotals.set(mk, { amount: prev.amount + amount, count: prev.count + 1 });
       }
     }
     if (bill.ocr_status === 'NEED_REVIEW') needsReview++;
@@ -104,11 +120,13 @@ export async function computeKpis(): Promise<KpiResult> {
     avgConfidence: completedCount > 0 ? Math.round((confidenceSum / completedCount) * 100) / 100 : 0,
     vendorCount: vendorTotals.size,
     vehicleCount: vehicleIds.size,
+    totalInvoiceCount: bills.length,
+    avgProcessingTimeMs: latencyCount > 0 ? Math.round(latencySum / latencyCount) : null,
     byVendor: Array.from(vendorTotals.entries())
-      .map(([name, amount]) => ({ name, amount }))
+      .map(([name, v]) => ({ name, amount: v.amount, parts_amount: v.parts, labour_amount: v.labour }))
       .sort((a, b) => b.amount - a.amount),
     byMonth: Array.from(monthTotals.entries())
-      .map(([label, amount]) => ({ label, amount }))
+      .map(([label, v]) => ({ label, amount: v.amount, count: v.count }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   };
 }

@@ -329,6 +329,46 @@ export async function fetchAllBills(opts: { status?: BillStatus } = {}): Promise
   return rows.map(billRowToDoc);
 }
 
+export async function fetchBillsForExport(opts: {
+  status?: BillStatus;
+  statuses?: BillStatus[];
+  needsReview?: boolean;
+  reviewCode?: string;
+  excludeNeedsReview?: boolean;
+  q?: string;
+  userId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  minTotal?: number;
+  maxDocs?: number;
+} = {}): Promise<BillDoc[]> {
+  const maxDocs = Math.min(Math.max(opts.maxDocs ?? 5000, 1), 5000);
+  const where = buildBillListWhere(opts) as Record<string, unknown>;
+
+  if (opts.dateFrom || opts.dateTo) {
+    where.invoiceDate = {
+      ...(opts.dateFrom ? { [Op.gte]: opts.dateFrom } : {}),
+      ...(opts.dateTo ? { [Op.lte]: opts.dateTo } : {}),
+    };
+  }
+
+  if (opts.minTotal !== undefined && Number.isFinite(opts.minTotal)) {
+    where.grandTotalAmount = { [Op.gte]: opts.minTotal };
+  }
+
+  const rows = await Bill.findAll({
+    where,
+    order: [['createdAt', 'DESC']],
+    limit: maxDocs,
+  });
+
+  let docs = rows.map(billRowToDoc);
+  if (opts.reviewCode) {
+    docs = docs.filter((b) => billHasReviewCode(b, opts.reviewCode!));
+  }
+  return docs;
+}
+
 export function billNeedsReview(b: BillDoc): boolean {
   return b.ocr_status === 'NEED_REVIEW';
 }
@@ -397,16 +437,9 @@ export async function countAllStatuses(): Promise<Record<string, number>> {
   return counts;
 }
 
-export async function listBillsPaginated(opts: {
+export async function listBillsPaginated(opts: BillListFilterOpts & {
   page?: number;
   pageSize?: number;
-  status?: BillStatus;
-  statuses?: BillStatus[];
-  needsReview?: boolean;
-  reviewCode?: string;
-  excludeNeedsReview?: boolean;
-  q?: string;
-  userId?: string;
 } = {}): Promise<PaginatedBills> {
   const pageSize = Math.min(Math.max(opts.pageSize ?? 10, 1), 100);
   const page = Math.max(opts.page ?? 1, 1);
@@ -441,7 +474,7 @@ export interface CursorBillsResult {
   nextCursor: string | null;
 }
 
-function buildBillListWhere(opts: {
+export interface BillListFilterOpts {
   status?: BillStatus;
   statuses?: BillStatus[];
   needsReview?: boolean;
@@ -450,7 +483,14 @@ function buildBillListWhere(opts: {
   q?: string;
   cursor?: string;
   userId?: string;
-}): any {
+  minTotal?: number;
+  maxTotal?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  vendor?: string;
+}
+
+function buildBillListWhere(opts: BillListFilterOpts): any {
   const searchTerm = opts.q?.trim();
   const where: any = {};
 
@@ -475,6 +515,25 @@ function buildBillListWhere(opts: {
   if (opts.needsReview) where.ocrStatus = 'NEED_REVIEW';
   else if (opts.excludeNeedsReview) where.ocrStatus = { [Op.ne]: 'NEED_REVIEW' };
 
+  const vendorTerm = opts.vendor?.trim();
+  if (vendorTerm) {
+    where.companyName = { [Op.iLike]: `%${vendorTerm}%` };
+  }
+
+  if (opts.minTotal != null && !Number.isNaN(opts.minTotal)) {
+    where.grandTotalAmount = { ...(where.grandTotalAmount ?? {}), [Op.gte]: opts.minTotal };
+  }
+  if (opts.maxTotal != null && !Number.isNaN(opts.maxTotal)) {
+    where.grandTotalAmount = { ...(where.grandTotalAmount ?? {}), [Op.lte]: opts.maxTotal };
+  }
+
+  if (opts.dateFrom || opts.dateTo) {
+    const dateCond: Record<string | symbol, unknown> = {};
+    if (opts.dateFrom) dateCond[Op.gte] = opts.dateFrom;
+    if (opts.dateTo) dateCond[Op.lte] = opts.dateTo;
+    where.invoiceDate = dateCond;
+  }
+
   if (opts.cursor) {
     where.createdAt = { [Op.lt]: new Date(opts.cursor) };
   }
@@ -482,16 +541,8 @@ function buildBillListWhere(opts: {
   return where;
 }
 
-export async function listBillsCursor(opts: {
+export async function listBillsCursor(opts: BillListFilterOpts & {
   limit?: number;
-  cursor?: string;
-  status?: BillStatus;
-  statuses?: BillStatus[];
-  needsReview?: boolean;
-  reviewCode?: string;
-  excludeNeedsReview?: boolean;
-  q?: string;
-  userId?: string;
 } = {}): Promise<CursorBillsResult> {
   const limit = Math.min(Math.max(opts.limit ?? 10, 1), 100);
   const where = buildBillListWhere(opts);

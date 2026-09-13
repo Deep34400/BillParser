@@ -169,6 +169,7 @@ export function SettingsPage() {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [modelPricing, setModelPricing] = useState<Record<string, ModelPrice>>({});
   const [defaultPricing, setDefaultPricing] = useState<Record<string, ModelPrice>>({});
@@ -187,6 +188,7 @@ export function SettingsPage() {
 
   const load = useCallback(async () => {
     try {
+      setLoadError('');
       const s = await api.settings();
       let fc: FallbackLevel[];
       if (s.fallbackChain && s.fallbackChain.length > 0) {
@@ -216,7 +218,11 @@ export function SettingsPage() {
         setCreds(cv);
       } catch { /* no reveal */ }
       setLoaded(true);
-    } catch (e) { flash(`Load failed: ${(e as Error).message}`); }
+    } catch (e) {
+      const msg = (e as Error).message;
+      setLoadError(msg);
+      flash(`Load failed: ${msg}`);
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -335,7 +341,18 @@ export function SettingsPage() {
   }, [pricingFilter, modelPricing, providerGroups]);
 
   if (!loaded) {
-    return <div className="py-10 text-center text-muted-foreground">Loading settings...</div>;
+    return (
+      <div className="max-w-3xl px-7 py-10 text-center space-y-3">
+        {loadError ? (
+          <>
+            <p className="text-sm text-destructive">Could not open settings: {loadError}</p>
+            <Button type="button" variant="outline" onClick={() => void load()}>Retry</Button>
+          </>
+        ) : (
+          <p className="text-muted-foreground">Loading settings...</p>
+        )}
+      </div>
+    );
   }
 
   return (

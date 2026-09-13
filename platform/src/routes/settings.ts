@@ -9,6 +9,8 @@ import {
 } from '../shared/settings.js';
 import { resolveThinkingBudget, THINKING_BUDGET_MIN, THINKING_BUDGET_MAX } from '../ocr/providers/geminiClient.js';
 import { DEFAULT_MODEL_PRICING } from '../shared/modelPricing.js';
+import { validateBody, settingsUpdateBodySchema } from '../shared/validation.js';
+import { ValidationError } from '../shared/errors.js';
 
 const PROVIDERS = [
   { name: 'mistral', displayName: 'Mistral OCR', kind: 'markdown', requiredCredentials: ['apiKey'] },
@@ -66,8 +68,16 @@ export async function settingsRoutes(app: FastifyInstance) {
   /**
    * PUT /api/settings — save extraction/structuring selections.
    */
-  app.put('/api/settings', { preHandler: requireAdmin }, async (req) => {
-    const body = req.body as Record<string, any>;
+  app.put('/api/settings', { preHandler: requireAdmin }, async (req, reply) => {
+    let body: Record<string, any>;
+    try {
+      body = validateBody(settingsUpdateBodySchema, req.body);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.status(400).send({ success: false, message: err.message });
+      }
+      throw err;
+    }
     const patch: Record<string, any> = {};
     if (body.pipelineMode === 'split' || body.pipelineMode === 'single') {
       patch.pipelineMode = body.pipelineMode;

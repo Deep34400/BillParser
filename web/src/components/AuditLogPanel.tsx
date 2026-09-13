@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { History } from 'lucide-react';
-import { api, type AuditLogEntry } from '../api/client.js';
+import { api } from '../api/client.js';
+import { ErrorState } from './ErrorState.js';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card.js';
 import { Badge } from '@/components/ui/badge.js';
 import { Input } from '@/components/ui/input.js';
@@ -22,22 +24,21 @@ export function AuditLogPanel({
   title?: string;
   description?: string;
 }) {
-  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
-  const [total, setTotal] = useState(0);
   const [action, setAction] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [debouncedAction, setDebouncedAction] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const r = await api.auditLogs({ action: action.trim() || undefined, limit: 50 });
-      setLogs(r.data);
-      setTotal(r.metadata.total);
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAction(action), 300);
+    return () => clearTimeout(timer);
   }, [action]);
 
-  useEffect(() => { void load(); }, [load]);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['audit-logs', debouncedAction.trim() || undefined],
+    queryFn: () => api.auditLogs({ action: debouncedAction.trim() || undefined, limit: 50 }),
+  });
+
+  const logs = data?.data ?? [];
+  const total = data?.metadata.total ?? 0;
 
   return (
     <Card>
@@ -56,7 +57,13 @@ export function AuditLogPanel({
         </div>
       </CardHeader>
       <CardContent>
-        {loading ? (
+        {error ? (
+          <ErrorState
+            title="Failed to load activity"
+            message={error instanceof Error ? error.message : 'Failed to load activity'}
+            onRetry={() => void refetch()}
+          />
+        ) : isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4">

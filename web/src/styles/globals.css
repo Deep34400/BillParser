@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * ─── Design Tokens ──────────────────────────────────────────────────────
  * Maps the app's warm-paper palette into Tailwind CSS variables.
@@ -53,6 +55,48 @@
   --radius-xl: 1rem;
 }
 
+/* ─── Dark Theme ─────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --color-background: #1a1a2e;
+  --color-foreground: #e4e4e7;
+  --color-card: #16162a;
+  --color-card-foreground: #e4e4e7;
+  --color-popover: #16162a;
+  --color-popover-foreground: #e4e4e7;
+  --color-primary: #5b8fb9;
+  --color-primary-foreground: #ffffff;
+  --color-primary-hover: #6fa3cc;
+  --color-secondary: #2a2a3e;
+  --color-secondary-foreground: #5b8fb9;
+  --color-muted: #2a2a3e;
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #2a2a3e;
+  --color-accent-foreground: #5b8fb9;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #3a3a4e;
+  --color-input: #3a3a4e;
+  --color-ring: #5b8fb9;
+  --color-faint: #71717a;
+
+  --color-success: #22c55e;
+  --color-success-soft: #14532d;
+  --color-warning: #f59e0b;
+  --color-warning-soft: #451a03;
+  --color-danger: #ef4444;
+  --color-danger-soft: #450a0a;
+  --color-info: #5b8fb9;
+  --color-info-soft: #1e3a5f;
+  --color-orange: #f59e0b;
+  --color-orange-soft: #451a03;
+}
+
 /* ─── Base Layer ─────────────────────────────────────────────────────── */
 @layer base {
   *, *::before, *::after {
@@ -93,4 +137,18 @@
 @media (max-width: 1050px) {
   .inv-split { flex-direction: column !important; }
   .inv-preview { width: 100% !important; position: static !important; }
+}
+
+.react-joyride__tooltip {
+  padding: 16px 18px !important;
+  max-width: 320px !important;
+}
+.react-joyride__tooltip h1,
+.react-joyride__tooltip h2,
+.react-joyride__tooltip p,
+.react-joyride__tooltip-title,
+.react-joyride__tooltip-content {
+  white-space: normal !important;
+  word-spacing: normal !important;
+  letter-spacing: normal !important;
 }

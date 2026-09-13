@@ -4,6 +4,7 @@ import {
 } from '@/components/ui/dialog.js';
 import { Button } from '@/components/ui/button.js';
 import { cn } from '@/lib/utils.js';
+import { useTourStart } from './GuidedTour.js';
 
 const STEPS = [
   { title: 'Welcome to BillParser', description: 'Upload invoice PDFs and get structured data automatically.' },
@@ -16,6 +17,7 @@ const STORAGE_KEY = 'hasSeenOnboarding';
 export function WelcomeDialog() {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
+  const startTour = useTourStart();
 
   useEffect(() => {
     if (localStorage.getItem(STORAGE_KEY) !== 'true') setOpen(true);
@@ -54,11 +56,24 @@ export function WelcomeDialog() {
           ))}
         </div>
 
-        <DialogFooter className="flex-row justify-between sm:justify-between">
+        <DialogFooter className="flex-row flex-wrap justify-between gap-2 sm:justify-between">
           <Button variant="ghost" onClick={finish}>Skip</Button>
-          <Button onClick={() => (isLast ? finish() : setStep((s) => s + 1))}>
-            {isLast ? 'Get started' : 'Next'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {isLast && startTour && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  finish();
+                  window.setTimeout(() => startTour(), 300);
+                }}
+              >
+                Take a tour
+              </Button>
+            )}
+            <Button onClick={() => (isLast ? finish() : setStep((s) => s + 1))}>
+              {isLast ? 'Get started' : 'Next'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

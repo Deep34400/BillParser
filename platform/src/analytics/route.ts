@@ -33,6 +33,8 @@ export async function analyticsRoutes(app: FastifyInstance) {
       avgConfidence: cached.avgConfidence,
       vendorCount: cached.vendorCount,
       vehicleCount: cached.vehicleCount,
+      totalInvoiceCount: cached.totalInvoiceCount,
+      avgProcessingTimeMs: cached.avgProcessingTimeMs,
     };
     const result = await computeKpis();
     cacheSet('analytics:kpis', result, CACHE_TTL);
@@ -46,6 +48,8 @@ export async function analyticsRoutes(app: FastifyInstance) {
       avgConfidence: result.avgConfidence,
       vendorCount: result.vendorCount,
       vehicleCount: result.vehicleCount,
+      totalInvoiceCount: result.totalInvoiceCount,
+      avgProcessingTimeMs: result.avgProcessingTimeMs,
     };
   });
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Users, Mail, Plus, UserPlus, Crown, History,
   ShieldCheck, CircleSlash, Lock, Power, PowerOff,
@@ -46,8 +47,17 @@ export function AdminPage() {
   const [tab, setTab] = useState<AdminTab>('users');
 
   // ─── Data ──────────────────────────────────────────────────────────────
-  const [users, setUsers] = useState<UserInfo[]>([]);
-  const [usersLoading, setUsersLoading] = useState(true);
+  const {
+    data: users = [],
+    isLoading: usersLoading,
+    refetch: refetchUsers,
+  } = useQuery({
+    queryKey: ['admin', 'users'],
+    queryFn: async () => {
+      const r = await api.adminUsers();
+      return r.data;
+    },
+  });
 
   // ─── User management ──────────────────────────────────────────────────
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
@@ -84,17 +94,11 @@ export function AdminPage() {
 
   // ─── Loaders ──────────────────────────────────────────────────────────
 
-  const loadUsers = useCallback(async () => {
-    setUsersLoading(true);
-    try {
-      const r = await api.adminUsers();
-      setUsers(r.data);
-      const drafts: Record<string, string> = {};
-      for (const u of r.data) drafts[u.user_id] = u.intake_email ?? '';
-      setIntakeDrafts(drafts);
-    } catch { /* ignore */ }
-    finally { setUsersLoading(false); }
-  }, []);
+  useEffect(() => {
+    const drafts: Record<string, string> = {};
+    for (const u of users) drafts[u.user_id] = u.intake_email ?? '';
+    setIntakeDrafts(drafts);
+  }, [users]);
 
   const loadIntakeConfig = useCallback(async () => {
     try {
@@ -111,11 +115,7 @@ export function AdminPage() {
     } catch { /* ignore */ }
   }, []);
 
-  const loadAll = useCallback(async () => {
-    await Promise.allSettled([loadUsers(), loadIntakeConfig()]);
-  }, [loadUsers, loadIntakeConfig]);
-
-  useEffect(() => { void loadAll(); }, [loadAll]);
+  useEffect(() => { void loadIntakeConfig(); }, [loadIntakeConfig]);
 
   // ─── User actions ─────────────────────────────────────────────────────
 
@@ -133,12 +133,12 @@ export function AdminPage() {
       await api.adminCreateUser(cEmail, cName, cPass, cRole, cBalance ? Number(cBalance) / usdToInrRate() : undefined, cIntakeEmail || undefined);
       setCEmail(''); setCName(''); setCPass(''); setCBalance(''); setCIntakeEmail('');
       flash('User created!'); setShowCreateUser(false);
-      await loadUsers();
+      await refetchUsers();
     } catch (e) { flash((e as Error).message, 'err'); }
   };
 
-  const handleBlock = async (id: string) => { await api.adminBlockUser(id); flash('User blocked'); await loadUsers(); };
-  const handleUnblock = async (id: string) => { await api.adminUnblockUser(id); flash('User unblocked'); await loadUsers(); };
+  const handleBlock = async (id: string) => { await api.adminBlockUser(id); flash('User blocked'); await refetchUsers(); };
+  const handleUnblock = async (id: string) => { await api.adminUnblockUser(id); flash('User unblocked'); await refetchUsers(); };
   const handleResetPassword = async (id: string, pw: string) => {
     if (!pw || pw.length < 6) return flash('Password must be at least 6 characters', 'err');
     try { await api.adminResetPassword(id, pw); flash('Password reset'); } catch (e) { flash((e as Error).message, 'err'); }
@@ -151,7 +151,7 @@ export function AdminPage() {
       const usd = Number(addAmt) / usdToInrRate();
       await api.adminAddTokens(selectedUser, usd, addDesc || undefined);
       setAddAmt(''); setAddDesc(''); flash('Balance added');
-      await loadUsers(); const r = await api.adminUserTransactions(selectedUser); setTxs(r.data);
+      await refetchUsers(); const r = await api.adminUserTransactions(selectedUser); setTxs(r.data);
     } catch (e) { flash((e as Error).message, 'err'); }
   };
 
@@ -191,7 +191,7 @@ export function AdminPage() {
     const value = (intakeDrafts[userId] ?? '').trim().toLowerCase();
     try {
       const res = await api.adminSetIntakeEmail(userId, value);
-      setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, ...res.data } : u)));
+      await refetchUsers();
       setIntakeDrafts((prev) => ({ ...prev, [userId]: res.data.intake_email ?? '' }));
       flash(value ? 'Allowed sender saved' : 'Allowed sender cleared');
     } catch (e) { flash((e as Error).message, 'err'); }

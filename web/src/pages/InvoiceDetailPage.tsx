@@ -21,6 +21,7 @@ import { OcrCostPanel } from '../components/invoice/OcrCostPanel.js';
 import { FallbackComparePanel } from '../components/invoice/FallbackComparePanel.js';
 import { InvoiceEditForm } from '../components/invoice/InvoiceEditForm.js';
 import { InvoicePdfSplit } from '../components/invoice/InvoicePdfSplit.js';
+import { CommentsPanel } from '../components/invoice/CommentsPanel.js';
 import { resolveInvoiceData } from '../components/invoice/invoiceData.js';
 import { buildFinalOcrJson } from '../components/invoice/rawOcr.js';
 import {
@@ -260,7 +261,9 @@ export function InvoiceDetailPage() {
         </Button>
       </div>
 
-      <StatusTimeline ocrStatus={inv.status} approvalStatus={inv.approvalStatus} />
+      <div data-tour="detail-status">
+        <StatusTimeline ocrStatus={inv.status} approvalStatus={inv.approvalStatus} />
+      </div>
 
       <InvoiceHeader
         inv={inv}
@@ -286,7 +289,9 @@ export function InvoiceDetailPage() {
       />
 
       {!editMode && (
-        <ApprovalBar inv={inv} onToast={setToast} onReload={() => void reload()} />
+        <div data-tour="detail-approve">
+          <ApprovalBar inv={inv} onToast={setToast} onReload={() => void reload()} />
+        </div>
       )}
 
       {!editMode && inv.status === 'NEEDS_REVIEW' && (
@@ -341,7 +346,9 @@ export function InvoiceDetailPage() {
           />
         ) : (
           <>
-            <InvoiceFieldGrid inv={inv} />
+            <div data-tour="detail-fields">
+              <InvoiceFieldGrid inv={inv} />
+            </div>
             <OcrCostPanel inv={inv} />
             {parsedData && (
               <>
@@ -360,6 +367,11 @@ export function InvoiceDetailPage() {
                 </div>
               )}
             </div>
+            {id && (
+              <div data-tour="detail-comments">
+                <CommentsPanel billId={id} />
+              </div>
+            )}
           </>
         )}
       </div>

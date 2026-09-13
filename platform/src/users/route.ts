@@ -15,15 +15,22 @@ import {
 } from './service.js';
 import { clientUserView, sanitizeUser } from './dto.js';
 import { audit } from '../audit/service.js';
+import { validateBody, loginBodySchema } from '../shared/validation.js';
+import { ValidationError } from '../shared/errors.js';
 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
 
   // ── Auth ────────────────────────────────────────────────────────
 
   app.post('/api/auth/login', async (req, reply) => {
-    const body = req.body as { email?: string; password?: string };
-    if (!body.email || !body.password) {
-      return reply.status(400).send({ success: false, message: 'Email and password are required' });
+    let body;
+    try {
+      body = validateBody(loginBodySchema, req.body);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.status(400).send({ success: false, message: err.message });
+      }
+      throw err;
     }
 
     const result = await login(body.email, body.password);

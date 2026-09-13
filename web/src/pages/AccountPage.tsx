@@ -93,7 +93,7 @@ export function AccountPage() {
       </Card>
 
       {/* API Keys */}
-      <Card className="mb-4">
+      <Card className="mb-4" data-tour="account-apikey">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Key className="h-4 w-4" /> API Keys</CardTitle>
           <CardDescription>Generate API keys to use the OCR API directly (POST /api/ocr/sync or /api/ocr/async).</CardDescription>

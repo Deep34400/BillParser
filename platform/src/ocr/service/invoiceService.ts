@@ -33,6 +33,11 @@ export interface InvoiceListFilters {
   needsReview?: boolean;
   completed?: boolean;
   reviewCode?: string;
+  minTotal?: number;
+  maxTotal?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  vendor?: string;
   /** When set, restrict results to this owner's bills (non-admin users). */
   userId?: string;
 }
@@ -71,6 +76,11 @@ export async function listInvoices(filters: InvoiceListFilters) {
     excludeNeedsReview: undefined as boolean | undefined,
     reviewCode,
     q,
+    minTotal: filters.minTotal,
+    maxTotal: filters.maxTotal,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    vendor: filters.vendor,
     userId: filters.userId,
   };
 

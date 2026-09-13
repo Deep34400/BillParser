@@ -6,6 +6,7 @@ import type { Sequelize } from 'sequelize';
 
 export { Bill, type BillAttributes } from '../ocr/models/index.js';
 export { BillPart, type BillPartAttributes } from '../ocr/models/index.js';
+export { InvoiceComment, type InvoiceCommentAttributes } from '../ocr/models/index.js';
 export { User, type UserAttributes } from '../users/models/index.js';
 export { ApiKey, type ApiKeyAttributes } from '../users/models/index.js';
 export { TokenTransaction, type TokenTransactionAttributes } from '../users/models/index.js';
@@ -16,7 +17,7 @@ export { AuditLog, type AuditLogAttributes } from '../audit/models/index.js';
 export { WebhookEndpoint, type WebhookEndpointAttributes } from '../webhook/models/index.js';
 export { WebhookDelivery, type WebhookDeliveryAttributes } from '../webhook/models/index.js';
 
-import { initBillModel, initBillPartModel, Bill, BillPart } from '../ocr/models/index.js';
+import { initBillModel, initBillPartModel, initInvoiceCommentModel, Bill, BillPart, InvoiceComment } from '../ocr/models/index.js';
 import { initUserModel, initApiKeyModel, initTokenTransactionModel, User, ApiKey, TokenTransaction } from '../users/models/index.js';
 import { initVendorModel, Vendor } from '../vendor/models/index.js';
 import { initAppSettingsModel } from '../shared/models/index.js';
@@ -29,6 +30,7 @@ export function initModels(seq: Sequelize): void {
   initUserModel(seq);
   initBillModel(seq);
   initBillPartModel(seq);
+  initInvoiceCommentModel(seq);
   initApiKeyModel(seq);
   initTokenTransactionModel(seq);
   initAppSettingsModel(seq);
@@ -41,6 +43,8 @@ export function initModels(seq: Sequelize): void {
   Vendor.hasMany(Bill, { foreignKey: 'vendorId', as: 'bills' });
   Bill.hasMany(BillPart, { foreignKey: 'billId', as: 'parts', onDelete: 'CASCADE' });
   BillPart.belongsTo(Bill, { foreignKey: 'billId', as: 'bill' });
+  Bill.hasMany(InvoiceComment, { foreignKey: 'billId', as: 'comments', onDelete: 'CASCADE' });
+  InvoiceComment.belongsTo(Bill, { foreignKey: 'billId', as: 'bill' });
   User.hasMany(ApiKey, { foreignKey: 'userId', as: 'apiKeys', onDelete: 'CASCADE' });
   ApiKey.belongsTo(User, { foreignKey: 'userId', as: 'user' });
   User.hasMany(TokenTransaction, { foreignKey: 'userId', as: 'transactions', onDelete: 'RESTRICT' });

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Upload, Search, SlidersHorizontal, Download, X, Mail, Copy, RotateCcw, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client.js';
@@ -9,7 +10,6 @@ import { WelcomeDialog } from '../components/WelcomeDialog.js';
 import { HelpTip } from '../components/HelpTip.js';
 import { DocumentPreview } from '../components/DocumentPreview.js';
 import { Toast } from '../components/Toast.js';
-import { usePolling } from '../hooks/usePolling.js';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
@@ -71,8 +71,6 @@ function isDuplicate(inv: Invoice): boolean {
 export function InvoicesPage() {
   const navigate = useNavigate();
 
-  const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
-  const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -92,7 +90,6 @@ export function InvoicesPage() {
   const [minTotal, setMinTotal] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [batches, setBatches] = useState<Batch[]>([]);
   const [batchFilter, setBatchFilter] = useState('');
   const [batchName, setBatchName] = useState('');
   const [importText, setImportText] = useState('');
@@ -134,66 +131,92 @@ export function InvoicesPage() {
     setNextCursor(null);
   }, []);
 
-  const fetchPage = useCallback(async (
-    nextCursor: string | undefined, size: number, search?: string, status?: StatusFilter, reviewCode?: ReviewCodeFilter,
-  ) => {
-    setLoading(true);
-    setAllInvoices([]);
-    try {
-      const statusParams = statusToApiParams(status ?? 'ALL');
-      const code = reviewCode ?? '';
-      const params: Record<string, string | undefined> = { pageSize: String(size), ...statusParams };
-      if (nextCursor) params.cursor = nextCursor;
-      if (search) params.q = search;
-      if (code && (status ?? 'ALL') === 'NEEDS_REVIEW') params.review_code = code;
-      const qs = buildQs(params);
-      const [inv, bat] = await Promise.all([api.list(qs), api.batches().catch(() => ({ batches: [] }))]);
-      setAllInvoices(inv.invoices);
-      setBatches(bat.batches);
-      setHasMore(inv.hasMore ?? false);
-      setNextCursor(inv.nextCursor ?? null);
-    } catch (e) {
-      setAllInvoices([]);
-      setHasMore(false);
-      setNextCursor(null);
-      setToast(e instanceof Error ? e.message : 'Failed to load invoices');
-    } finally {
-      setLoading(false);
+  const invoiceFilters = useMemo(() => ({
+    cursor,
+    pageSize,
+    q,
+    statusFilter,
+    reviewCodeFilter,
+    minTotal: minTotal || undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+  }), [cursor, pageSize, q, statusFilter, reviewCodeFilter, minTotal, dateFrom, dateTo]);
+
+  const hasProcessingInvoices = useCallback((invoices: Invoice[]) =>
+    invoices.some((r) => r.status === 'PENDING' || r.status === 'PROCESSING'), []);
+
+  const {
+    data: invoiceData,
+    isLoading: loading,
+    error: invoiceError,
+    refetch: refetchInvoices,
+  } = useQuery({
+    queryKey: ['invoices', invoiceFilters],
+    queryFn: async () => {
+      const statusParams = statusToApiParams(statusFilter);
+      const params: Record<string, string | undefined> = { pageSize: String(pageSize), ...statusParams };
+      if (cursor) params.cursor = cursor;
+      if (q) params.q = q;
+      if (reviewCodeFilter && statusFilter === 'NEEDS_REVIEW') params.review_code = reviewCodeFilter;
+      if (minTotal) params.minTotal = minTotal;
+      if (dateFrom) params.dateFrom = dateFrom;
+      if (dateTo) params.dateTo = dateTo;
+      return api.list(params);
+    },
+    refetchInterval: (query) =>
+      hasProcessingInvoices(query.state.data?.invoices ?? []) ? 3000 : false,
+  });
+
+  const { data: batches = [] } = useQuery({
+    queryKey: ['batches'],
+    queryFn: () => api.batches().then((r) => r.batches).catch(() => [] as Batch[]),
+  });
+
+  const { data: countsRaw, refetch: refetchCounts } = useQuery({
+    queryKey: ['invoices', 'counts'],
+    queryFn: () => api.counts(),
+    select: (res) => res.counts,
+    refetchInterval: () =>
+      hasProcessingInvoices(invoiceData?.invoices ?? []) ? 3000 : false,
+  });
+
+  useEffect(() => {
+    if (invoiceError) {
+      setToast(invoiceError instanceof Error ? invoiceError.message : 'Failed to load invoices');
     }
-  }, []);
+  }, [invoiceError]);
 
-  const fetchGlobalCounts = useCallback(async () => {
-    try {
-      const res = await api.counts();
-      applyCountsToState(res.counts);
-    } catch { /* ignore */ }
-  }, []);
-
-  const applyCountsToState = useCallback((c: Record<string, number>) => {
+  useEffect(() => {
+    if (!countsRaw) return;
     setGlobalCounts({
-      ALL: c['all'] ?? c['ALL'] ?? 0,
-      DRAFT: c['DRAFT'] ?? 0,
-      PENDING: c['UPLOADED'] ?? 0,
-      PROCESSING: c['PROCESSING'] ?? 0,
-      COMPLETED: (c['OCR_COMPLETED'] ?? 0) + (c['VERIFIED'] ?? 0),
-      FAILED: c['FAILED'] ?? 0,
-      NEEDS_REVIEW: c['NEED_REVIEW'] ?? 0,
+      ALL: countsRaw['all'] ?? countsRaw['ALL'] ?? 0,
+      DRAFT: countsRaw['DRAFT'] ?? 0,
+      PENDING: countsRaw['UPLOADED'] ?? 0,
+      PROCESSING: countsRaw['PROCESSING'] ?? 0,
+      COMPLETED: (countsRaw['OCR_COMPLETED'] ?? 0) + (countsRaw['VERIFIED'] ?? 0),
+      FAILED: countsRaw['FAILED'] ?? 0,
+      NEEDS_REVIEW: countsRaw['NEED_REVIEW'] ?? 0,
     });
     setReviewCodeCounts({
-      NEED_REVIEW: c['NEED_REVIEW'] ?? 0,
-      review_MISSING_TAX_ID: c['review_MISSING_TAX_ID'] ?? 0,
-      review_TOTAL_MISMATCH: c['review_TOTAL_MISMATCH'] ?? 0,
-      review_PARTS_BASE_MISMATCH: c['review_PARTS_BASE_MISMATCH'] ?? 0,
-      review_LABOUR_BASE_MISMATCH: c['review_LABOUR_BASE_MISMATCH'] ?? 0,
+      NEED_REVIEW: countsRaw['NEED_REVIEW'] ?? 0,
+      review_MISSING_TAX_ID: countsRaw['review_MISSING_TAX_ID'] ?? 0,
+      review_TOTAL_MISMATCH: countsRaw['review_TOTAL_MISMATCH'] ?? 0,
+      review_PARTS_BASE_MISMATCH: countsRaw['review_PARTS_BASE_MISMATCH'] ?? 0,
+      review_LABOUR_BASE_MISMATCH: countsRaw['review_LABOUR_BASE_MISMATCH'] ?? 0,
     });
-  }, []);
+  }, [countsRaw]);
+
+  const allInvoices = invoiceData?.invoices ?? [];
+
+  useEffect(() => {
+    setHasMore(invoiceData?.hasMore ?? false);
+    setNextCursor(invoiceData?.nextCursor ?? null);
+  }, [invoiceData]);
 
   const refetch = useCallback(async () => {
-    await fetchPage(cursor, pageSize, q || undefined, statusFilter, reviewCodeFilter);
-  }, [fetchPage, cursor, pageSize, q, statusFilter, reviewCodeFilter]);
+    await Promise.all([refetchInvoices(), refetchCounts()]);
+  }, [refetchInvoices, refetchCounts]);
 
-  useEffect(() => { void fetchPage(cursor, pageSize, q || undefined, statusFilter, reviewCodeFilter); }, [fetchPage, cursor, pageSize, q, statusFilter, reviewCodeFilter]);
-  useEffect(() => { void fetchGlobalCounts(); }, [fetchGlobalCounts]);
   useEffect(() => { api.config().then((cfg) => { if (cfg.emailIntake?.enabled && cfg.emailIntake.address) setIntakeEmail(cfg.emailIntake.address); }).catch(() => {}); }, []);
 
   useEffect(() => {
@@ -202,9 +225,6 @@ export function InvoicesPage() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [searchInput]);
 
-  const refetchWithCounts = useCallback(async () => { await Promise.all([refetch(), fetchGlobalCounts()]); }, [refetch, fetchGlobalCounts]);
-  usePolling(refetchWithCounts, () => allInvoices.some((r) => r.status === 'PENDING' || r.status === 'PROCESSING'), 3000);
-
   const counts = globalCounts;
   const hasAdvancedFilters = !!(minTotal || dateFrom || dateTo);
   const hasSearch = !!q;
@@ -212,9 +232,6 @@ export function InvoicesPage() {
   const displayedRows: Invoice[] = (() => {
     let rows = [...allInvoices];
     if (batchFilter) rows = rows.filter((inv) => inv.batchId === batchFilter);
-    if (minTotal) { const min = parseFloat(minTotal); if (!isNaN(min)) rows = rows.filter((inv) => ((inv.netAmount ?? inv.totalAmount) ?? 0) >= min); }
-    if (dateFrom) rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate >= dateFrom);
-    if (dateTo) rows = rows.filter((inv) => !!inv.invoiceDate && inv.invoiceDate <= dateTo);
     if (sort !== 'none') {
       rows = [...rows].sort((a, b) => {
         let av: string | number | null | undefined;
@@ -244,8 +261,20 @@ export function InvoicesPage() {
   async function handleProcessOcr(id: string) { try { await api.processOcr(id); setToast('OCR processing started…'); await refetch(); } catch (e) { setToast('Error: ' + (e instanceof Error ? e.message : 'unknown')); } }
   async function handleBulkDelete() { try { await api.bulk('delete', [...selected]); setSelected(new Set()); setToast('Deleted selected invoices'); await refetch(); } catch (e) { setToast('Error: ' + (e instanceof Error ? e.message : 'unknown')); } }
 
+  function buildExportQs(): string {
+    const statusParams = statusToApiParams(statusFilter);
+    return buildQs({
+      ...statusParams,
+      q: q || undefined,
+      minTotal: minTotal || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      review_code: reviewCodeFilter && statusFilter === 'NEEDS_REVIEW' ? reviewCodeFilter : undefined,
+    });
+  }
+
   async function exportCsv(path: string) {
-    const qs = buildQs({ q: q || undefined, minTotal: minTotal || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined });
+    const qs = buildExportQs();
     try {
       const token = localStorage.getItem('session_token');
       const res = await fetch(path + qs, { headers: token ? { authorization: `Bearer ${token}` } : {} });
@@ -255,6 +284,14 @@ export function InvoicesPage() {
       const a = document.createElement('a'); a.href = url; a.download = path.includes('line-items') ? 'line-items.csv' : 'invoices.csv';
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch (e) { setToast('Export failed: ' + (e instanceof Error ? e.message : 'unknown')); }
+  }
+
+  async function exportExcel() {
+    try {
+      await api.exportExcel(buildExportQs());
+    } catch (e) {
+      setToast('Export failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    }
   }
 
   async function handleFiles(files: FileList | File[]) {
@@ -411,6 +448,7 @@ export function InvoicesPage() {
               type="text" placeholder="Search vendor, invoice #, file"
               value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               className="w-64 pl-9"
+              data-tour="search"
             />
           </div>
 
@@ -430,14 +468,19 @@ export function InvoicesPage() {
             )}
           </Button>
 
-          <Button variant="outline" onClick={() => void exportCsv('/api/invoices/export/csv')}>
-            <Download className="h-4 w-4" /> CSV
-          </Button>
-          <Button variant="outline" onClick={() => void exportCsv('/api/invoices/export/line-items.csv')}>
-            <Download className="h-4 w-4" /> Items
-          </Button>
+          <div className="flex flex-wrap items-center gap-2" data-tour="export">
+            <Button variant="outline" onClick={() => void exportCsv('/api/invoices/export/csv')}>
+              <Download className="h-4 w-4" /> CSV
+            </Button>
+            <Button variant="outline" onClick={() => void exportExcel()}>
+              <Download className="h-4 w-4" /> Excel
+            </Button>
+            <Button variant="outline" onClick={() => void exportCsv('/api/invoices/export/line-items.csv')}>
+              <Download className="h-4 w-4" /> Items
+            </Button>
+          </div>
 
-          <Button onClick={() => setShowUpload((v) => !v)} disabled={!canUpload} title={!canUpload ? 'Insufficient balance — contact admin to add points' : undefined}>
+          <Button data-tour="upload" onClick={() => setShowUpload((v) => !v)} disabled={!canUpload} title={!canUpload ? 'Insufficient balance — contact admin to add points' : undefined}>
             <Upload className="h-4 w-4" /> {canUpload ? 'Upload bills' : 'No balance'}
           </Button>
         </div>
@@ -449,17 +492,17 @@ export function InvoicesPage() {
           <div className="flex flex-wrap items-end gap-4">
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase text-muted-foreground">Min total</label>
-              <Input type="number" placeholder="0" value={minTotal} onChange={(e) => setMinTotal(e.target.value)} className="w-28" />
+              <Input type="number" placeholder="0" value={minTotal} onChange={(e) => { setMinTotal(e.target.value); resetPagination(); }} className="w-28" />
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase text-muted-foreground">Issued from</label>
-              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); resetPagination(); }} />
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase text-muted-foreground">Issued to</label>
-              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); resetPagination(); }} />
             </div>
-            <Button variant="ghost" size="sm" onClick={() => { setMinTotal(''); setDateFrom(''); setDateTo(''); }}>
+            <Button variant="ghost" size="sm" onClick={() => { setMinTotal(''); setDateFrom(''); setDateTo(''); resetPagination(); }}>
               Clear filters
             </Button>
           </div>
@@ -525,7 +568,7 @@ export function InvoicesPage() {
       )}
 
       {/* ─── Status pills ─── */}
-      <div className="flex flex-wrap gap-1.5 px-7 pt-1">
+      <div className="flex flex-wrap gap-1.5 px-7 pt-1" data-tour="filters">
         {STATUS_PILLS.map(({ key, label }) => {
           const active = statusFilter === key;
           return (
@@ -618,7 +661,7 @@ export function InvoicesPage() {
 
       {/* ─── Two-column: table + preview ─── */}
       <div className="inv-split flex items-start gap-4 px-7 pt-4 pb-10">
-        <Card className="flex min-w-0 flex-[1.35] flex-col overflow-hidden">
+        <Card className="flex min-w-0 flex-[1.35] flex-col overflow-hidden" data-tour="invoice-list">
           <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
             <Table>
               <TableHeader>
@@ -676,7 +719,7 @@ export function InvoicesPage() {
                   const isChecked = selected.has(row.id);
                   const isPreview = previewInvoice?.id === row.id;
                   return (
-                    <TableRow key={row.id} tabIndex={0}
+                    <TableRow key={row.id} tabIndex={0} data-tour-invoice-id={row.id}
                       onClick={() => setPreviewId(row.id)}
                       onDoubleClick={() => navigate('/invoices/' + row.id)}
                       onKeyDown={(e) => { if (e.key === 'Enter') navigate('/invoices/' + row.id); if (e.key === ' ') { e.preventDefault(); setPreviewId(row.id); } }}

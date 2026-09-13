@@ -92,17 +92,59 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
+export interface InvoiceComment {
+  id: string;
+  bill_id: string;
+  user_id: string;
+  text: string;
+  created_at: string;
+  user_email?: string;
+  user_name?: string;
+}
+
+export interface InvoiceListParams {
+  pageSize?: number;
+  cursor?: string;
+  page?: number;
+  status?: string;
+  q?: string;
+  needsReview?: string;
+  completed?: string;
+  review_code?: string;
+  minTotal?: string;
+  maxTotal?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  vendor?: string;
+}
+
 export const api = {
   config: () => j<AppConfig>('/api/config'),
-  list: (qs: string) => j<{
-    invoices: Invoice[];
-    pageSize: number;
-    total?: number;
-    page?: number;
-    totalPages?: number;
-    hasMore?: boolean;
-    nextCursor?: string | null;
-  }>(`/api/invoices${qs}`),
+  list: (params?: InvoiceListParams | string) => {
+    const qs = typeof params === 'string'
+      ? params
+      : (() => {
+          if (!params) return '';
+          const p = new URLSearchParams();
+          for (const [k, v] of Object.entries(params)) {
+            if (v !== undefined && v !== '') p.set(k, v);
+          }
+          const s = p.toString();
+          return s ? '?' + s : '';
+        })();
+    return j<{
+      invoices: Invoice[];
+      pageSize: number;
+      total?: number;
+      page?: number;
+      totalPages?: number;
+      hasMore?: boolean;
+      nextCursor?: string | null;
+    }>(`/api/invoices${qs}`);
+  },
+  getComments: (id: string) => j<InvoiceComment[]>(`/api/invoices/${id}/comments`),
+  addComment: (id: string, text: string) =>
+    j<InvoiceComment>(`/api/invoices/${id}/comments`, { method: 'POST', body: JSON.stringify({ text }) }),
   counts: () => j<{ counts: Record<string, number> }>('/api/invoices/counts'),
   get: (id: string) => j<Invoice>(`/api/invoices/${id}`),
   fileUrl: (id: string) => {
@@ -124,8 +166,8 @@ export const api = {
   analytics: () => j<Analytics>('/api/analytics'),
   analyticsKpis: () => j<AnalyticsKpis>('/api/analytics/kpis'),
   analyticsVehicles: (q?: string, limit = 20, offset = 0) => j<{ vehicles: VehicleSpend[]; total: number }>(`/api/analytics/vehicles?limit=${limit}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
-  analyticsWorkshops: (q?: string, limit = 20, offset = 0) => j<{ workshops: { name: string; amount: number }[]; total: number }>(`/api/analytics/workshops?limit=${limit}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
-  analyticsMonths: (limit = 50, offset = 0) => j<{ months: { label: string; amount: number }[]; total: number }>(`/api/analytics/months?limit=${limit}&offset=${offset}`),
+  analyticsWorkshops: (q?: string, limit = 20, offset = 0) => j<{ workshops: { name: string; amount: number; parts_amount?: number; labour_amount?: number }[]; total: number }>(`/api/analytics/workshops?limit=${limit}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
+  analyticsMonths: (limit = 50, offset = 0) => j<{ months: { label: string; amount: number; count?: number }[]; total: number }>(`/api/analytics/months?limit=${limit}&offset=${offset}`),
   analyticsCostkm: (q?: string, limit = 20, offset = 0) => j<{ costPerKm: CostPerKm[]; total: number }>(`/api/analytics/costkm?limit=${limit}&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
   analyticsCosts: () => j<OcrCostSummary>('/api/analytics/costs'),
   fraudSummary: () => j<{ total: number; by_type: Record<string, number>; by_severity: Record<string, number> }>('/api/fraud/summary'),
@@ -154,6 +196,31 @@ export const api = {
     }
     return res.json();
   },
+  exportExcel: async (qs = '') => {
+    const token = localStorage.getItem('session_token');
+    const res = await fetch(BASE + '/api/invoices/export/xlsx' + qs, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    if (res.status === 401) {
+      localStorage.removeItem('session_token');
+      localStorage.removeItem('session_user');
+      window.dispatchEvent(new Event('auth-logout'));
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { message?: string; error?: string }).message ?? (body as { error?: string }).error ?? `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoices-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   importSources: async (sources: string[], batchName?: string) => {
     const res = await fetch('/api/invoices/import', {
       method: 'POST',

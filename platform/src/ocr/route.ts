@@ -19,13 +19,44 @@ import {
   submitForApproval, approveInvoice, rejectInvoice,
   type UploadedFile,
 } from './service/invoiceService.js';
-import { exportInvoicesCsv, exportLineItemsCsv } from './service/exportService.js';
+import { exportInvoicesCsv, exportLineItemsCsv, exportFilteredInvoicesExcel } from './service/exportService.js';
+import { getComments, addComment } from './commentRepository.js';
+import { getBill } from './repository.js';
 import { bearerFromRequest } from '../middleware/auth.js';
 import { isPdf, isImage } from '../shared/storage.js';
+import { ValidationError } from '../shared/errors.js';
+import {
+  validateBody,
+  validateQuery,
+  commentBodySchema,
+  invoiceUpdateBodySchema,
+  invoiceExportQuerySchema,
+} from '../shared/validation.js';
+import type { BillStatus } from '../shared/types.js';
 
 function billOwnerFilter(req: { appUser?: { user_id: string; role: string } | null }): string | undefined {
   if (!req.appUser || req.appUser.role === 'admin') return undefined;
   return req.appUser.user_id;
+}
+
+function parseExportFilters(qs: ReturnType<typeof invoiceExportQuerySchema.parse>, userId?: string) {
+  const needsReview = qs.needsReview === '1' || qs.needsReview === 'true';
+  const completed = qs.completed === '1' || qs.completed === 'true';
+  const status = qs.status as BillStatus | undefined;
+  const reviewCode = qs.review_code?.trim() || undefined;
+  const minTotalRaw = qs.minTotal?.trim();
+  const minTotal = minTotalRaw ? Number(minTotalRaw) : undefined;
+
+  return {
+    status: needsReview || reviewCode ? 'NEED_REVIEW' as const : (completed ? undefined : status),
+    statuses: completed ? (['OCR_COMPLETED', 'VERIFIED'] as BillStatus[]) : undefined,
+    reviewCode,
+    q: qs.q?.trim().toLowerCase(),
+    userId,
+    dateFrom: qs.dateFrom?.trim() || undefined,
+    dateTo: qs.dateTo?.trim() || undefined,
+    minTotal: minTotal !== undefined && Number.isFinite(minTotal) ? minTotal : undefined,
+  };
 }
 
 export async function billRoutes(app: FastifyInstance) {
@@ -44,6 +75,11 @@ export async function billRoutes(app: FastifyInstance) {
         needsReview: qs.needsReview === '1' || qs.needsReview === 'true',
         completed: qs.completed === '1' || qs.completed === 'true',
         reviewCode: qs.review_code,
+        minTotal: qs.minTotal !== undefined ? Number(qs.minTotal) : undefined,
+        maxTotal: qs.maxTotal !== undefined ? Number(qs.maxTotal) : undefined,
+        dateFrom: qs.dateFrom,
+        dateTo: qs.dateTo,
+        vendor: qs.vendor,
         userId: billOwnerFilter(req),
       });
     } catch (err) {
@@ -101,6 +137,45 @@ export async function billRoutes(app: FastifyInstance) {
       }
       req.log.error(err, 'reconcile-range failed');
       return reply.code(500).send({ success: false, message: msg });
+    }
+  });
+
+  // ── Invoice Comments ────────────────────────────────────────────────────
+
+  app.get('/api/invoices/:id/comments', async (req, reply) => {
+    try {
+      const { id } = req.params as { id: string };
+      const ownerId = billOwnerFilter(req);
+      const bill = await getBill(id, ownerId);
+      if (!bill) return reply.code(404).send({ error: 'Invoice not found' });
+      const comments = await getComments(id);
+      return comments;
+    } catch (err) {
+      req.log.error(err, 'Failed to list comments');
+      return reply.code(500).send({ error: 'Failed to list comments' });
+    }
+  });
+
+  app.post('/api/invoices/:id/comments', async (req, reply) => {
+    try {
+      if (!req.appUser) {
+        return reply.status(401).send({ error: 'Authentication required' });
+      }
+      const { id } = req.params as { id: string };
+      const ownerId = billOwnerFilter(req);
+      const bill = await getBill(id, ownerId);
+      if (!bill) return reply.code(404).send({ error: 'Invoice not found' });
+
+      const body = validateBody(commentBodySchema, req.body);
+
+      const comment = await addComment(id, req.appUser.user_id, body.text.trim());
+      return reply.code(201).send(comment);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      req.log.error(err, 'Failed to add comment');
+      return reply.code(500).send({ error: 'Failed to add comment' });
     }
   });
 
@@ -170,8 +245,15 @@ export async function billRoutes(app: FastifyInstance) {
         }
       }
 
+      if (files.length === 0) {
+        throw new ValidationError('At least one file is required');
+      }
+
       return await uploadInvoices(files, req.appUser.user_id);
     } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ success: false, message: err.message });
+      }
       return reply.code(500).send({ error: 'Upload failed' });
     }
   });
@@ -284,16 +366,12 @@ export async function billRoutes(app: FastifyInstance) {
   app.patch('/api/invoices/:id', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
-      const body = req.body as Record<string, unknown>;
-      return await updateInvoice(id, {
-        vendorName: body.vendorName as string | undefined,
-        vendorTaxId: body.vendorTaxId as string | undefined,
-        invoiceNumber: body.invoiceNumber as string | undefined,
-        invoiceDate: body.invoiceDate as string | undefined,
-        totalAmount: body.totalAmount as number | undefined,
-        subtotal: body.subtotal as number | undefined,
-      }, req.appUser?.user_id);
+      const body = validateBody(invoiceUpdateBodySchema, req.body);
+      return await updateInvoice(id, body, req.appUser?.user_id);
     } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ error: err.message });
+      }
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ error: 'Update failed' });
     }
@@ -340,6 +418,23 @@ export async function billRoutes(app: FastifyInstance) {
       reply.header('Content-Disposition', 'attachment; filename="line-items.csv"');
       return csv;
     } catch (err) {
+      return reply.code(500).send({ error: 'Export failed' });
+    }
+  });
+
+  app.get('/api/invoices/export/xlsx', async (req, reply) => {
+    try {
+      const qs = validateQuery(invoiceExportQuerySchema, req.query);
+      const filters = parseExportFilters(qs, billOwnerFilter(req));
+      const buffer = await exportFilteredInvoicesExcel(filters);
+      const stamp = new Date().toISOString().slice(0, 10);
+      reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      reply.header('Content-Disposition', `attachment; filename="invoices-${stamp}.xlsx"`);
+      return buffer;
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ error: err.message });
+      }
       return reply.code(500).send({ error: 'Export failed' });
     }
   });
