@@ -9,6 +9,7 @@ export type ApprovalStatus = typeof APPROVAL_STATUSES[number];
 
 export interface BillAttributes {
   billId: string;
+  userId: string | null;
   fleetId: string | null;
   vehicleId: string | null;
   billType: string;
@@ -97,6 +98,7 @@ export interface BillAttributes {
 
 export class Bill extends Model<BillAttributes> implements BillAttributes {
   declare billId: string;
+  declare userId: string | null;
   declare fleetId: string | null;
   declare vehicleId: string | null;
   declare billType: string;
@@ -186,6 +188,7 @@ export class Bill extends Model<BillAttributes> implements BillAttributes {
 export function initBillModel(seq: Sequelize): void {
   Bill.init({
     billId: { type: DataTypes.TEXT, primaryKey: true, field: 'bill_id' },
+    userId: { type: DataTypes.TEXT, allowNull: true, field: 'user_id' },
     fleetId: { type: DataTypes.TEXT, field: 'fleet_id' },
     vehicleId: { type: DataTypes.TEXT, field: 'vehicle_id' },
     billType: { type: DataTypes.TEXT, allowNull: false, field: 'bill_type', validate: { isIn: [BILL_TYPES] } },
@@ -276,6 +279,10 @@ export function initBillModel(seq: Sequelize): void {
       { fields: [{ name: 'updated_at', order: 'DESC' }], name: 'bills_updated_at_idx' },
       { fields: [{ name: 'created_at', order: 'DESC' }], name: 'bills_created_at_idx' },
       { fields: ['ocr_status', { name: 'updated_at', order: 'DESC' }], name: 'bills_status_updated_idx' },
+      { fields: ['user_id'], name: 'idx_bills_user_id' },
+      { fields: [{ name: 'created_at', order: 'DESC' }], name: 'idx_bills_created_at' },
+      { fields: ['user_id', 'ocr_status'], name: 'idx_bills_user_status' },
+      { fields: ['user_id', { name: 'created_at', order: 'DESC' }], name: 'idx_bills_user_created' },
       { fields: ['vehicle_id'], name: 'bills_vehicle_idx' },
       { fields: ['vendor_id'], name: 'bills_vendor_idx' },
       { fields: ['invoice_number', 'vendor_gstin'], name: 'bills_dup_idx' },

@@ -9,7 +9,7 @@
  * translates them to HTTP responses.
  */
 import {
-  getBill, listBillsPaginated, deleteBill, updateBill,
+  getBill, listBillsPaginated, listBillsCursor, deleteBill, updateBill,
   getPartsForBill, deletePartsForBill,
   countAllStatuses,
   type BillDoc,
@@ -27,11 +27,14 @@ import { recordActivity } from './recordActivity.js';
 export interface InvoiceListFilters {
   page?: number;
   pageSize?: number;
+  cursor?: string;
   status?: string;
   q?: string;
   needsReview?: boolean;
   completed?: boolean;
   reviewCode?: string;
+  /** When set, restrict results to this owner's bills (non-admin users). */
+  userId?: string;
 }
 
 export interface ReconcileRangeParams {
@@ -55,23 +58,43 @@ export interface InvoiceUpdate {
 
 /** List invoices with pagination and filtering. */
 export async function listInvoices(filters: InvoiceListFilters) {
-  const page = Math.max(Number(filters.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(filters.pageSize) || 10, 1), 100);
   const status = filters.status as import('../../shared/types.js').BillStatus | undefined;
   const q = filters.q?.trim().toLowerCase();
   const needsReview = filters.needsReview;
   const completed = filters.completed;
   const reviewCode = filters.reviewCode?.trim() || undefined;
+  const listFilters = {
+    status: needsReview || reviewCode ? 'NEED_REVIEW' as const : (completed ? undefined : status),
+    statuses: completed ? (['OCR_COMPLETED', 'VERIFIED'] as import('../../shared/types.js').BillStatus[]) : undefined,
+    needsReview: undefined as boolean | undefined,
+    excludeNeedsReview: undefined as boolean | undefined,
+    reviewCode,
+    q,
+    userId: filters.userId,
+  };
 
+  const useCursor = filters.cursor !== undefined || filters.page === undefined;
+  if (useCursor) {
+    const result = await listBillsCursor({
+      limit: pageSize,
+      cursor: filters.cursor,
+      ...listFilters,
+    });
+
+    return {
+      invoices: result.rows.map((b) => billToInvoice(b)),
+      hasMore: result.hasMore,
+      nextCursor: result.nextCursor,
+      pageSize,
+    };
+  }
+
+  const page = Math.max(Number(filters.page) || 1, 1);
   const result = await listBillsPaginated({
     page,
     pageSize,
-    status: needsReview || reviewCode ? 'NEED_REVIEW' : (completed ? undefined : status),
-    statuses: completed ? ['OCR_COMPLETED', 'VERIFIED'] : undefined,
-    needsReview: undefined,
-    excludeNeedsReview: undefined,
-    reviewCode,
-    q,
+    ...listFilters,
   });
 
   return {
@@ -89,15 +112,15 @@ export async function getStatusCounts() {
 }
 
 /** Get a single invoice by ID. Throws NotFoundError if missing. */
-export async function getInvoice(billId: string): Promise<BillDoc> {
-  const bill = await getBill(billId);
+export async function getInvoice(billId: string, userId?: string): Promise<BillDoc> {
+  const bill = await getBill(billId, userId);
   if (!bill) throw new NotFoundError('Invoice', billId);
   return bill;
 }
 
 /** Get invoice detail for the UI (with line items). */
-export async function getInvoiceForUi(billId: string): Promise<FrontendInvoice> {
-  const bill = await getInvoice(billId);
+export async function getInvoiceForUi(billId: string, userId?: string): Promise<FrontendInvoice> {
+  const bill = await getInvoice(billId, userId);
   const parts = await getPartsForBill(billId);
   return billToInvoice(bill, parts);
 }
@@ -122,11 +145,11 @@ export async function getInvoiceForApi(bill: BillDoc) {
  * Get a signed URL or the raw bytes for an invoice file.
  * Returns { redirect: url } or { buf, contentType } or throws NotFoundError.
  */
-export async function getInvoiceFile(billId: string): Promise<
+export async function getInvoiceFile(billId: string, userId?: string): Promise<
   | { redirect: string }
   | { buf: Buffer; contentType: string; fileName: string }
 > {
-  const bill = await getInvoice(billId);
+  const bill = await getInvoice(billId, userId);
 
   if (!bill.storage_path && !bill.file_url) {
     throw new NotFoundError('File', billId);

@@ -1,7 +1,7 @@
 /**
  * Postgres connection — Sequelize instance.
  *
- * Pool settings tuned for Cloud Run (max 2 per instance × 8 instances = 16 connections).
+ * Pool max 10 — supports higher concurrency per instance under load.
  * NUMERIC columns returned as JS numbers via pg type parser override.
  */
 import { Sequelize } from 'sequelize';
@@ -25,7 +25,7 @@ export function sequelize(): Sequelize {
       dialectModule: pg,
       logging: false,
       pool: {
-        max: 2,
+        max: 10,
         min: 0,
         idle: 10_000,
         acquire: 30_000,

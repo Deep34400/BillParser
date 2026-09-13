@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
+import { requireAdmin } from '../middleware/auth.js';
 import {
   getSettings,
   saveSettings,
-  getProviderCredentials,
   saveProviderCredentials,
   clearProviderCredentials,
   getAllCredentials,
@@ -25,7 +25,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   /**
    * GET /api/settings
    */
-  app.get('/api/settings', async () => {
+  app.get('/api/settings', { preHandler: requireAdmin }, async () => {
     const settings = await getSettings();
     const allCreds = await getAllCredentials();
 
@@ -66,7 +66,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   /**
    * PUT /api/settings — save extraction/structuring selections.
    */
-  app.put('/api/settings', async (req) => {
+  app.put('/api/settings', { preHandler: requireAdmin }, async (req) => {
     const body = req.body as Record<string, any>;
     const patch: Record<string, any> = {};
     if (body.pipelineMode === 'split' || body.pipelineMode === 'single') {
@@ -117,7 +117,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   /**
    * GET /api/settings/reveal — reveal all stored credentials (decrypted).
    */
-  app.get('/api/settings/reveal', async () => {
+  app.get('/api/settings/reveal', { preHandler: requireAdmin }, async () => {
     const credentials = await getAllCredentials();
     return { credentials };
   });
@@ -125,7 +125,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   /**
    * PUT /api/settings/providers/:provider — save provider credentials.
    */
-  app.put('/api/settings/providers/:provider', async (req) => {
+  app.put('/api/settings/providers/:provider', { preHandler: requireAdmin }, async (req) => {
     const { provider } = req.params as { provider: string };
     const creds = req.body as Record<string, string>;
     await saveProviderCredentials(provider, creds);
@@ -135,7 +135,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   /**
    * DELETE /api/settings/providers/:provider — clear provider credentials.
    */
-  app.delete('/api/settings/providers/:provider', async (req) => {
+  app.delete('/api/settings/providers/:provider', { preHandler: requireAdmin }, async (req) => {
     const { provider } = req.params as { provider: string };
     await clearProviderCredentials(provider);
     return { ok: true };

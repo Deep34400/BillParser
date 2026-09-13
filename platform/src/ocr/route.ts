@@ -23,6 +23,11 @@ import { exportInvoicesCsv, exportLineItemsCsv } from './service/exportService.j
 import { bearerFromRequest } from '../middleware/auth.js';
 import { isPdf, isImage } from '../shared/storage.js';
 
+function billOwnerFilter(req: { appUser?: { user_id: string; role: string } | null }): string | undefined {
+  if (!req.appUser || req.appUser.role === 'admin') return undefined;
+  return req.appUser.user_id;
+}
+
 export async function billRoutes(app: FastifyInstance) {
 
   // ── Invoice List & Counts ───────────────────────────────────────────────
@@ -31,13 +36,15 @@ export async function billRoutes(app: FastifyInstance) {
     try {
       const qs = req.query as Record<string, string | undefined>;
       return await listInvoices({
-        page: Number(qs.page) || undefined,
+        page: qs.page !== undefined ? Number(qs.page) || undefined : undefined,
         pageSize: Number(qs.pageSize) || undefined,
+        cursor: qs.cursor,
         status: qs.status,
         q: qs.q,
         needsReview: qs.needsReview === '1' || qs.needsReview === 'true',
         completed: qs.completed === '1' || qs.completed === 'true',
         reviewCode: qs.review_code,
+        userId: billOwnerFilter(req),
       });
     } catch (err) {
       req.log.error(err, 'Failed to list invoices');
@@ -102,7 +109,8 @@ export async function billRoutes(app: FastifyInstance) {
   app.get('/api/invoices/:id', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
-      const bill = await getInvoice(id);
+      const ownerId = billOwnerFilter(req);
+      const bill = await getInvoice(id, ownerId);
 
       const token = bearerFromRequest(req);
       const isApiKey = !!token?.startsWith('inv_');
@@ -111,7 +119,7 @@ export async function billRoutes(app: FastifyInstance) {
         return { success: true, data: await getInvoiceForApi(bill) };
       }
 
-      return await getInvoiceForUi(id);
+      return await getInvoiceForUi(id, ownerId);
     } catch (err) {
       if ((err as any)?.statusCode === 404) {
         return reply.code(404).send({ error: 'Invoice not found' });
@@ -125,7 +133,7 @@ export async function billRoutes(app: FastifyInstance) {
   app.get('/api/invoices/:id/file', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
-      const fileResult = await getInvoiceFile(id);
+      const fileResult = await getInvoiceFile(id, billOwnerFilter(req));
 
       if ('redirect' in fileResult) {
         return reply.redirect(fileResult.redirect);

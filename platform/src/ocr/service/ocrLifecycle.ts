@@ -235,6 +235,7 @@ export async function uploadInvoices(files: UploadedFile[], userId?: string): Pr
         storagePath,
       });
       initialBill.ocr_status = 'PROCESSING';
+      initialBill.user_id = userId ?? null;
       await applyPipelineSettings(initialBill);
       await createBill(initialBill);
 
@@ -276,6 +277,7 @@ export async function importFromUrls(sources: string[], userId?: string): Promis
         storagePath,
       });
       initialBill.ocr_status = 'PROCESSING';
+      initialBill.user_id = userId ?? null;
       await applyPipelineSettings(initialBill);
       await createBill(initialBill);
 
@@ -360,6 +362,7 @@ export async function syncOcr(
   });
   bill.fallback_attempts = fallbackAttempts;
   bill.fallback_history = fallbackHistory;
+  bill.user_id = userId;
   await createBill(bill);
   recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { source: 'sync-ocr' });
   recordActivity(userId, 'invoice:complete', 'invoice.completed', billId, {
@@ -429,6 +432,7 @@ export async function asyncOcr(
     storagePath,
   });
   initialBill.ocr_status = 'PROCESSING';
+  initialBill.user_id = userId;
   await createBill(initialBill);
   recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { source: 'async-ocr' });
 

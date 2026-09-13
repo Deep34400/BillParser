@@ -18,6 +18,7 @@ export { getSettings };
 function billRowToDoc(row: Bill): BillDoc {
   return {
     bill_id: row.billId,
+    user_id: row.userId,
     fleet_id: row.fleetId,
     vehicle_id: row.vehicleId,
     bill_type: row.billType as BillType,
@@ -108,6 +109,7 @@ function billRowToDoc(row: Bill): BillDoc {
 function billDocToRow(b: BillDoc): Record<string, unknown> {
   return {
     billId: b.bill_id,
+    userId: b.user_id ?? null,
     fleetId: b.fleet_id ?? null,
     vehicleId: b.vehicle_id ?? null,
     billType: b.bill_type,
@@ -244,8 +246,10 @@ export async function createBill(bill: BillDoc): Promise<BillDoc> {
   return bill;
 }
 
-export async function getBill(billId: string): Promise<BillDoc | null> {
-  const row = await Bill.findByPk(billId);
+export async function getBill(billId: string, userId?: string): Promise<BillDoc | null> {
+  const where: Record<string, unknown> = { billId };
+  if (userId) where.userId = userId;
+  const row = await Bill.findOne({ where });
   return row ? billRowToDoc(row) : null;
 }
 
@@ -402,13 +406,55 @@ export async function listBillsPaginated(opts: {
   reviewCode?: string;
   excludeNeedsReview?: boolean;
   q?: string;
+  userId?: string;
 } = {}): Promise<PaginatedBills> {
   const pageSize = Math.min(Math.max(opts.pageSize ?? 10, 1), 100);
   const page = Math.max(opts.page ?? 1, 1);
   const skip = (page - 1) * pageSize;
   const searchTerm = opts.q?.trim();
 
+  const where: any = buildBillListWhere(opts);
+
+  if (opts.reviewCode) {
+    const allRows = await Bill.findAll({ where, order: [['updatedAt', 'DESC']] });
+    const docs = allRows.map(billRowToDoc).filter((b) => billHasReviewCode(b, opts.reviewCode!));
+    const total = docs.length;
+    return {
+      bills: docs.slice(skip, skip + pageSize), total, page, pageSize,
+      totalPages: Math.ceil(total / pageSize) || 1,
+    };
+  }
+
+  const { count: total, rows } = await Bill.findAndCountAll({
+    where,
+    order: [['updatedAt', 'DESC']],
+    limit: pageSize,
+    offset: skip,
+  });
+
+  return { bills: rows.map(billRowToDoc), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+}
+
+export interface CursorBillsResult {
+  rows: BillDoc[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+function buildBillListWhere(opts: {
+  status?: BillStatus;
+  statuses?: BillStatus[];
+  needsReview?: boolean;
+  reviewCode?: string;
+  excludeNeedsReview?: boolean;
+  q?: string;
+  cursor?: string;
+  userId?: string;
+}): any {
+  const searchTerm = opts.q?.trim();
   const where: any = {};
+
+  if (opts.userId) where.userId = opts.userId;
 
   if (opts.statuses?.length) {
     where.ocrStatus = { [Op.in]: opts.statuses };
@@ -429,24 +475,53 @@ export async function listBillsPaginated(opts: {
   if (opts.needsReview) where.ocrStatus = 'NEED_REVIEW';
   else if (opts.excludeNeedsReview) where.ocrStatus = { [Op.ne]: 'NEED_REVIEW' };
 
-  if (opts.reviewCode) {
-    const allRows = await Bill.findAll({ where, order: [['updatedAt', 'DESC']] });
-    const docs = allRows.map(billRowToDoc).filter((b) => billHasReviewCode(b, opts.reviewCode!));
-    const total = docs.length;
-    return {
-      bills: docs.slice(skip, skip + pageSize), total, page, pageSize,
-      totalPages: Math.ceil(total / pageSize) || 1,
-    };
+  if (opts.cursor) {
+    where.createdAt = { [Op.lt]: new Date(opts.cursor) };
   }
 
-  const { count: total, rows } = await Bill.findAndCountAll({
+  return where;
+}
+
+export async function listBillsCursor(opts: {
+  limit?: number;
+  cursor?: string;
+  status?: BillStatus;
+  statuses?: BillStatus[];
+  needsReview?: boolean;
+  reviewCode?: string;
+  excludeNeedsReview?: boolean;
+  q?: string;
+  userId?: string;
+} = {}): Promise<CursorBillsResult> {
+  const limit = Math.min(Math.max(opts.limit ?? 10, 1), 100);
+  const where = buildBillListWhere(opts);
+
+  if (opts.reviewCode) {
+    const allRows = await Bill.findAll({ where, order: [['createdAt', 'DESC']] });
+    const docs = allRows.map(billRowToDoc).filter((b) => billHasReviewCode(b, opts.reviewCode!));
+    const slice = docs.slice(0, limit + 1);
+    const hasMore = slice.length > limit;
+    const rows = hasMore ? slice.slice(0, limit) : slice;
+    const nextCursor = rows.length > 0 ? rows[rows.length - 1].created_at : null;
+    return { rows, hasMore, nextCursor: hasMore ? nextCursor : null };
+  }
+
+  const rows = await Bill.findAll({
     where,
-    order: [['updatedAt', 'DESC']],
-    limit: pageSize,
-    offset: skip,
+    order: [['createdAt', 'DESC']],
+    limit: limit + 1,
   });
 
-  return { bills: rows.map(billRowToDoc), total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const docs = pageRows.map(billRowToDoc);
+  const nextCursor = docs.length > 0 ? docs[docs.length - 1].created_at : null;
+
+  return {
+    rows: docs,
+    hasMore,
+    nextCursor: hasMore ? nextCursor : null,
+  };
 }
 
 export async function findDuplicateBills(

@@ -119,6 +119,8 @@ export type LineType = 'PART' | 'LABOUR';
 
 export interface BillDoc {
   bill_id: string;
+  /** Owner user — used for data isolation between tenants. */
+  user_id?: string | null;
   fleet_id?: string | null;
   vehicle_id?: string | null;
 

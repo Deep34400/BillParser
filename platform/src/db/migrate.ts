@@ -37,7 +37,18 @@ export async function runMigrations(): Promise<void> {
 
       DROP TABLE IF EXISTS org_members;
       DROP TABLE IF EXISTS organizations;
+
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'bills') THEN
+        ALTER TABLE bills ADD COLUMN IF NOT EXISTS user_id TEXT;
+      END IF;
     END $$;
+  `);
+
+  await seq.query(`
+    CREATE INDEX IF NOT EXISTS idx_bills_user_id ON bills (user_id);
+    CREATE INDEX IF NOT EXISTS idx_bills_created_at ON bills (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_bills_user_status ON bills (user_id, ocr_status);
+    CREATE INDEX IF NOT EXISTS idx_bills_user_created ON bills (user_id, created_at DESC);
   `);
 
   await seq.sync({ alter: true });
