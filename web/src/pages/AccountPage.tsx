@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge.js';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
 import { WebhooksPanel } from '../components/WebhooksPanel.js';
-import { AuditLogPanel } from '../components/AuditLogPanel.js';
 
 export function AccountPage() {
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
@@ -133,11 +132,6 @@ export function AccountPage() {
       </Card>
 
       <WebhooksPanel onFlash={flash} />
-
-      <AuditLogPanel
-        title="My activity"
-        description="Your invoice, approval, and webhook actions."
-      />
 
       {/* Transaction history */}
       <Card className="mt-4">

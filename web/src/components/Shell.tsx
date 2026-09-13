@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, LogOut,
+  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, LogOut, History,
 } from 'lucide-react';
 import { api, type SessionUser } from '../api/client.js';
 import carrumLogo from '../assets/carrum-logo.svg';
@@ -23,7 +23,7 @@ const SECONDARY_NAV = [
   { label: 'Account', to: '/account', icon: User },
 ];
 
-
+const ACTIVITY_NAV = { label: 'Activity', to: '/activity', icon: History };
 const ADMIN_NAV = { label: 'Admin', to: '/admin', icon: Shield };
 
 interface Props {
@@ -67,7 +67,9 @@ export function Shell({ children, user, onLogout, onUserUpdate }: Props) {
   useEffect(() => { void refreshAccount(); }, [location.pathname, refreshAccount]);
 
   const isAdmin = liveUser.role === 'admin';
-  const secondary = isAdmin ? [ADMIN_NAV, ...SECONDARY_NAV] : SECONDARY_NAV;
+  const secondary = isAdmin
+    ? [ADMIN_NAV, ...SECONDARY_NAV]
+    : [ACTIVITY_NAV, ...SECONDARY_NAV];
   const balance = balanceNumber(liveUser.role, liveUser.token_balance);
   const unlimited = hasUnlimitedBalance(liveUser.role, liveUser.token_balance);
   const isHealthy = unlimited || balance > 0;

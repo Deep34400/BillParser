@@ -10,6 +10,7 @@ import { OdometerPage } from './pages/OdometerPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AccountPage } from './pages/AccountPage.js';
+import { ActivityPage } from './pages/ActivityPage.js';
 import { api, type SessionUser } from './api/client.js';
 import { setUsdToInr } from './lib/format.js';
 
@@ -65,7 +66,9 @@ export default function App() {
           <Route path="/organization" element={<Navigate to="/invoices" replace />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/account" element={<AccountPage />} />
-          {user.role === 'admin' && <Route path="/admin" element={<AdminPage />} />}
+          {user.role === 'admin'
+            ? <Route path="/admin" element={<AdminPage />} />
+            : <Route path="/activity" element={<ActivityPage />} />}
         </Routes>
       </Shell>
     </BrowserRouter>
