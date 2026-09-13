@@ -1,36 +1,21 @@
 # Database Design — BillParser Platform
 
 > **ORM:** Sequelize 6 · **Database:** PostgreSQL 15+ · **Extension:** pg_trgm (trigram search)
-> **Tables:** 10 (8 original + 2 multi-tenancy)
+> **Tables:** users, vendors, bills, bill_parts, api_keys, token_transactions, app_settings, provider_credentials, audit_logs, webhook_endpoints
 
 ---
 
 ## Entity Relationship Diagram
 
 ```
-┌──────────────────┐
-│  organizations   │ 1    N  ┌──────────────────────────────────────┐
-│──────────────────│◄────────│           org_members                │
-│ org_id      PK   │         │──────────────────────────────────────│
-│ name             │         │ org_id   PK, FK → organizations     │
-│ slug    UNIQUE   │         │ user_id  PK, FK → users             │
-│ plan             │         │ org_role (owner/admin/reviewer/...)  │
-│ status           │         │ joined_at                            │
-│ settings  JSONB  │         └──────────────────────────────────────┘
-│ invoice_limit    │
-│ created_at       │
-│ updated_at       │
-└───────┬──────────┘
-        │ 1
-        │ N
-┌───────▼─────────┐         ┌──────────────────────────────────────┐
+┌─────────────────┐         ┌──────────────────────────────────────┐
 │    vendors       │ 1    N  │               bills                  │
 │─────────────────│◄────────│──────────────────────────────────────│
 │ vendor_id  PK   │         │ bill_id         PK                   │
-│ legal_name      │         │ org_id          FK → organizations   │
-│ display_name    │         │ vendor_id       FK → vendors (NULL)  │
-│ gstin           │         │ bill_type       NOT NULL              │
-│ pan             │         │ ocr_status      NOT NULL              │
+│ legal_name      │         │ vendor_id       FK → vendors (NULL)  │
+│ display_name    │         │ bill_type       NOT NULL              │
+│ gstin           │         │ ocr_status      NOT NULL              │
+│ pan             │         │ vendor_name, vendor_gstin             │
 │ invoice_count   │         │ vendor_name, vendor_gstin             │
 │ first_seen      │         │ invoice_number, invoice_date          │
 │ last_seen       │         │ grand_total_amount, parts_amount ...  │
@@ -72,11 +57,33 @@
 │ intake_email    │         │ user_id       FK → users (RESTRICT)  │
 │ created_at      │         │ type          credit | debit          │
 │ updated_at      │         │ amount                                │
-└─────────────────┘         │ balance_after                         │
-                            │ description                           │
-                            │ reference_id                          │
-                            │ created_at                            │
-                            └──────────────────────────────────────┘
+│                 │         │ balance_after                         │
+│                 │         │ description                           │
+│                 │         │ reference_id                          │
+│                 │         │ created_at                            │
+│                 │         └──────────────────────────────────────┘
+│                 │
+│                 │ 1    N  ┌──────────────────────────────────────┐
+│                 │◄────────│           audit_logs                  │
+│                 │         │──────────────────────────────────────│
+│                 │         │ log_id        PK                     │
+│                 │         │ user_id       (nullable)             │
+│                 │         │ action        invoice:upload …       │
+│                 │         │ resource_type / resource_id          │
+│                 │         │ details       JSONB                  │
+│                 │         │ created_at                           │
+│                 │         └──────────────────────────────────────┘
+│                 │
+│                 │ 1    N  ┌──────────────────────────────────────┐
+│                 │◄────────│        webhook_endpoints              │
+│                 │         │──────────────────────────────────────│
+│                 │         │ endpoint_id   PK                     │
+│                 │         │ user_id                              │
+│                 │         │ url, events[], secret                │
+│                 │         │ active, description                  │
+│                 │         │ created_at, updated_at               │
+│                 │         └──────────────────────────────────────┘
+└─────────────────┘
 
 ┌──────────────────────────┐    ┌──────────────────────────────────┐
 │      app_settings         │    │     provider_credentials          │
@@ -97,60 +104,7 @@
 
 ## Tables in Detail
 
-### 1. `organizations` — Multi-Tenancy Root
-
-Each organization is a tenant. Users belong to organizations via `org_members`. Bills are scoped to an organization via `org_id`.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `org_id` | TEXT | **PK** | UUID |
-| `name` | TEXT | NOT NULL | Organization display name |
-| `slug` | TEXT | NOT NULL, UNIQUE | URL-safe identifier |
-| `plan` | TEXT | NOT NULL, default `free` | `free`, `starter`, `business`, `enterprise` |
-| `status` | TEXT | NOT NULL, default `active` | `active` or `suspended` |
-| `settings` | JSONB | default `{}` | Organization-level config |
-| `invoice_limit` | INTEGER | NOT NULL, default 50 | Max invoices per billing period |
-| `created_at` | TIMESTAMPTZ | NOT NULL | |
-| `updated_at` | TIMESTAMPTZ | NOT NULL | |
-
-**Indexes:**
-- `organizations_slug_idx` — UNIQUE on `slug`
-
-**Plan Limits:**
-| Plan | Invoice Limit |
-|------|--------------|
-| `free` | 50 |
-| `starter` | 500 |
-| `business` | 5,000 |
-| `enterprise` | 999,999 |
-
----
-
-### 2. `org_members` — Organization Membership
-
-Maps users to organizations with roles. Composite primary key.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `org_id` | TEXT | **PK**, FK → organizations (CASCADE) | Organization |
-| `user_id` | TEXT | **PK**, FK → users (CASCADE) | User |
-| `org_role` | TEXT | NOT NULL | `owner`, `admin`, `reviewer`, `viewer`, `api_user` |
-| `joined_at` | TIMESTAMPTZ | NOT NULL | When the user joined |
-
-**RBAC Roles:**
-| Role | Description |
-|------|-------------|
-| `owner` | Full access, can assign admin, delete org |
-| `admin` | Full access except org deletion |
-| `reviewer` | View + approve/reject invoices |
-| `viewer` | Read-only access |
-| `api_user` | API-only access (upload + read) |
-
----
-
-### 3. `vendors` — Vendor Registry
-
-> *Renumbered from original #1 after adding organizations + org_members.*
+### 1. `vendors` — Vendor Registry
 
 Auto-populated from processed invoices. Matched by GSTIN → PAN → legal name.
 
@@ -176,7 +130,7 @@ Auto-populated from processed invoices. Matched by GSTIN → PAN → legal name.
 
 ---
 
-### 4. `bills` — The Core Invoice Table
+### 2. `bills` — The Core Invoice Table
 
 One row per uploaded invoice. Contains all extracted data, costs, and audit fields.
 
@@ -184,7 +138,6 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 |--------|------|-------------|-------------|
 | **Identity** | | | |
 | `bill_id` | TEXT | **PK** | UUID |
-| `org_id` | TEXT | FK → organizations, SET NULL | Tenant isolation (nullable for legacy bills) |
 | `fleet_id` | TEXT | | Fleet identifier |
 | `vehicle_id` | TEXT | Indexed | Vehicle identifier |
 | `bill_type` | TEXT | NOT NULL, CHECK | MAINTENANCE, FUEL, INSURANCE, TYRE, TOLL, ACCIDENT_REPAIR, BATTERY_REPLACEMENT, AMC_CONTRACT, OTHER |
@@ -282,7 +235,6 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 - `bills_vehicle_idx` — `vehicle_id` (vehicle analytics)
 - `bills_vendor_idx` — `vendor_id` (vendor drilldown)
 - `bills_dup_idx` — `(invoice_number, vendor_gstin)` (duplicate detection)
-- `bills_org_updated_idx` — `(org_id, updated_at DESC)` (tenant-scoped pagination)
 
 **GST Rules:**
 - Intra-state: CGST + SGST (IGST = NULL)
@@ -421,24 +373,71 @@ Single row (`id = 1`). Stores pipeline config, pricing, and email intake setting
 
 ---
 
+### 11. `audit_logs` — Activity History
+
+Append-only. Written by `audit()` from invoice, admin, and webhook code. The UI reads this table; it is not derived from invoices.
+
+See [src/audit/README.md](./src/audit/README.md).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `log_id` | TEXT | **PK** | UUID |
+| `user_id` | TEXT | | Actor (nullable for system rows) |
+| `action` | TEXT | NOT NULL | e.g. `invoice:upload`, `invoice:approve`, `tokens:credit` |
+| `resource_type` | TEXT | | `bill`, `user`, `webhook` |
+| `resource_id` | TEXT | | Target id |
+| `details` | JSONB | | Extra context (`fileName`, `reason`, …) |
+| `ip_address` | TEXT | | Reserved |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `audit_user_created_idx` — `(user_id, created_at DESC)`
+- `audit_action_idx` — `action`
+- `audit_resource_idx` — `(resource_type, resource_id)`
+
+---
+
+### 12. `webhook_endpoints` — Outbound Event Subscriptions
+
+Per-user HTTPS receivers. Dispatch is fire-and-forget HMAC POST.
+
+See [src/webhook/README.md](./src/webhook/README.md).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `endpoint_id` | TEXT | **PK** | UUID |
+| `user_id` | TEXT | NOT NULL | Owner — only that user's invoice events are sent here |
+| `url` | TEXT | NOT NULL | Receiver (`https://` in production) |
+| `events` | TEXT[] | NOT NULL | Subset of `invoice.uploaded`, `.completed`, `.failed`, `.approved`, `.rejected`, `.deleted` |
+| `secret` | TEXT | NOT NULL | `whsec_…` used for `X-Webhook-Signature` |
+| `active` | BOOLEAN | NOT NULL, default true | Paused endpoints are skipped |
+| `description` | TEXT | | Optional label |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `webhooks_user_idx` — `user_id`
+- `webhooks_active_idx` — `active`
+
+---
+
 ## Foreign Key Relationships
 
 | From | To | On Delete | Why |
 |------|----|-----------|-----|
-| `org_members.org_id` | `organizations.org_id` | CASCADE | Members belong to an org |
-| `org_members.user_id` | `users.user_id` | CASCADE | Members belong to a user |
-| `bills.org_id` | `organizations.org_id` | SET NULL | Org optional; deleting org doesn't delete bills |
 | `bills.vendor_id` | `vendors.vendor_id` | SET NULL | Vendor is optional; deleting vendor doesn't delete bills |
 | `bill_parts.bill_id` | `bills.bill_id` | CASCADE | Parts are owned by a bill; no orphans |
 | `api_keys.user_id` | `users.user_id` | CASCADE | Keys are owned by a user |
 | `token_transactions.user_id` | `users.user_id` | RESTRICT | Can't delete user with billing history |
+| `audit_logs.user_id` | — | none | Actor id stored as text (no FK; keep history if a user is removed) |
+| `webhook_endpoints.user_id` | — | none | Owner id stored as text |
 
 ---
 
 ## Schema Management
 
 - **ORM:** Sequelize 6 with `sync({ alter: true })` on startup
-- **Init order:** Organization → Vendor → User → OrgMember → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential
+- **Init order:** Vendor → User → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential → AuditLog → WebhookEndpoint
 - **Extension:** `pg_trgm` created automatically for trigram search
 - **NUMERIC handling:** pg type parser overrides OID 1700 → `parseFloat()` so all decimal columns return JS numbers (not strings)
 - **Timestamps:** Managed by application code, not Sequelize auto-timestamps

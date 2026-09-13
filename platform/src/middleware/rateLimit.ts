@@ -1,15 +1,5 @@
 /**
- * Rate Limiting Middleware — per-user request throttling.
- *
- * Uses an in-memory sliding window counter. Each user gets a bucket
- * keyed by user_id. Limits are based on the organization plan.
- *
- * Plan limits (requests per minute):
- *   free:       30
- *   starter:    120
- *   business:   300
- *   enterprise: 1000
- *   (no plan):  60  (legacy/no-org users)
+ * Rate limiting — per-user sliding window (60 requests / minute).
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
@@ -19,22 +9,8 @@ interface BucketEntry {
 }
 
 const WINDOW_MS = 60_000;
-const buckets = new Map<string, BucketEntry>();
-
-const PLAN_LIMITS: Record<string, number> = {
-  free: 30,
-  starter: 120,
-  business: 300,
-  enterprise: 1000,
-};
-
 const DEFAULT_LIMIT = 60;
-
-function getLimit(req: FastifyRequest): number {
-  const plan = (req as any).orgPlan;
-  if (plan && PLAN_LIMITS[plan]) return PLAN_LIMITS[plan];
-  return DEFAULT_LIMIT;
-}
+const buckets = new Map<string, BucketEntry>();
 
 function getKey(req: FastifyRequest): string | null {
   const user = req.appUser;
@@ -42,7 +18,6 @@ function getKey(req: FastifyRequest): string | null {
   return `rate:${user.user_id}`;
 }
 
-/** Clean expired buckets every 5 minutes. */
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of buckets) {
@@ -56,7 +31,7 @@ export async function rateLimitPlugin(app: FastifyInstance): Promise<void> {
     if (!key) return;
 
     const now = Date.now();
-    const limit = getLimit(req);
+    const limit = DEFAULT_LIMIT;
 
     let bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {

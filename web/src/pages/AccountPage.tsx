@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input.js';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card.js';
 import { Badge } from '@/components/ui/badge.js';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
-import { EmptyState } from '@/components/ui/empty-state.js';
+import { WebhooksPanel } from '../components/WebhooksPanel.js';
+import { AuditLogPanel } from '../components/AuditLogPanel.js';
 
 export function AccountPage() {
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
@@ -47,7 +48,7 @@ export function AccountPage() {
   try { const raw = localStorage.getItem('session_user'); if (raw) acct = JSON.parse(raw); } catch { /* ignore */ }
 
   return (
-    <div className="max-w-3xl px-7 py-6 font-sans">
+    <div className="max-w-4xl px-7 py-6 font-sans">
       <h1 className="font-heading text-xl font-bold mb-5">My Account</h1>
 
       {msg && (
@@ -131,8 +132,15 @@ export function AccountPage() {
         </CardContent>
       </Card>
 
+      <WebhooksPanel onFlash={flash} />
+
+      <AuditLogPanel
+        title="My activity"
+        description="Your invoice, approval, and webhook actions."
+      />
+
       {/* Transaction history */}
-      <Card>
+      <Card className="mt-4">
         <CardHeader>
           <CardTitle>Usage History</CardTitle>
         </CardHeader>

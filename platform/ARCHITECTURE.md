@@ -7,12 +7,13 @@ Index for how the backend is wired. Table columns live in [DATABASE.md](./DATABA
 | Tables, FKs, indexes | [DATABASE.md](./DATABASE.md) |
 | OCR pipeline | [src/ocr/README.md](./src/ocr/README.md) |
 | OCR cost math | [src/ocr/COST.md](./src/ocr/COST.md) |
-| Multi-tenancy & RBAC | [src/tenant/README.md](./src/tenant/README.md) |
 | Auth / tokens | [src/users/README.md](./src/users/README.md) |
 | Vendor registry | [src/vendor/README.md](./src/vendor/README.md) |
 | Analytics | [src/analytics/README.md](./src/analytics/README.md) |
 | Fraud | [src/fraud/README.md](./src/fraud/README.md) |
 | Email intake | [src/email-intake/README.md](./src/email-intake/README.md) |
+| Audit history | [src/audit/README.md](./src/audit/README.md) |
+| Webhooks | [src/webhook/README.md](./src/webhook/README.md) |
 | Frontend | [../web/ARCHITECTURE.md](../web/ARCHITECTURE.md) |
 
 ---
@@ -40,34 +41,30 @@ platform/src/
 ├── db/              # schema.ts (initModels + associations), migrate.ts
 ├── middleware/
 │   ├── auth.ts            # JWT + API key authentication
-│   ├── tenantContext.ts   # Resolves req.orgId + req.orgRole from OrgMember
+│   ├── rateLimit.ts       # Per-user 60 req/min
 │   └── errorHandler.ts   # Global Fastify error handler (AppError → HTTP)
 ├── ocr/             # pipeline, providers, parser, transformer, models, repo
 │   ├── route.ts           # Thin HTTP controller (338 lines)
 │   └── service/           # Business logic
 │       ├── invoiceService.ts  # All invoice operations (388 lines)
 │       └── exportService.ts   # CSV export logic
-├── tenant/          # Multi-tenancy (Phase 2)
-│   ├── models/            # Organization, OrgMember Sequelize models
-│   ├── repository.ts      # Org + member CRUD
-│   ├── service.ts         # Org lifecycle, member invite, role changes
-│   └── route.ts           # /api/orgs/* endpoints
 ├── users/           # auth, API keys, token ledger
 ├── vendor/          # vendor upsert from invoices
 ├── analytics/       # spend / cost KPIs
 ├── fraud/           # duplicate, GST, price, odometer checks
 ├── email-intake/    # IMAP → DRAFT bills
+├── audit/           # append-only activity log
+├── webhook/         # outbound signed POSTs
 ├── odometerOcr/     # standalone odometer extract
 ├── shared/
-│   ├── constants.ts       # Bill types, OCR statuses, roles
+│   ├── constants.ts       # Bill types, OCR statuses
 │   ├── errors.ts          # AppError hierarchy (NotFound, Validation, Forbidden, etc.)
-│   ├── roles.ts           # RBAC permission matrix (can() + permissionsFor())
 │   ├── settings.ts        # Pipeline settings
 │   ├── storage.ts         # GCS upload/download
 │   ├── cache.ts           # Analytics cache
 │   └── types.ts           # BillDoc, ParsedInvoiceData, etc.
 ├── routes/          # settings + config
-├── app.ts           # Fastify factory (auth → tenant → errorHandler → routes)
+├── app.ts           # Fastify factory (auth → errorHandler → routes)
 └── index.ts         # init DB, seed admin, listen
 ```
 
@@ -78,21 +75,20 @@ Models live in `{domain}/models/`. `db/schema.ts` is the only place that calls `
 ## Database Layer (code)
 
 - **`config/db.ts`** — singleton Sequelize from `DATABASE_URL`. Pool `max: 2` (Cloud Run). `pg` OID 1700 parser so NUMERIC is a JS number.
-- **`db/schema.ts`** — init order: Organization → Vendor → User → OrgMember → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential. Associations: Org↔OrgMember, Org↔Bill, Bill↔Vendor, Bill↔BillPart, User↔OrgMember, User↔ApiKey, User↔TokenTransaction.
-- **`db/migrate.ts`** — `CREATE EXTENSION pg_trgm` + `sync({ alter: true })`. Prefer sequelize-cli migrations in production.
-- **`shared/constants.ts`** — bill types, OCR statuses, roles, pagination, pricing defaults.
+- **`db/schema.ts`** — init order: Vendor → User → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential → AuditLog → WebhookEndpoint. Associations: Bill↔Vendor, Bill↔BillPart, User↔ApiKey, User↔TokenTransaction.
+- **`db/migrate.ts`** — drops retired org tables, then `CREATE EXTENSION pg_trgm` + `sync({ alter: true })`.
+- **`shared/constants.ts`** — bill types, OCR statuses, pagination, pricing defaults.
 
-Route → Service → Repository → Sequelize model → PostgreSQL. Repositories map camelCase rows ↔ snake_case domain docs (`BillDoc`, `UserDoc`, `OrgDoc`).
+Route → Service → Repository → Sequelize model → PostgreSQL. Repositories map camelCase rows ↔ snake_case domain docs (`BillDoc`, `UserDoc`).
 
 ## Request Lifecycle
 
 ```
 HTTP Request
   → authPlugin          (JWT/API key → req.appUser)
-  → tenantPlugin         (OrgMember lookup → req.orgId + req.orgRole)
   → route handler        (thin controller — parse request, call service)
-  → service layer        (business logic, validation, RBAC checks)
-  → repository           (Sequelize CRUD, scoped by orgId when present)
+  → service layer        (business logic, validation)
+  → repository           (Sequelize CRUD)
   → global errorHandler  (AppError → structured JSON response)
 ```
 
@@ -195,21 +191,11 @@ Gemini on Cloud Run uses Vertex + ADC (no `GEMINI_API_KEY`).
 | `GET/POST/DELETE` | `/api/auth/api-keys` | JWT |
 | `GET` | `/api/account` | JWT / key |
 | `GET` | `/api/account/transactions` | JWT / key |
+| `GET` | `/api/audit/logs` | JWT (own rows; admin sees all) |
+| `GET/POST/PATCH/DELETE` | `/api/webhooks` | JWT |
 | `GET/POST` | `/api/admin/users` | Admin |
 | `PATCH` | `/api/admin/users/:id/block` | Admin |
 | `POST` | `/api/admin/users/:id/tokens` | Admin |
-
-### Organizations (Multi-Tenancy)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/orgs` | Create organization (user becomes owner) |
-| `GET` | `/api/orgs/me` | Get current user's org + role |
-| `PATCH` | `/api/orgs` | Update org name/settings |
-| `GET` | `/api/orgs/members` | List org members |
-| `POST` | `/api/orgs/members` | Invite user to org |
-| `PATCH` | `/api/orgs/members/:userId/role` | Change member's role |
-| `DELETE` | `/api/orgs/members/:userId` | Remove member from org |
 
 ### Other
 
@@ -221,6 +207,16 @@ Gemini on Cloud Run uses Vertex + ADC (no `GEMINI_API_KEY`).
 | Settings | `/api/settings`, `/api/settings/providers/:name`, `/api/config` |
 | Odometer | `POST /api/odometer/extract`, `POST /api/odometer/batch` |
 | Health | `GET /api/health` |
+
+### Activity & webhooks
+
+| Area | Where in the UI | How it works |
+|------|-----------------|--------------|
+| My webhooks | **Account → Webhooks** | Store URL + events in `webhook_endpoints`. Invoice service POSTs a signed JSON body when that user uploads / completes / fails / approves / rejects / deletes a bill. |
+| My activity | **Account → My activity** | `GET /api/audit/logs` scoped to the current user. |
+| All activity | **Admin → Activity** | Same API; admins see every user. |
+
+Full write-up: [src/audit/README.md](./src/audit/README.md) and [src/webhook/README.md](./src/webhook/README.md).
 
 ---
 

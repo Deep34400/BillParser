@@ -1,5 +1,5 @@
 /**
- * WebhookEndpoint Sequelize model — stores webhook subscriptions per org.
+ * WebhookEndpoint Sequelize model — stores webhook subscriptions per user.
  */
 import { DataTypes, Model, type Sequelize } from 'sequelize';
 
@@ -13,7 +13,7 @@ export type WebhookEvent = typeof WEBHOOK_EVENTS[number];
 
 export interface WebhookEndpointAttributes {
   endpointId: string;
-  orgId: string;
+  userId: string;
   url: string;
   events: string[];
   secret: string;
@@ -25,7 +25,7 @@ export interface WebhookEndpointAttributes {
 
 export class WebhookEndpoint extends Model<WebhookEndpointAttributes> implements WebhookEndpointAttributes {
   declare endpointId: string;
-  declare orgId: string;
+  declare userId: string;
   declare url: string;
   declare events: string[];
   declare secret: string;
@@ -38,7 +38,7 @@ export class WebhookEndpoint extends Model<WebhookEndpointAttributes> implements
 export function initWebhookEndpointModel(seq: Sequelize): void {
   WebhookEndpoint.init({
     endpointId: { type: DataTypes.TEXT, primaryKey: true, field: 'endpoint_id' },
-    orgId: { type: DataTypes.TEXT, allowNull: false, field: 'org_id' },
+    userId: { type: DataTypes.TEXT, allowNull: false, field: 'user_id' },
     url: { type: DataTypes.TEXT, allowNull: false },
     events: { type: DataTypes.ARRAY(DataTypes.TEXT), allowNull: false },
     secret: { type: DataTypes.TEXT, allowNull: false },
@@ -51,7 +51,7 @@ export function initWebhookEndpointModel(seq: Sequelize): void {
     tableName: 'webhook_endpoints',
     timestamps: false,
     indexes: [
-      { fields: ['org_id'], name: 'webhooks_org_idx' },
+      { fields: ['user_id'], name: 'webhooks_user_idx' },
       { fields: ['active'], name: 'webhooks_active_idx' },
     ],
   });

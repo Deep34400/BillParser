@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, Building2, LogOut,
+  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, LogOut,
 } from 'lucide-react';
 import { api, type SessionUser } from '../api/client.js';
 import carrumLogo from '../assets/carrum-logo.svg';
@@ -19,7 +19,6 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
-  { label: 'Organization', to: '/organization', icon: Building2 },
   { label: 'Settings', to: '/settings', icon: Settings },
   { label: 'Account', to: '/account', icon: User },
 ];
@@ -68,11 +67,7 @@ export function Shell({ children, user, onLogout, onUserUpdate }: Props) {
   useEffect(() => { void refreshAccount(); }, [location.pathname, refreshAccount]);
 
   const isAdmin = liveUser.role === 'admin';
-  // Super admin: replace "Organization" with "Admin" (combined dashboard).
-  // Regular users: keep "Organization" (their own org management).
-  const secondary = isAdmin
-    ? [ADMIN_NAV, ...SECONDARY_NAV.filter((n) => n.to !== '/organization')]
-    : SECONDARY_NAV;
+  const secondary = isAdmin ? [ADMIN_NAV, ...SECONDARY_NAV] : SECONDARY_NAV;
   const balance = balanceNumber(liveUser.role, liveUser.token_balance);
   const unlimited = hasUnlimitedBalance(liveUser.role, liveUser.token_balance);
   const isHealthy = unlimited || balance > 0;

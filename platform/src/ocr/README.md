@@ -44,7 +44,7 @@ ocr/
 │   ├── exportService.ts          # CSV export (bills + line items)
 │   └── reconcileRange.ts         # Date range reconciliation
 ├── mapper.ts                     # Data transformations: ParsedData ↔ BillDoc ↔ FrontendInvoice
-├── repository.ts                 # PostgreSQL CRUD (Sequelize) — scoped by orgId
+├── repository.ts                 # PostgreSQL CRUD (Sequelize)
 ├── types/
 │   ├── invoice.ts                # Re-exports ParsedInvoiceData, BillDoc, etc. from shared
 │   ├── parser.ts                 # ValidationIssue, ParseResult
@@ -62,7 +62,7 @@ ocr/
 `POST /api/invoices/upload` → `route.ts` → `invoiceService.uploadInvoices()`:
 1. Validates the file (PDF, JPEG, PNG, or WebP)
 2. Uploads to Cloud Storage
-3. Creates a placeholder `BillDoc` with `ocr_status: 'PROCESSING'` and `org_id` from tenant context
+3. Creates a placeholder `BillDoc` with `ocr_status: 'PROCESSING'`
 4. Returns `HTTP 202` immediately — OCR runs in the background
 
 ### 2. Pipeline Orchestration
@@ -114,7 +114,7 @@ Each configured level in Settings is tried in order. The chain moves to the next
 
 ### 6. Mapping & Storage
 
-- `mapper.ts → mapParsedToBill()` — converts to `BillDoc` for PostgreSQL (accepts optional `orgId` for tenant scoping)
+- `mapper.ts → mapParsedToBill()` — converts to `BillDoc` for PostgreSQL
 - `mapper.ts → toApiParsed()` — stable API response contract (IMMUTABLE)
 - `mapper.ts → billToInvoice()` — frontend-ready shape
 - `models/bill.ts` + `models/billPart.ts` — Sequelize model definitions
@@ -130,8 +130,8 @@ All invoice business logic in one file. Route handlers call these functions — 
 
 | Function | What it does |
 |----------|-------------|
-| `listInvoices(filters)` | Paginated list with optional `orgId` scoping |
-| `getInvoiceCounts(orgId?)` | Status counts per org |
+| `listInvoices(filters)` | Paginated list |
+| `getInvoiceCounts()` | Status counts |
 | `getInvoice(id)` | Single invoice + parts |
 | `getInvoiceFile(id)` | Signed file URL from GCS |
 | `uploadInvoices(files, opts)` | Validate → store → create PROCESSING bill → trigger OCR |
@@ -147,12 +147,14 @@ All invoice business logic in one file. Route handlers call these functions — 
 | `syncOcr(buffer, opts)` | Synchronous OCR via API key |
 | `asyncOcr(buffer, opts)` | Async OCR via API key |
 
+Invoice create / complete / fail / approve / reject / delete also write `audit_logs` and fire user webhooks. See [../audit/README.md](../audit/README.md) and [../webhook/README.md](../webhook/README.md).
+
 ### `service/exportService.ts` (63 lines)
 
 | Function | What it does |
 |----------|-------------|
-| `exportBillsCsv(orgId?)` | Bills CSV filtered by org |
-| `exportLineItemsCsv(orgId?)` | Line items CSV |
+| `exportBillsCsv()` | Bills CSV |
+| `exportLineItemsCsv()` | Line items CSV |
 
 ### 7. Batch Reconciliation
 

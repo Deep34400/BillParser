@@ -14,6 +14,7 @@ import {
   setUserIntakeEmail,
 } from './service.js';
 import { clientUserView, sanitizeUser } from './dto.js';
+import { audit } from '../audit/service.js';
 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
 
@@ -120,6 +121,13 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(result.status).send({ success: false, message: result.error });
     }
 
+    audit('user:create', {
+      userId: req.appUser?.user_id,
+      resourceType: 'user',
+      resourceId: result.user_id,
+      details: { email: result.email, role: result.role },
+    });
+
     return reply.status(201).send({
       success: true,
       data: sanitizeUser(result),
@@ -137,12 +145,14 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/admin/users/:id/block', { preHandler: requireAdmin }, async (req, reply) => {
     const { id } = req.params as { id: string };
     await blockUser(id);
+    audit('user:block', { userId: req.appUser?.user_id, resourceType: 'user', resourceId: id });
     return reply.send({ success: true, message: 'User blocked' });
   });
 
   app.patch('/api/admin/users/:id/unblock', { preHandler: requireAdmin }, async (req, reply) => {
     const { id } = req.params as { id: string };
     await unblockUser(id);
+    audit('user:unblock', { userId: req.appUser?.user_id, resourceType: 'user', resourceId: id });
     return reply.send({ success: true, message: 'User unblocked' });
   });
 
@@ -153,6 +163,12 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ success: false, message: 'amount must be > 0' });
     }
     const tx = await addTokens(id, body.amount, body.description ?? 'Admin top-up');
+    audit('tokens:credit', {
+      userId: req.appUser?.user_id,
+      resourceType: 'user',
+      resourceId: id,
+      details: { amount: body.amount, description: body.description ?? 'Admin top-up' },
+    });
     return reply.send({ success: true, data: tx });
   });
 
@@ -167,6 +183,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     const body = req.body as { password?: string };
     const result = await resetPassword(id, body?.password ?? '');
     if (result.error) return reply.status(400).send({ success: false, message: result.error });
+    audit('user:reset_password', { userId: req.appUser?.user_id, resourceType: 'user', resourceId: id });
     return reply.send({ success: true, message: 'Password reset' });
   });
 

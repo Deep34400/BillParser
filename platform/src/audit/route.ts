@@ -12,9 +12,9 @@ export async function auditRoutes(app: FastifyInstance) {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
 
       const qs = req.query as Record<string, string | undefined>;
+      const isAdmin = req.appUser.role === 'admin';
       const result = await getAuditLogs({
-        orgId: req.orgId,
-        userId: qs.userId,
+        userId: isAdmin ? (qs.userId || undefined) : req.appUser.user_id,
         action: qs.action,
         resourceType: qs.resourceType,
         resourceId: qs.resourceId,

@@ -3,7 +3,7 @@
  *
  * Usage:
  *   import { audit } from '../audit/service.js';
- *   audit('invoice:upload', { orgId, userId, resourceType: 'bill', resourceId: billId });
+ *   audit('invoice:upload', { userId, resourceType: 'bill', resourceId: billId });
  *
  * Failures are silently logged to console — never block the main operation.
  */
@@ -12,7 +12,6 @@ import { insertAuditLog, listAuditLogs, type AuditListFilters, type AuditLogDoc 
 import type { AuditAction } from './models/index.js';
 
 export interface AuditEntry {
-  orgId?: string | null;
   userId?: string | null;
   resourceType?: string | null;
   resourceId?: string | null;
@@ -26,7 +25,6 @@ export interface AuditEntry {
 export function audit(action: AuditAction, entry: AuditEntry): void {
   const doc: AuditLogDoc = {
     log_id: uuid(),
-    org_id: entry.orgId ?? null,
     user_id: entry.userId ?? null,
     action,
     resource_type: entry.resourceType ?? null,

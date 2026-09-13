@@ -10,7 +10,6 @@ import { OdometerPage } from './pages/OdometerPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AccountPage } from './pages/AccountPage.js';
-import { OrgPage } from './pages/OrgPage.js';
 import { api, type SessionUser } from './api/client.js';
 import { setUsdToInr } from './lib/format.js';
 
@@ -63,7 +62,7 @@ export default function App() {
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/fraud" element={<FraudPage />} />
           <Route path="/odometer" element={<OdometerPage />} />
-          <Route path="/organization" element={<OrgPage />} />
+          <Route path="/organization" element={<Navigate to="/invoices" replace />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/account" element={<AccountPage />} />
           {user.role === 'admin' && <Route path="/admin" element={<AdminPage />} />}

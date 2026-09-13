@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Users, Building2, Mail, Shield, Plus, UserPlus, Crown, Eye, Bot,
-  Trash2, ShieldCheck, CircleSlash, Lock, Power, PowerOff,
+  Users, Mail, Plus, UserPlus, Crown, History,
+  ShieldCheck, CircleSlash, Lock, Power, PowerOff,
 } from 'lucide-react';
 import {
-  api, type UserInfo, type TokenTransaction, type OrgInfo, type OrgMemberInfo,
-  type OrgRole, type AuditLogEntry,
+  api, type UserInfo, type TokenTransaction,
 } from '../api/client.js';
 import { costFmt, usdToInrRate } from '../lib/format.js';
 import { formatBalance } from '../lib/balance.js';
@@ -25,25 +24,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog.js';
 import { Separator } from '@/components/ui/separator.js';
+import { AuditLogPanel } from '../components/AuditLogPanel.js';
 
-/* ── Helpers ─────────────────────────────────────────────────────────────── */
-
-const ROLE_META: Record<string, { label: string; icon: React.ElementType; variant: 'default' | 'success' | 'warning' | 'info' | 'muted' }> = {
-  owner:    { label: 'Owner',    icon: Crown,  variant: 'warning' },
-  admin:    { label: 'Admin',    icon: Shield, variant: 'info' },
-  reviewer: { label: 'Reviewer', icon: Eye,    variant: 'success' },
-  viewer:   { label: 'Viewer',   icon: Eye,    variant: 'muted' },
-  api_user: { label: 'API User', icon: Bot,    variant: 'default' },
-};
-
-const PLAN_META: Record<string, { label: string; variant: 'muted' | 'info' | 'success' | 'warning' }> = {
-  free:       { label: 'Free',       variant: 'muted' },
-  starter:    { label: 'Starter',    variant: 'info' },
-  business:   { label: 'Business',   variant: 'success' },
-  enterprise: { label: 'Enterprise', variant: 'warning' },
-};
-
-type AdminTab = 'users' | 'orgs' | 'email-intake';
+type AdminTab = 'users' | 'email-intake' | 'activity';
 
 function FlashMsg({ msg, type }: { msg: string; type: 'ok' | 'err' }) {
   if (!msg) return null;
@@ -62,8 +45,6 @@ export function AdminPage() {
 
   // ─── Data ──────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<UserInfo[]>([]);
-  const [allOrgs, setAllOrgs] = useState<(OrgInfo & { member_count: number })[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
 
   // ─── User management ──────────────────────────────────────────────────
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
@@ -77,14 +58,6 @@ export function AdminPage() {
   const [cIntakeEmail, setCIntakeEmail] = useState('');
   const [addAmt, setAddAmt] = useState('');
   const [addDesc, setAddDesc] = useState('');
-
-  // ─── Org management ───────────────────────────────────────────────────
-  const [showCreateOrg, setShowCreateOrg] = useState(false);
-  const [newOrgName, setNewOrgName] = useState('');
-  const [newOrgOwner, setNewOrgOwner] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
-  const [selectedOrgMembers, setSelectedOrgMembers] = useState<OrgMemberInfo[]>([]);
 
   // ─── Email intake ─────────────────────────────────────────────────────
   const [intakeEnabled, setIntakeEnabled] = useState(false);
@@ -117,10 +90,6 @@ export function AdminPage() {
     } catch { /* ignore */ }
   }, []);
 
-  const loadOrgs = useCallback(async () => {
-    try { const r = await api.adminListOrgs(); setAllOrgs(r.data ?? []); } catch { setAllOrgs([]); }
-  }, []);
-
   const loadIntakeConfig = useCallback(async () => {
     try {
       const cfg = await api.config();
@@ -137,8 +106,8 @@ export function AdminPage() {
   }, []);
 
   const loadAll = useCallback(async () => {
-    await Promise.allSettled([loadUsers(), loadOrgs(), loadIntakeConfig()]);
-  }, [loadUsers, loadOrgs, loadIntakeConfig]);
+    await Promise.allSettled([loadUsers(), loadIntakeConfig()]);
+  }, [loadUsers, loadIntakeConfig]);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
 
@@ -179,27 +148,6 @@ export function AdminPage() {
       setAddAmt(''); setAddDesc(''); flash('Balance added');
       await loadUsers(); const r = await api.adminUserTransactions(selectedUser); setTxs(r.data);
     } catch (e) { flash((e as Error).message, 'err'); }
-  };
-
-  // ─── Org actions ──────────────────────────────────────────────────────
-
-  const handleCreateOrg = async () => {
-    if (!newOrgName.trim()) return flash('Enter org name', 'err');
-    if (!newOrgOwner) return flash('Select an owner', 'err');
-    setCreating(true);
-    try {
-      await api.createOrg(newOrgName.trim(), newOrgOwner);
-      flash('Organization created!'); setNewOrgName(''); setNewOrgOwner(''); setShowCreateOrg(false);
-      await loadOrgs();
-    } catch (e) { flash((e as Error).message, 'err'); }
-    finally { setCreating(false); }
-  };
-
-  const handleSelectOrg = async (orgId: string) => {
-    if (selectedOrg === orgId) { setSelectedOrg(null); return; }
-    setSelectedOrg(orgId);
-    try { const r = await api.adminOrgMembers(orgId); setSelectedOrgMembers(r.data ?? []); }
-    catch { setSelectedOrgMembers([]); }
   };
 
   // ─── Email intake actions ─────────────────────────────────────────────
@@ -249,9 +197,6 @@ export function AdminPage() {
   const selUser = users.find((u) => u.user_id === selectedUser);
   const activeUsers = users.filter((u) => u.status === 'active');
   const blockedUsers = users.filter((u) => u.status === 'blocked');
-  const usersWithoutOrg = activeUsers; // simplified — all active users shown as potential owners
-  const userMap = new Map(users.map((u) => [u.user_id, u]));
-
   // ─── Tab button ───────────────────────────────────────────────────────
 
   const TabBtn = ({ id, icon: Icon, label, count }: { id: AdminTab; icon: React.ElementType; label: string; count?: number }) => (
@@ -276,7 +221,7 @@ export function AdminPage() {
           <h1 className="font-heading text-xl font-bold flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-primary" /> Platform Admin
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage users, organizations, billing, and platform settings.</p>
+          <p className="text-sm text-muted-foreground mt-1">Manage users, billing, and platform settings.</p>
         </div>
         <Badge variant="warning" className="gap-1"><Crown className="h-3 w-3" /> Super Admin</Badge>
       </div>
@@ -284,12 +229,11 @@ export function AdminPage() {
       <FlashMsg msg={msg} type={msgType} />
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 mb-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-5">
         {[
           { label: 'Users', value: users.length, icon: Users },
           { label: 'Active', value: activeUsers.length, icon: ShieldCheck },
           { label: 'Blocked', value: blockedUsers.length, icon: CircleSlash },
-          { label: 'Organizations', value: allOrgs.length, icon: Building2 },
           { label: 'Email Intake', value: intakeEnabled ? 'ON' : 'OFF', icon: Mail },
         ].map(({ label, value, icon: Icon }) => (
           <Card key={label}>
@@ -309,8 +253,8 @@ export function AdminPage() {
       {/* Tabs */}
       <div className="flex items-center gap-2 mb-5">
         <TabBtn id="users" icon={Users} label="Users" count={users.length} />
-        <TabBtn id="orgs" icon={Building2} label="Organizations" count={allOrgs.length} />
         <TabBtn id="email-intake" icon={Mail} label="Email Intake" />
+        <TabBtn id="activity" icon={History} label="Activity" />
       </div>
 
       <Separator className="mb-5" />
@@ -439,118 +383,6 @@ export function AdminPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
-       * TAB: ORGANIZATIONS
-       * ═══════════════════════════════════════════════════════════════════ */}
-      {tab === 'orgs' && (
-        <Card className="mb-4">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2"><Building2 className="h-4 w-4" /> All Organizations ({allOrgs.length})</CardTitle>
-                <CardDescription>Create orgs, assign owners. The owner manages their own members and settings.</CardDescription>
-              </div>
-              <Button onClick={() => setShowCreateOrg(!showCreateOrg)}><Plus className="h-4 w-4 mr-1" /> Create Org</Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {/* Create Org */}
-            {showCreateOrg && (
-              <div className="mb-4 p-4 rounded-lg border border-border bg-background space-y-3">
-                <p className="text-sm font-semibold">Create New Organization</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <Label>Organization Name</Label>
-                    <Input value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} placeholder="Acme Fleet Services" />
-                  </div>
-                  <div>
-                    <Label>Owner (user who will own this org)</Label>
-                    <Select value={newOrgOwner} onValueChange={setNewOrgOwner}>
-                      <SelectTrigger><SelectValue placeholder="Select owner…" /></SelectTrigger>
-                      <SelectContent>
-                        {usersWithoutOrg.map((u) => (
-                          <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => void handleCreateOrg()} disabled={creating}>
-                    {creating ? 'Creating…' : 'Create Organization'}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowCreateOrg(false)}>Cancel</Button>
-                </div>
-              </div>
-            )}
-
-            {allOrgs.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Organization</TableHead>
-                    <TableHead>Plan</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Members</TableHead>
-                    <TableHead className="text-right">Limit</TableHead>
-                    <TableHead>Created</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allOrgs.map((org) => {
-                    const planInfo = PLAN_META[org.plan] ?? PLAN_META.free;
-                    const isSelected = selectedOrg === org.org_id;
-                    return (
-                      <React.Fragment key={org.org_id}>
-                        <TableRow
-                          className={cn('cursor-pointer hover:bg-muted/50', isSelected && 'bg-secondary')}
-                          onClick={() => void handleSelectOrg(org.org_id)}
-                        >
-                          <TableCell>
-                            <div className="font-semibold">{org.name}</div>
-                            <div className="text-[11px] text-muted-foreground font-mono">{org.slug}</div>
-                          </TableCell>
-                          <TableCell><Badge variant={planInfo.variant}>{planInfo.label}</Badge></TableCell>
-                          <TableCell><Badge variant={org.status === 'active' ? 'success' : 'danger'}>{org.status}</Badge></TableCell>
-                          <TableCell className="text-right font-mono">{org.member_count}</TableCell>
-                          <TableCell className="text-right font-mono">{org.invoice_limit?.toLocaleString()}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{new Date(org.created_at).toLocaleDateString()}</TableCell>
-                        </TableRow>
-                        {isSelected && selectedOrgMembers.length > 0 && (
-                          <TableRow>
-                            <TableCell colSpan={6} className="bg-muted/50 py-3 px-6">
-                              <p className="text-xs font-semibold mb-2">Members of {org.name}:</p>
-                              <div className="flex flex-wrap gap-2">
-                                {selectedOrgMembers.map((m) => {
-                                  const user = userMap.get(m.user_id);
-                                  const roleMeta = ROLE_META[m.org_role] ?? ROLE_META.viewer;
-                                  return (
-                                    <div key={m.user_id} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5">
-                                      <span className="text-sm font-medium">{m.user_name ?? user?.name ?? m.user_id}</span>
-                                      <Badge variant={roleMeta.variant} className="text-[10px]">{roleMeta.label}</Badge>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Building2 className="h-10 w-10 text-muted-foreground mb-3" />
-                <h3 className="font-heading text-lg font-semibold">No Organizations Yet</h3>
-                <p className="mt-1 text-sm text-muted-foreground">Click "Create Org" to set up the first organization.</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════════
        * TAB: EMAIL INTAKE
        * ═══════════════════════════════════════════════════════════════════ */}
       {tab === 'email-intake' && (
@@ -645,6 +477,13 @@ export function AdminPage() {
         </>
       )}
 
+      {tab === 'activity' && (
+        <AuditLogPanel
+          title="Platform activity"
+          description="All users — uploads, OCR results, approvals, token credits, and webhook changes."
+        />
+      )}
+
       {/* ═══════════════════════════════════════════════════════════════════
        * CREATE USER DIALOG
        * ═══════════════════════════════════════════════════════════════════ */}
@@ -652,7 +491,7 @@ export function AdminPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Create New User</DialogTitle>
-            <DialogDescription>Create an account. You can then create an org and assign this user as owner.</DialogDescription>
+            <DialogDescription>Create an account. They can sign in with email and password.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="grid grid-cols-2 gap-3">

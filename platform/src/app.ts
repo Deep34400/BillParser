@@ -3,7 +3,6 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import jwt from '@fastify/jwt';
 import { authPlugin } from './middleware/auth.js';
-import { tenantPlugin } from './middleware/tenantContext.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { rateLimitPlugin } from './middleware/rateLimit.js';
 import { userRoutes } from './users/route.js';
@@ -14,7 +13,6 @@ import { vendorRoutes } from './vendor/route.js';
 import { configRoutes } from './routes/config.js';
 import { settingsRoutes } from './routes/settings.js';
 import { odometerRoutes } from './odometerOcr/route.js';
-import { tenantRoutes } from './tenant/route.js';
 import { auditRoutes } from './audit/route.js';
 import { webhookRoutes } from './webhook/route.js';
 
@@ -68,7 +66,6 @@ export async function buildApp() {
   await app.register(jwt, { secret: JWT_SECRET });
 
   await app.register(authPlugin);
-  await app.register(tenantPlugin);
   await app.register(rateLimitPlugin);
   app.setErrorHandler(errorHandler);
 
@@ -80,7 +77,6 @@ export async function buildApp() {
   await app.register(configRoutes);
   await app.register(settingsRoutes);
   await app.register(odometerRoutes);
-  await app.register(tenantRoutes);
   await app.register(auditRoutes);
   await app.register(webhookRoutes);
 

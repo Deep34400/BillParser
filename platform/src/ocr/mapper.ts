@@ -35,7 +35,6 @@ export function mapParsedToBill(
     storagePath?: string;
     rawOcrReference?: string;
     billType?: BillType;
-    orgId?: string;
     fleetId?: string;
     vehicleId?: string;
     costInfo?: OcrCostInfo;
@@ -60,7 +59,6 @@ export function mapParsedToBill(
 
   return {
     bill_id: billId,
-    org_id: opts.orgId ?? null,
     fleet_id: opts.fleetId ?? null,
     vehicle_id: opts.vehicleId ?? null,
 

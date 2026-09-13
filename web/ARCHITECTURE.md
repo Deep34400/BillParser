@@ -57,6 +57,8 @@ web/
 │   │   │   └── empty-state.tsx # Empty state with icon + action
 │   │   │
 │   │   ├── Shell.tsx          # App shell (sidebar nav + header)
+│   │   ├── WebhooksPanel.tsx  # Create / pause / delete webhook endpoints
+│   │   ├── AuditLogPanel.tsx  # Activity history table
 │   │   ├── Toast.tsx          # Toast notification (3 variants)
 │   │   ├── StatusDot.tsx      # OCR status indicator with pulse animation
 │   │   ├── ConfidenceBar.tsx  # Confidence score progress bar
@@ -70,7 +72,7 @@ web/
 │   ├── pages/                 # Route-level page components
 │   │   ├── LoginPage.tsx      # ✅ Converted — shadcn Card/Input/Button
 │   │   ├── InvoicesPage.tsx   # ✅ Converted — shadcn Table/Badge/Button
-│   │   ├── AccountPage.tsx    # ✅ Converted — shadcn Card/Table/Badge
+│   │   ├── AccountPage.tsx    # API keys, webhooks, my activity, usage
 │   │   ├── FraudPage.tsx      # ✅ Converted — shadcn Card/Badge/EmptyState
 │   │   ├── AnalyticsPage.tsx  # ✅ Converted — shadcn Tabs/Card/Table
 │   │   ├── OdometerPage.tsx   # ✅ Converted — shadcn Card/Badge/EmptyState
@@ -165,7 +167,7 @@ Workshops and Vehicles views have debounced search inputs (300ms) that hit serve
 | Shell.tsx | ✅ Converted | Tailwind + shadcn Button/Separator |
 | LoginPage.tsx | ✅ Converted | shadcn Card/Input/Label/Button |
 | InvoicesPage.tsx | ✅ Converted | shadcn Table/Badge/Button/Input/Card |
-| AccountPage.tsx | ✅ Converted | shadcn Card/Table/Badge/Button/Input |
+| AccountPage.tsx | ✅ Converted | API keys, webhooks, activity, usage |
 | FraudPage.tsx | ✅ Converted | shadcn Card/Badge/Button/EmptyState |
 | AnalyticsPage.tsx | ✅ Converted | shadcn Tabs/Card/Table/Input/Button |
 | OdometerPage.tsx | ✅ Converted | shadcn Card/Badge/Button/EmptyState |

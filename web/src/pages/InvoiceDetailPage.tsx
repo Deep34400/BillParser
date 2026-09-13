@@ -511,7 +511,7 @@ export function InvoiceDetailPage() {
                 {inv.approvalStatus === 'pending' && (
                   <>
                     <span style={{ fontSize: 11, fontWeight: 700, color: T.amber, padding: '4px 8px', background: '#fff8e6', borderRadius: 6, border: '1px solid #fde2b3' }}>
-                      {inv.approvalStep === 'owner' ? 'Step 2/2 · Waiting for Owner' : 'Step 1/2 · Waiting for Org Admin'}
+                      Pending approval
                     </span>
                     <button
                       onClick={async () => {
@@ -523,7 +523,7 @@ export function InvoiceDetailPage() {
                       }}
                       style={{ ...actionBtn, background: '#e6f7ef', color: T.green, border: '1px solid #b7e8cf', fontWeight: 600 }}
                     >
-                      ✓ {inv.approvalStep === 'owner' ? 'Final approve' : 'Approve'}
+                      ✓ Approve
                     </button>
                     <button
                       onClick={async () => {

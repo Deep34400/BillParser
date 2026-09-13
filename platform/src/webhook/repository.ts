@@ -5,7 +5,7 @@ import { WebhookEndpoint } from './models/index.js';
 
 export interface WebhookEndpointDoc {
   endpoint_id: string;
-  org_id: string;
+  user_id: string;
   url: string;
   events: string[];
   secret: string;
@@ -18,7 +18,7 @@ export interface WebhookEndpointDoc {
 function rowToDoc(row: WebhookEndpoint): WebhookEndpointDoc {
   return {
     endpoint_id: row.endpointId,
-    org_id: row.orgId,
+    user_id: row.userId,
     url: row.url,
     events: row.events,
     secret: row.secret,
@@ -32,7 +32,7 @@ function rowToDoc(row: WebhookEndpoint): WebhookEndpointDoc {
 export async function createWebhook(doc: WebhookEndpointDoc): Promise<WebhookEndpointDoc> {
   await WebhookEndpoint.create({
     endpointId: doc.endpoint_id,
-    orgId: doc.org_id,
+    userId: doc.user_id,
     url: doc.url,
     events: doc.events,
     secret: doc.secret,
@@ -44,8 +44,8 @@ export async function createWebhook(doc: WebhookEndpointDoc): Promise<WebhookEnd
   return doc;
 }
 
-export async function listWebhooks(orgId: string): Promise<WebhookEndpointDoc[]> {
-  const rows = await WebhookEndpoint.findAll({ where: { orgId }, order: [['createdAt', 'DESC']] });
+export async function listWebhooks(userId: string): Promise<WebhookEndpointDoc[]> {
+  const rows = await WebhookEndpoint.findAll({ where: { userId }, order: [['createdAt', 'DESC']] });
   return rows.map(rowToDoc);
 }
 
@@ -67,10 +67,9 @@ export async function deleteWebhook(endpointId: string): Promise<void> {
   await WebhookEndpoint.destroy({ where: { endpointId } });
 }
 
-/** Find all active endpoints subscribed to a specific event for an org. */
-export async function findActiveWebhooksForEvent(orgId: string, event: string): Promise<WebhookEndpointDoc[]> {
+export async function findActiveWebhooksForEvent(userId: string, event: string): Promise<WebhookEndpointDoc[]> {
   const rows = await WebhookEndpoint.findAll({
-    where: { orgId, active: true },
+    where: { userId, active: true },
   });
   return rows.filter((r) => r.events.includes(event)).map(rowToDoc);
 }

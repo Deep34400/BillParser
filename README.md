@@ -1,6 +1,6 @@
 # BillParser — Fleet Invoice OCR SaaS
 
-Multi-tenant SaaS platform for extracting structured data from automotive invoices (PDF/image), with approval workflows, RBAC, analytics, and fraud detection.
+SaaS platform for extracting structured data from automotive invoices (PDF/image), with approval workflows, analytics, and fraud detection.
 
 ## Architecture
 
@@ -10,10 +10,10 @@ Multi-tenant SaaS platform for extracting structured data from automotive invoic
 │   Tailwind CSS + shadcn/ui · Lucide Icons · Vite 5 · TypeScript    │
 ├──────────────────────────────────────────────────────────────────────┤
 │                          API (Fastify 5)                            │
-│   JWT + API Key Auth → Tenant Context → RBAC → Controller → Service│
+│   JWT + API Key Auth → Controller → Service                         │
 ├──────────────────────────────────────────────────────────────────────┤
 │                        Business Logic                               │
-│   OCR Pipeline · Invoice Service · Tenant Service · Export Service  │
+│   OCR Pipeline · Invoice Service · Audit · Webhooks · Export        │
 ├──────────────────────────────────────────────────────────────────────┤
 │                        Data Layer                                   │
 │   PostgreSQL + Sequelize 6 · Google Cloud Storage                   │
@@ -28,13 +28,14 @@ Multi-tenant SaaS platform for extracting structured data from automotive invoic
 | Feature | Description |
 |---------|-------------|
 | **Multi-Provider OCR** | Fallback chain tries multiple AI providers; reconciliation picks the best result |
-| **Multi-Tenancy** | Organizations with isolated data; `org_id` on all bills |
-| **RBAC** | 5 roles — owner, admin, reviewer, viewer, api_user — with 24 granular permissions |
+| **Auth** | JWT + API keys; admin vs regular user |
 | **Indian GST** | Seller/buyer GSTIN correction, PAN derivation, intra/inter-state tax handling |
 | **Fraud Detection** | Duplicate invoices, GST anomalies, price outliers, odometer rollback |
 | **Analytics** | Spend by workshop/vehicle/month, cost-per-km, OCR API cost tracking |
 | **Token Billing** | Per-user token balance with atomic debit, audit trail |
 | **Email Intake** | IMAP polling for invoices sent via email |
+| **Audit history** | Every upload, OCR result, approval, and admin action on Account / Admin |
+| **Webhooks** | Signed HTTPS POSTs when invoices are uploaded, completed, approved, or deleted |
 | **Modern UI** | Tailwind CSS + shadcn/ui components, Lucide icons, responsive layout |
 
 ## Docs
@@ -42,9 +43,10 @@ Multi-tenant SaaS platform for extracting structured data from automotive invoic
 | Doc | What it covers |
 |-----|----------------|
 | [platform/ARCHITECTURE.md](platform/ARCHITECTURE.md) | System overview, API list, deployment |
-| [platform/DATABASE.md](platform/DATABASE.md) | All 10 tables, FKs, indexes |
+| [platform/DATABASE.md](platform/DATABASE.md) | All tables (including audit_logs, webhook_endpoints), FKs, indexes |
+| [platform/src/audit/README.md](platform/src/audit/README.md) | Activity history (how it is written and shown) |
+| [platform/src/webhook/README.md](platform/src/webhook/README.md) | Outbound webhooks + HMAC verification |
 | [platform/src/ocr/README.md](platform/src/ocr/README.md) | OCR pipeline (how the code runs) |
-| [platform/src/tenant/README.md](platform/src/tenant/README.md) | Multi-tenancy, organizations, RBAC |
 | [platform/src/users/README.md](platform/src/users/README.md) | Auth, API keys, token billing |
 | [platform/src/vendor/README.md](platform/src/vendor/README.md) | Vendor matching |
 | [platform/src/analytics/README.md](platform/src/analytics/README.md) | KPIs and spend |
@@ -95,7 +97,7 @@ cd web && npm test
 │   └── src/
 │       ├── config/          # Database, env, GCS
 │       ├── db/              # Schema init + migrations
-│       ├── middleware/       # Auth, tenant context, error handler
+│       ├── middleware/       # Auth, error handler, rate limit
 │       ├── ocr/             # OCR pipeline + invoice CRUD
 │       │   ├── models/      # Bill, BillPart Sequelize models
 │       │   ├── pipeline/    # Single, Split, FallbackChain
@@ -103,20 +105,16 @@ cd web && npm test
 │       │   ├── parser/      # JSON repair + structuring
 │       │   ├── transformer/ # Normalize, validate, review
 │       │   └── service/     # InvoiceService, ExportService
-│       ├── tenant/          # Multi-tenancy (Phase 2)
-│       │   ├── models/      # Organization, OrgMember
-│       │   ├── repository.ts
-│       │   ├── service.ts
-│       │   └── route.ts
 │       ├── users/           # Auth, API keys, token billing
 │       ├── vendor/          # Vendor matching
 │       ├── analytics/       # Spend KPIs
 │       ├── fraud/           # Anomaly detection
 │       ├── email-intake/    # IMAP poller
+│       ├── audit/           # Activity history
+│       ├── webhook/         # Signed outbound events
 │       ├── odometerOcr/     # Standalone odometer OCR
-│       ├── shared/          # Types, constants, errors, roles, settings
-│       │   ├── errors.ts    # AppError hierarchy
-│       │   └── roles.ts     # RBAC permission matrix
+│       ├── shared/          # Types, constants, errors, settings
+│       │   └── errors.ts    # AppError hierarchy
 │       ├── routes/          # Settings + config
 │       ├── app.ts           # Fastify app factory
 │       └── index.ts         # Boot: init DB, seed admin, listen

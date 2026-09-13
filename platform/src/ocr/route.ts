@@ -22,8 +22,6 @@ import {
 import { exportInvoicesCsv, exportLineItemsCsv } from './service/exportService.js';
 import { bearerFromRequest } from '../middleware/auth.js';
 import { isPdf, isImage } from '../shared/storage.js';
-import { can } from '../shared/roles.js';
-import type { OrgRole } from '../tenant/models/index.js';
 
 export async function billRoutes(app: FastifyInstance) {
 
@@ -40,7 +38,6 @@ export async function billRoutes(app: FastifyInstance) {
         needsReview: qs.needsReview === '1' || qs.needsReview === 'true',
         completed: qs.completed === '1' || qs.completed === 'true',
         reviewCode: qs.review_code,
-        orgId: req.orgId,
       });
     } catch (err) {
       req.log.error(err, 'Failed to list invoices');
@@ -165,7 +162,7 @@ export async function billRoutes(app: FastifyInstance) {
         }
       }
 
-      return await uploadInvoices(files, req.appUser.user_id, req.orgId);
+      return await uploadInvoices(files, req.appUser.user_id);
     } catch (err) {
       return reply.code(500).send({ error: 'Upload failed' });
     }
@@ -183,7 +180,7 @@ export async function billRoutes(app: FastifyInstance) {
       }
       const body = req.body as { sources?: string[] } | undefined;
       const sources = body?.sources ?? [];
-      return await importFromUrls(sources, req.appUser?.user_id, req.orgId);
+      return await importFromUrls(sources, req.appUser?.user_id);
     } catch (err) {
       return reply.code(500).send({ error: 'Import failed' });
     }
@@ -206,7 +203,7 @@ export async function billRoutes(app: FastifyInstance) {
   app.post('/api/invoices/:id/cancel', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
-      await cancelInvoice(id);
+      await cancelInvoice(id, req.appUser?.user_id);
       return { ok: true };
     } catch (err) {
       return reply.code(500).send({ error: 'Cancel failed' });
@@ -232,7 +229,7 @@ export async function billRoutes(app: FastifyInstance) {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
       const { id } = req.params as { id: string };
       await submitForApproval(id, req.appUser.user_id);
-      return { success: true, message: 'Submitted — waiting for Org Admin' };
+      return { success: true, message: 'Submitted — pending approval' };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ success: false, message: (err as Error).message });
@@ -242,19 +239,13 @@ export async function billRoutes(app: FastifyInstance) {
   app.post('/api/invoices/:id/approve', async (req, reply) => {
     try {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
-      if (req.appUser.role !== 'admin' && req.orgRole && !can(req.orgRole as OrgRole, 'invoice:approve')) {
-        return reply.status(403).send({ success: false, message: 'You do not have permission to approve invoices' });
-      }
       const { id } = req.params as { id: string };
-      const result = await approveInvoice(id, req.appUser.user_id, {
-        isSuperAdmin: req.appUser.role === 'admin',
-        orgRole: req.orgRole ?? null,
-      });
+      const result = await approveInvoice(id, req.appUser.user_id);
       return {
         success: true,
         approved: result.approved,
         nextStep: result.nextStep,
-        message: result.approved ? 'Invoice approved' : 'Signed — waiting for Owner',
+        message: result.approved ? 'Invoice approved' : 'Signed — pending approval',
       };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
@@ -265,9 +256,6 @@ export async function billRoutes(app: FastifyInstance) {
   app.post('/api/invoices/:id/reject', async (req, reply) => {
     try {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
-      if (req.appUser.role !== 'admin' && req.orgRole && !can(req.orgRole as OrgRole, 'invoice:approve')) {
-        return reply.status(403).send({ success: false, message: 'You do not have permission to reject invoices' });
-      }
       const { id } = req.params as { id: string };
       const body = req.body as { reason?: string };
       await rejectInvoice(id, req.appUser.user_id, body.reason ?? '');
@@ -296,7 +284,7 @@ export async function billRoutes(app: FastifyInstance) {
         invoiceDate: body.invoiceDate as string | undefined,
         totalAmount: body.totalAmount as number | undefined,
         subtotal: body.subtotal as number | undefined,
-      });
+      }, req.appUser?.user_id);
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
       return reply.code(code).send({ error: 'Update failed' });
@@ -306,7 +294,7 @@ export async function billRoutes(app: FastifyInstance) {
   app.delete('/api/invoices/:id', async (req, reply) => {
     try {
       const { id } = req.params as { id: string };
-      await deleteInvoice(id);
+      await deleteInvoice(id, req.appUser?.user_id);
       return { ok: true };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;

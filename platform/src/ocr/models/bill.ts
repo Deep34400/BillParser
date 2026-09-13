@@ -9,7 +9,6 @@ export type ApprovalStatus = typeof APPROVAL_STATUSES[number];
 
 export interface BillAttributes {
   billId: string;
-  orgId: string | null;
   fleetId: string | null;
   vehicleId: string | null;
   billType: string;
@@ -98,7 +97,6 @@ export interface BillAttributes {
 
 export class Bill extends Model<BillAttributes> implements BillAttributes {
   declare billId: string;
-  declare orgId: string | null;
   declare fleetId: string | null;
   declare vehicleId: string | null;
   declare billType: string;
@@ -188,7 +186,6 @@ export class Bill extends Model<BillAttributes> implements BillAttributes {
 export function initBillModel(seq: Sequelize): void {
   Bill.init({
     billId: { type: DataTypes.TEXT, primaryKey: true, field: 'bill_id' },
-    orgId: { type: DataTypes.TEXT, field: 'org_id', references: { model: 'organizations', key: 'org_id' } },
     fleetId: { type: DataTypes.TEXT, field: 'fleet_id' },
     vehicleId: { type: DataTypes.TEXT, field: 'vehicle_id' },
     billType: { type: DataTypes.TEXT, allowNull: false, field: 'bill_type', validate: { isIn: [BILL_TYPES] } },
@@ -282,7 +279,6 @@ export function initBillModel(seq: Sequelize): void {
       { fields: ['vehicle_id'], name: 'bills_vehicle_idx' },
       { fields: ['vendor_id'], name: 'bills_vendor_idx' },
       { fields: ['invoice_number', 'vendor_gstin'], name: 'bills_dup_idx' },
-      { fields: ['org_id', { name: 'updated_at', order: 'DESC' }], name: 'bills_org_updated_idx' },
     ],
   });
 }

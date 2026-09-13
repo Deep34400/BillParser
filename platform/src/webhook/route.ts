@@ -7,19 +7,11 @@ import { WEBHOOK_EVENTS } from './models/index.js';
 
 export async function webhookRoutes(app: FastifyInstance) {
 
-  /** GET /api/webhooks — list webhook endpoints for current org. */
+  /** GET /api/webhooks — list webhook endpoints for the current user. */
   app.get('/api/webhooks', async (req, reply) => {
     try {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
-      if (!req.orgId) {
-        // Super admin without org — return empty list with events metadata
-        if (req.appUser.role === 'admin') {
-          return { success: true, data: [], metadata: { availableEvents: WEBHOOK_EVENTS } };
-        }
-        return reply.code(404).send({ success: false, message: 'No organization' });
-      }
-
-      const endpoints = await listEndpoints(req.orgId);
+      const endpoints = await listEndpoints(req.appUser.user_id);
       return { success: true, data: endpoints, metadata: { availableEvents: WEBHOOK_EVENTS } };
     } catch (err) {
       return reply.code(500).send({ success: false, message: (err as Error).message });
@@ -30,13 +22,12 @@ export async function webhookRoutes(app: FastifyInstance) {
   app.post('/api/webhooks', async (req, reply) => {
     try {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
-      if (!req.orgId) return reply.code(404).send({ success: false, message: 'No organization' });
 
       const body = req.body as { url: string; events: string[]; description?: string };
       if (!body.url) return reply.code(400).send({ success: false, message: 'url is required' });
       if (!body.events?.length) return reply.code(400).send({ success: false, message: 'events array is required' });
 
-      const endpoint = await createEndpoint(req.orgId, body.url, body.events, body.description);
+      const endpoint = await createEndpoint(req.appUser.user_id, body.url, body.events, body.description);
       return { success: true, data: endpoint };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
@@ -51,7 +42,7 @@ export async function webhookRoutes(app: FastifyInstance) {
 
       const { id } = req.params as { id: string };
       const body = req.body as { active: boolean };
-      await toggleEndpoint(id, body.active);
+      await toggleEndpoint(id, req.appUser.user_id, body.active);
       return { success: true };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;
@@ -65,7 +56,7 @@ export async function webhookRoutes(app: FastifyInstance) {
       if (!req.appUser) return reply.status(401).send({ success: false, message: 'Authentication required' });
 
       const { id } = req.params as { id: string };
-      await removeEndpoint(id);
+      await removeEndpoint(id, req.appUser.user_id);
       return { success: true };
     } catch (err) {
       const code = (err as any)?.statusCode ?? 500;

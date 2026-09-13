@@ -6,7 +6,6 @@ import { AuditLog } from './models/index.js';
 
 export interface AuditLogDoc {
   log_id: string;
-  org_id: string | null;
   user_id: string | null;
   action: string;
   resource_type: string | null;
@@ -19,7 +18,6 @@ export interface AuditLogDoc {
 function rowToDoc(row: AuditLog): AuditLogDoc {
   return {
     log_id: row.logId,
-    org_id: row.orgId,
     user_id: row.userId,
     action: row.action,
     resource_type: row.resourceType,
@@ -33,7 +31,6 @@ function rowToDoc(row: AuditLog): AuditLogDoc {
 export async function insertAuditLog(doc: AuditLogDoc): Promise<void> {
   await AuditLog.create({
     logId: doc.log_id,
-    orgId: doc.org_id,
     userId: doc.user_id,
     action: doc.action,
     resourceType: doc.resource_type,
@@ -45,7 +42,6 @@ export async function insertAuditLog(doc: AuditLogDoc): Promise<void> {
 }
 
 export interface AuditListFilters {
-  orgId?: string;
   userId?: string;
   action?: string;
   resourceType?: string;
@@ -56,7 +52,6 @@ export interface AuditListFilters {
 
 export async function listAuditLogs(filters: AuditListFilters): Promise<{ logs: AuditLogDoc[]; total: number }> {
   const where: Record<string, unknown> = {};
-  if (filters.orgId) where.orgId = filters.orgId;
   if (filters.userId) where.userId = filters.userId;
   if (filters.action) where.action = filters.action;
   if (filters.resourceType) where.resourceType = filters.resourceType;

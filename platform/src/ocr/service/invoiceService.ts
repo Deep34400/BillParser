@@ -24,9 +24,24 @@ import { upsertVendorFromInvoice } from '../../vendor/vendorService.js';
 import { deductTokens, trackOcrCost } from '../../users/service.js';
 import { reconcileBillsInCreatedAtRange } from './reconcileRange.js';
 import {
-  NotFoundError, ValidationError, InsufficientBalanceError, UnsupportedFileError, ForbiddenError,
+  NotFoundError, ValidationError, InsufficientBalanceError, UnsupportedFileError,
 } from '../../shared/errors.js';
-import { enforceUsageLimit } from '../../tenant/usage.js';
+import { audit } from '../../audit/service.js';
+import type { AuditAction } from '../../audit/models/index.js';
+import { dispatchWebhookEvent } from '../../webhook/service.js';
+import type { WebhookEvent } from '../../webhook/models/index.js';
+
+function recordActivity(
+  userId: string | undefined,
+  action: AuditAction,
+  event: WebhookEvent | null,
+  billId: string,
+  details?: Record<string, unknown>,
+): void {
+  if (!userId) return;
+  audit(action, { userId, resourceType: 'bill', resourceId: billId, details: details ?? null });
+  if (event) dispatchWebhookEvent(userId, event, { billId, ...(details ?? {}) });
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -49,7 +64,6 @@ export interface InvoiceListFilters {
   needsReview?: boolean;
   completed?: boolean;
   reviewCode?: string;
-  orgId?: string;
 }
 
 export interface ReconcileRangeParams {
@@ -187,11 +201,15 @@ function processInBackground(
         + `struct=${providers.structuring}, parts=${parts.length}, `
         + `$${costInfo.total_cost_usd.toFixed(4)})`,
       );
+      recordActivity(userId, 'invoice:complete', 'invoice.completed', billId, {
+        fileName, status: bill.ocr_status, costUsd: costInfo.total_cost_usd,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.error(`[OCR] ${billId} — FAILED after ${elapsed}s:`, msg);
       await updateBillStatus(billId, 'FAILED', { processing_status: msg }).catch(() => {});
+      recordActivity(userId, 'invoice:fail', 'invoice.failed', billId, { fileName, error: msg });
     }
   })();
 }
@@ -235,7 +253,7 @@ async function chargeUserForOcr(
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-/** List invoices with pagination and filtering. Scoped to org when orgId present. */
+/** List invoices with pagination and filtering. */
 export async function listInvoices(filters: InvoiceListFilters) {
   const page = Math.max(Number(filters.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(filters.pageSize) || 10, 1), 100);
@@ -253,7 +271,6 @@ export async function listInvoices(filters: InvoiceListFilters) {
     needsReview: undefined,
     excludeNeedsReview: undefined,
     reviewCode,
-    orgId: filters.orgId,
     q,
   });
 
@@ -348,19 +365,13 @@ export async function getInvoiceFile(billId: string): Promise<
 /**
  * Upload one or more invoices. Validates each file, uploads to storage,
  * creates a PROCESSING bill, and starts OCR in the background.
- * When orgId is provided, the bill is scoped to that organization.
  */
-export async function uploadInvoices(files: UploadedFile[], userId?: string, orgId?: string): Promise<UploadResult> {
+export async function uploadInvoices(files: UploadedFile[], userId?: string): Promise<UploadResult> {
   const created: string[] = [];
   const rejected: { name: string; reason: string }[] = [];
 
   if (files.length === 0) {
     return { created: [], duplicates: [], rejected: [{ name: '(none)', reason: 'No files in upload' }] };
-  }
-
-  // Enforce plan usage limit if user belongs to an org
-  if (orgId) {
-    await enforceUsageLimit(orgId, files.length);
   }
 
   for (const file of files) {
@@ -383,13 +394,13 @@ export async function uploadInvoices(files: UploadedFile[], userId?: string, org
       const initialBill = mapParsedToBill(billId, {} as ParsedInvoiceData, {
         fileUrl: publicUrl,
         storagePath,
-        orgId,
       });
       initialBill.ocr_status = 'PROCESSING';
       await applyPipelineSettings(initialBill);
       await createBill(initialBill);
 
       created.push(billId);
+      recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { fileName: file.name });
       processInBackground(billId, file.buf, file.name, publicUrl, storagePath, userId);
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Upload failed';
@@ -402,7 +413,7 @@ export async function uploadInvoices(files: UploadedFile[], userId?: string, org
 }
 
 /** Import invoices from URLs. Downloads each, validates, and starts OCR. */
-export async function importFromUrls(sources: string[], userId?: string, orgId?: string): Promise<UploadResult> {
+export async function importFromUrls(sources: string[], userId?: string): Promise<UploadResult> {
   const created: string[] = [];
   const rejected: string[] = [];
 
@@ -424,13 +435,13 @@ export async function importFromUrls(sources: string[], userId?: string, orgId?:
       const initialBill = mapParsedToBill(billId, {} as ParsedInvoiceData, {
         fileUrl: publicUrl,
         storagePath,
-        orgId,
       });
       initialBill.ocr_status = 'PROCESSING';
       await applyPipelineSettings(initialBill);
       await createBill(initialBill);
 
       created.push(billId);
+      recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { fileName, sourceUrl: url });
       processInBackground(billId, buf, fileName, publicUrl, storagePath, userId);
     } catch {
       rejected.push(url);
@@ -452,12 +463,14 @@ export async function reextractInvoice(billId: string, userId?: string): Promise
   const fileName = (bill as { original_filename?: string }).original_filename
     ?? bill.storage_path.split('/').pop()
     ?? `bill-${billId}`;
+  recordActivity(userId, 'invoice:reextract', null, billId, { fileName });
   processInBackground(billId, stored.buf, fileName, bill.file_url ?? '', bill.storage_path, userId);
 }
 
 /** Cancel a processing invoice. */
-export async function cancelInvoice(billId: string): Promise<void> {
+export async function cancelInvoice(billId: string, userId?: string): Promise<void> {
   await updateBill(billId, { ocr_status: 'FAILED', processing_status: 'Cancelled by user' });
+  recordActivity(userId, 'invoice:cancel', 'invoice.failed', billId, { reason: 'Cancelled by user' });
 }
 
 /** Process a DRAFT bill (from email intake). */
@@ -477,8 +490,8 @@ export async function processDraft(billId: string, userId?: string): Promise<voi
 }
 
 /** Human correction — update fields and mark as VERIFIED. */
-export async function updateInvoice(billId: string, changes: InvoiceUpdate): Promise<FrontendInvoice> {
-  const bill = await getInvoice(billId);
+export async function updateInvoice(billId: string, changes: InvoiceUpdate, userId?: string): Promise<FrontendInvoice> {
+  await getInvoice(billId);
   const updates: Record<string, unknown> = {};
 
   if (changes.vendorName !== undefined) updates.vendor_name = changes.vendorName;
@@ -490,6 +503,7 @@ export async function updateInvoice(billId: string, changes: InvoiceUpdate): Pro
 
   updates.ocr_status = 'VERIFIED';
   await updateBill(billId, updates as any);
+  recordActivity(userId, 'invoice:edit', null, billId, { fields: Object.keys(changes) });
 
   const updated = await getBill(billId);
   const parts = await getPartsForBill(billId);
@@ -497,11 +511,12 @@ export async function updateInvoice(billId: string, changes: InvoiceUpdate): Pro
 }
 
 /** Delete an invoice and its line items. */
-export async function deleteInvoice(billId: string): Promise<void> {
-  const bill = await getInvoice(billId);
+export async function deleteInvoice(billId: string, userId?: string): Promise<void> {
+  await getInvoice(billId);
   await deletePartsForBill(billId);
   await deleteBill(billId);
   cacheInvalidate('analytics');
+  recordActivity(userId, 'invoice:delete', 'invoice.deleted', billId);
 }
 
 /** Run bulk actions (delete, reextract) on multiple invoices. */
@@ -510,6 +525,7 @@ export async function bulkAction(action: string, ids: string[], userId?: string)
     for (const id of ids) {
       await deletePartsForBill(id);
       await deleteBill(id);
+      recordActivity(userId, 'invoice:bulk_delete', 'invoice.deleted', id);
     }
     cacheInvalidate('analytics');
   } else if (action === 'reextract') {
@@ -570,6 +586,10 @@ export async function syncOcr(
   bill.fallback_attempts = fallbackAttempts;
   bill.fallback_history = fallbackHistory;
   await createBill(bill);
+  recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { source: 'sync-ocr' });
+  recordActivity(userId, 'invoice:complete', 'invoice.completed', billId, {
+    status: bill.ocr_status, source: 'sync-ocr',
+  });
 
   const parts = extractPartsFromParsed(billId, result.parsed);
   await saveBillParts(parts);
@@ -635,6 +655,7 @@ export async function asyncOcr(
   });
   initialBill.ocr_status = 'PROCESSING';
   await createBill(initialBill);
+  recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { source: 'async-ocr' });
 
   processInBackground(billId, buf, 'api-upload.pdf', publicUrl, storagePath, userId);
 
@@ -643,13 +664,6 @@ export async function asyncOcr(
 
 // ─── Approval Workflow ──────────────────────────────────────────────────────
 
-/**
- * Approval cycle (hierarchy):
- *   1. Member submits  → waiting for Org Admin
- *   2. Org Admin signs → waiting for Owner
- *   3. Owner signs     → approved
- * Super admin can final-approve at any hop. Owner can also skip the admin hop.
- */
 export async function submitForApproval(billId: string, submittedBy?: string): Promise<void> {
   const bill = await getInvoice(billId);
   if (bill.ocr_status !== 'OCR_COMPLETED' && bill.ocr_status !== 'NEED_REVIEW' && bill.ocr_status !== 'VERIFIED') {
@@ -657,61 +671,34 @@ export async function submitForApproval(billId: string, submittedBy?: string): P
   }
   await updateBill(billId, {
     approval_status: 'pending',
-    approval_step: 'admin',
+    approval_step: null,
     submitted_by: submittedBy ?? null,
     approved_by: null,
     approved_at: null,
     rejection_reason: null,
   });
   cacheInvalidate();
+  recordActivity(submittedBy, 'invoice:submit_approval', null, billId);
 }
 
 export async function approveInvoice(
   billId: string,
   approvedBy: string,
-  opts: { isSuperAdmin?: boolean; orgRole?: string | null } = {},
 ): Promise<{ approved: boolean; nextStep: string | null }> {
   const bill = await getInvoice(billId);
   if (bill.approval_status !== 'pending') {
     throw new ValidationError('Invoice is not pending approval');
   }
-
-  const step = bill.approval_step ?? 'admin';
-  const orgRole = opts.orgRole ?? null;
-  const isSuper = opts.isSuperAdmin === true;
-  const isOwner = orgRole === 'owner';
-  const isOrgAdmin = orgRole === 'admin';
-
-  const finalize = async () => {
-    await updateBill(billId, {
-      approval_status: 'approved',
-      approval_step: 'done',
-      approved_by: approvedBy,
-      approved_at: new Date().toISOString(),
-      rejection_reason: null,
-    });
-    cacheInvalidate();
-    return { approved: true, nextStep: null as string | null };
-  };
-
-  if (isSuper || isOwner) return finalize();
-
-  if (step === 'admin' && isOrgAdmin) {
-    await updateBill(billId, {
-      approval_status: 'pending',
-      approval_step: 'owner',
-      approved_by: approvedBy,
-      approved_at: new Date().toISOString(),
-    });
-    cacheInvalidate();
-    return { approved: false, nextStep: 'owner' };
-  }
-
-  throw new ValidationError(
-    step === 'owner'
-      ? 'Waiting for the organization owner to give final approval'
-      : 'Waiting for an organization admin to approve first',
-  );
+  await updateBill(billId, {
+    approval_status: 'approved',
+    approval_step: 'done',
+    approved_by: approvedBy,
+    approved_at: new Date().toISOString(),
+    rejection_reason: null,
+  });
+  cacheInvalidate();
+  recordActivity(approvedBy, 'invoice:approve', 'invoice.approved', billId);
+  return { approved: true, nextStep: null };
 }
 
 export async function rejectInvoice(billId: string, rejectedBy: string, reason: string): Promise<void> {
@@ -730,4 +717,5 @@ export async function rejectInvoice(billId: string, rejectedBy: string, reason: 
     rejection_reason: reason.trim(),
   });
   cacheInvalidate();
+  recordActivity(rejectedBy, 'invoice:reject', 'invoice.rejected', billId, { reason: reason.trim() });
 }

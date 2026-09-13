@@ -1,15 +1,17 @@
 import type { Invoice, AppConfig, SettingsData, Analytics, AnalyticsKpis, VehicleSpend, CostPerKm, OcrCostSummary, ExtractionRun, Batch, FraudScanResult } from '../types/index.js';
 const BASE = '';
 
-function getAuthHeaders(): Record<string, string> {
+function getAuthHeaders(hasBody: boolean): Record<string, string> {
   const token = localStorage.getItem('session_token');
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = {};
+  if (hasBody) headers['content-type'] = 'application/json';
   if (token) headers['authorization'] = `Bearer ${token}`;
   return headers;
 }
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + url, { headers: getAuthHeaders(), ...init });
+  const headers = getAuthHeaders(init?.body != null);
+  const res = await fetch(BASE + url, { ...init, headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) } });
   if (res.status === 401) {
     localStorage.removeItem('session_token');
     localStorage.removeItem('session_user');
@@ -67,34 +69,9 @@ export interface UserInfo extends SessionUser {
 // Keep backward compat alias
 export type AccountInfo = SessionUser;
 
-// ─── Organization types ─────────────────────────────────────────────────────
-
-export type OrgRole = 'owner' | 'admin' | 'reviewer' | 'viewer' | 'api_user';
-
-export interface OrgInfo {
-  org_id: string;
-  name: string;
-  slug: string;
-  plan: string;
-  status: string;
-  settings: Record<string, unknown> | null;
-  invoice_limit: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface OrgMemberInfo {
-  org_id: string;
-  user_id: string;
-  org_role: OrgRole;
-  joined_at: string;
-  user_name?: string;
-  user_email?: string;
-}
-
 export interface WebhookEndpointInfo {
   endpoint_id: string;
-  org_id: string;
+  user_id: string;
   url: string;
   events: string[];
   secret: string;
@@ -106,7 +83,6 @@ export interface WebhookEndpointInfo {
 
 export interface AuditLogEntry {
   log_id: string;
-  org_id: string | null;
   user_id: string | null;
   action: string;
   resource_type: string | null;
@@ -173,7 +149,7 @@ export const api = {
   importSources: async (sources: string[], batchName?: string) => {
     const res = await fetch('/api/invoices/import', {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: getAuthHeaders(true),
       body: JSON.stringify({ sources, batchName }),
     });
     if (!res.ok) throw new Error(`Import failed: HTTP ${res.status}`);
@@ -217,38 +193,6 @@ export const api = {
       method: 'PATCH', body: JSON.stringify({ intake_email }),
     }),
 
-  // ─── Organization (multi-tenancy) ────────────────────────────────────────
-  createOrg: (name: string, ownerUserId?: string) =>
-    j<{ success: boolean; data: OrgInfo }>('/api/orgs', { method: 'POST', body: JSON.stringify({ name, ownerUserId }) }),
-  getMyOrg: () =>
-    j<{ success: boolean; data: (OrgInfo & { role: OrgRole }) | null; isSuperAdmin?: boolean }>('/api/orgs/me'),
-  updateOrg: (updates: { name?: string; settings?: Record<string, unknown> }) =>
-    j<{ success: boolean; data: OrgInfo }>('/api/orgs', { method: 'PATCH', body: JSON.stringify(updates) }),
-  orgMembers: () =>
-    j<{ success: boolean; data: OrgMemberInfo[] }>('/api/orgs/members'),
-  orgUsage: () =>
-    j<{ success: boolean; data: { currentMonth: number; limit: number; percentage: number; remaining: number } }>('/api/orgs/usage'),
-  inviteMember: (userId: string, role: OrgRole = 'viewer') =>
-    j<{ success: boolean; data: OrgMemberInfo }>('/api/orgs/members', { method: 'POST', body: JSON.stringify({ userId, role }) }),
-  inviteMemberByEmail: (email: string, role: OrgRole = 'viewer') =>
-    j<{ success: boolean; data: OrgMemberInfo }>('/api/orgs/members', { method: 'POST', body: JSON.stringify({ email, role }) }),
-  createOrgMember: (name: string, email: string, password: string, role: OrgRole = 'viewer') =>
-    j<{ success: boolean; data: { user: any; member: OrgMemberInfo } }>('/api/orgs/members/create', { method: 'POST', body: JSON.stringify({ name, email, password, role }) }),
-  changeMemberRole: (userId: string, role: OrgRole) =>
-    j<{ success: boolean }>(`/api/orgs/members/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
-  removeMember: (userId: string) =>
-    j<{ success: boolean }>(`/api/orgs/members/${userId}`, { method: 'DELETE' }),
-
-  // ─── Admin: Organization Management ─────────────────────────────────────
-  adminListOrgs: () =>
-    j<{ success: boolean; data: (OrgInfo & { member_count: number })[] }>('/api/admin/orgs'),
-  adminGetOrg: (orgId: string) =>
-    j<{ success: boolean; data: OrgInfo & { members: OrgMemberInfo[] } }>(`/api/admin/orgs/${orgId}`),
-  adminUpdateOrg: (orgId: string, updates: { name?: string; plan?: string; status?: string }) =>
-    j<{ success: boolean; data: OrgInfo }>(`/api/admin/orgs/${orgId}`, { method: 'PATCH', body: JSON.stringify(updates) }),
-  adminOrgMembers: (orgId: string) =>
-    j<{ success: boolean; data: OrgMemberInfo[] }>(`/api/admin/orgs/${orgId}/members`),
-
   // ─── Webhooks ───────────────────────────────────────────────────────────
   listWebhooks: () =>
     j<{ success: boolean; data: WebhookEndpointInfo[]; metadata: { availableEvents: string[] } }>('/api/webhooks'),
@@ -259,7 +203,7 @@ export const api = {
   toggleWebhook: (id: string, active: boolean) =>
     j<{ success: boolean }>(`/api/webhooks/${id}/toggle`, { method: 'PATCH', body: JSON.stringify({ active }) }),
   deleteWebhook: (id: string) =>
-    j<{ success: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
+    j<{ success: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE', body: '{}' }),
 
   // ─── Audit Logs ─────────────────────────────────────────────────────────
   auditLogs: (params?: { action?: string; limit?: number; offset?: number }) => {
