@@ -25,6 +25,8 @@ import {
 } from '@/components/ui/dialog.js';
 import { Separator } from '@/components/ui/separator.js';
 import { AuditLogPanel } from '../components/AuditLogPanel.js';
+import { PromptDialog } from '../components/PromptDialog.js';
+import { Skeleton } from '@/components/ui/skeleton.js';
 
 type AdminTab = 'users' | 'email-intake' | 'activity';
 
@@ -45,6 +47,7 @@ export function AdminPage() {
 
   // ─── Data ──────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<UserInfo[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
 
   // ─── User management ──────────────────────────────────────────────────
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
@@ -74,6 +77,7 @@ export function AdminPage() {
   // ─── Feedback ─────────────────────────────────────────────────────────
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
+  const [resetPasswordUserId, setResetPasswordUserId] = useState<string | null>(null);
   const flash = (text: string, type: 'ok' | 'err' = 'ok') => {
     setMsg(text); setMsgType(type); setTimeout(() => setMsg(''), 4000);
   };
@@ -81,6 +85,7 @@ export function AdminPage() {
   // ─── Loaders ──────────────────────────────────────────────────────────
 
   const loadUsers = useCallback(async () => {
+    setUsersLoading(true);
     try {
       const r = await api.adminUsers();
       setUsers(r.data);
@@ -88,6 +93,7 @@ export function AdminPage() {
       for (const u of r.data) drafts[u.user_id] = u.intake_email ?? '';
       setIntakeDrafts(drafts);
     } catch { /* ignore */ }
+    finally { setUsersLoading(false); }
   }, []);
 
   const loadIntakeConfig = useCallback(async () => {
@@ -133,8 +139,7 @@ export function AdminPage() {
 
   const handleBlock = async (id: string) => { await api.adminBlockUser(id); flash('User blocked'); await loadUsers(); };
   const handleUnblock = async (id: string) => { await api.adminUnblockUser(id); flash('User unblocked'); await loadUsers(); };
-  const handleResetPassword = async (id: string) => {
-    const pw = prompt('Enter new password (min 6 chars):');
+  const handleResetPassword = async (id: string, pw: string) => {
     if (!pw || pw.length < 6) return flash('Password must be at least 6 characters', 'err');
     try { await api.adminResetPassword(id, pw); flash('Password reset'); } catch (e) { flash((e as Error).message, 'err'); }
   };
@@ -288,7 +293,18 @@ export function AdminPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map((u) => {
+                  {usersLoading && users.length === 0 && Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-32 mb-1" /><Skeleton className="h-3 w-40" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-14" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-4 w-8 ml-auto" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
+                    </TableRow>
+                  ))}
+                  {!usersLoading && users.map((u) => {
                     const isSel = selectedUser === u.user_id;
                     return (
                       <React.Fragment key={u.user_id}>
@@ -311,7 +327,7 @@ export function AdminPage() {
                               {u.status === 'active'
                                 ? <Button variant="destructive" size="sm" onClick={() => void handleBlock(u.user_id)}>Block</Button>
                                 : <Button variant="outline" size="sm" onClick={() => void handleUnblock(u.user_id)}>Unblock</Button>}
-                              <Button variant="outline" size="sm" onClick={() => void handleResetPassword(u.user_id)}>
+                              <Button variant="outline" size="sm" onClick={() => setResetPasswordUserId(u.user_id)}>
                                 <Lock className="h-3.5 w-3.5" />
                               </Button>
                             </div>
@@ -521,6 +537,16 @@ export function AdminPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <PromptDialog
+        open={resetPasswordUserId !== null}
+        onOpenChange={(open) => { if (!open) setResetPasswordUserId(null); }}
+        title="Reset password"
+        description="Enter a new password for this user (minimum 6 characters)."
+        inputLabel="New password"
+        inputType="password"
+        onSubmit={(pw) => { if (resetPasswordUserId) void handleResetPassword(resetPasswordUserId, pw); setResetPasswordUserId(null); }}
+      />
     </div>
   );
 }

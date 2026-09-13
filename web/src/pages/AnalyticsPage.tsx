@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { BarChart3 } from 'lucide-react';
 import type { AnalyticsKpis, VehicleSpend, CostPerKm, OcrCostSummary } from '../types/index.js';
 import { api } from '../api/client.js';
 import { moneyCompact, moneyFull, countFmt, usdToInrRate } from '../lib/format.js';
-import { DocNote, type DocItem } from '../components/DocNote.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/button.js';
@@ -10,12 +11,8 @@ import { Input } from '@/components/ui/input.js';
 import { Card, CardContent } from '@/components/ui/card.js';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.js';
-
-const KPI_DOCS: DocItem[] = [
-  { term: 'Total Spend', desc: 'SUM(grand_total_amount) WHERE status = OCR_COMPLETED or VERIFIED' },
-  { term: 'Parts / Labour / Tax', desc: 'Parts = SUM(parts_amount) · Labour = SUM(labour_amount) · Tax = SUM(total_tax_amount)' },
-  { term: 'Needs Review', desc: 'COUNT WHERE ocr_status = NEED_REVIEW (no GSTIN and no PAN at OCR save)' },
-];
+import { Skeleton } from '@/components/ui/skeleton.js';
+import { EmptyState } from '@/components/ui/empty-state.js';
 
 type SpendView = 'workshops' | 'vehicles' | 'months' | 'costkm';
 const PAGE_SIZE = 20;
@@ -36,7 +33,21 @@ export function AnalyticsPage() {
 
   useEffect(() => { loadKpis(); }, [loadKpis]);
 
-  if (loading) return <PageShell><p className="text-muted-foreground py-2">Loading analytics…</p></PageShell>;
+  if (loading) {
+    return (
+      <PageShell>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2.5">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Card key={i} className="p-4">
+              <Skeleton className="h-3 w-20 mb-2" />
+              <Skeleton className="h-7 w-16 mb-1" />
+              <Skeleton className="h-3 w-28" />
+            </Card>
+          ))}
+        </div>
+      </PageShell>
+    );
+  }
 
   if (error) {
     return (
@@ -49,8 +60,12 @@ export function AnalyticsPage() {
   if (!kpis || kpis.completedCount === 0) {
     return (
       <PageShell>
-        <DocNote title="How analytics values are calculated" subtitle="Upload invoices first — metrics populate automatically" items={KPI_DOCS} />
-        <p className="text-sm text-muted-foreground mt-4">No completed invoices yet — upload and extract some bills.</p>
+        <EmptyState
+          icon={<BarChart3 className="h-10 w-10" />}
+          title="No analytics yet"
+          description="Analytics will appear after you process your first invoice."
+          action={<Button asChild><Link to="/invoices">Go to Invoices</Link></Button>}
+        />
       </PageShell>
     );
   }

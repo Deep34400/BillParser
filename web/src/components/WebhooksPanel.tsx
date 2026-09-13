@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, Plus, Trash2, Webhook } from 'lucide-react';
 import { api, type WebhookEndpointInfo } from '../api/client.js';
 import { cn } from '@/lib/utils.js';
@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input.js';
 import { Badge } from '@/components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card.js';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
+import { EmptyState } from '@/components/ui/empty-state.js';
 
 const DEFAULT_EVENTS = [
   'invoice.uploaded',
@@ -23,6 +24,7 @@ export function WebhooksPanel({ onFlash }: { onFlash?: (text: string, type?: 'ok
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
   const [newSecret, setNewSecret] = useState<string | null>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
 
   const flash = onFlash ?? (() => undefined);
 
@@ -84,7 +86,7 @@ export function WebhooksPanel({ onFlash }: { onFlash?: (text: string, type?: 'ok
       </CardHeader>
       <CardContent>
         <div className="grid gap-3 mb-4 sm:grid-cols-[1fr_200px_auto]">
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhooks/invoices" />
+          <Input ref={urlInputRef} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhooks/invoices" />
           <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Label (optional)" />
           <Button onClick={() => void handleCreate()} disabled={!url.trim() || events.length === 0}>
             <Plus className="h-4 w-4" /> Add endpoint
@@ -161,7 +163,16 @@ export function WebhooksPanel({ onFlash }: { onFlash?: (text: string, type?: 'ok
             </TableBody>
           </Table>
         ) : (
-          <p className="text-xs text-faint py-2">No webhooks yet. Add an HTTPS endpoint above to receive invoice events.</p>
+          <EmptyState
+            icon={<Webhook className="h-10 w-10" />}
+            title="No webhooks yet"
+            description="Set up webhooks to get notified when invoices are processed."
+            action={
+              <Button onClick={() => urlInputRef.current?.focus()}>
+                <Plus className="h-4 w-4" /> Add Webhook
+              </Button>
+            }
+          />
         )}
       </CardContent>
     </Card>

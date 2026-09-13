@@ -4,7 +4,9 @@ import { Upload, Search, SlidersHorizontal, Download, X, Mail, Copy, RotateCcw, 
 import { api } from '../api/client.js';
 import type { Invoice, Batch } from '../types/index.js';
 import { money, dateFmt, costFmt } from '../lib/format.js';
-import { StatusDot } from '../components/StatusDot.js';
+import { StatusBadge } from '../components/invoice/StatusBadge.js';
+import { WelcomeDialog } from '../components/WelcomeDialog.js';
+import { HelpTip } from '../components/HelpTip.js';
 import { DocumentPreview } from '../components/DocumentPreview.js';
 import { Toast } from '../components/Toast.js';
 import { usePolling } from '../hooks/usePolling.js';
@@ -17,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea.js';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
 import { EmptyState } from '@/components/ui/empty-state.js';
 import { hasUnlimitedBalance, balanceNumber } from '../lib/balance.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -68,10 +71,11 @@ export function InvoicesPage() {
 
   const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [totalRecords, setTotalRecords] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
   const [globalCounts, setGlobalCounts] = useState<Record<StatusFilter, number>>({
     ALL: 0, DRAFT: 0, PENDING: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0, NEEDS_REVIEW: 0,
   });
@@ -106,6 +110,7 @@ export function InvoicesPage() {
   const [toast, setToast] = useState('');
   const [duplicateBanner, setDuplicateBanner] = useState<{ count: number } | null>(null);
   const [intakeEmail, setIntakeEmail] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const statusToApiParams = (sf: StatusFilter): Record<string, string | undefined> => {
@@ -120,28 +125,34 @@ export function InvoicesPage() {
     }
   };
 
+  const resetPagination = useCallback(() => {
+    setCursor(undefined);
+    setCursorStack([]);
+    setNextCursor(null);
+  }, []);
+
   const fetchPage = useCallback(async (
-    page: number, size: number, search?: string, status?: StatusFilter, reviewCode?: ReviewCodeFilter,
+    nextCursor: string | undefined, size: number, search?: string, status?: StatusFilter, reviewCode?: ReviewCodeFilter,
   ) => {
     setLoading(true);
     setAllInvoices([]);
     try {
       const statusParams = statusToApiParams(status ?? 'ALL');
       const code = reviewCode ?? '';
-      const params: Record<string, string | undefined> = { page: String(page), pageSize: String(size), ...statusParams };
+      const params: Record<string, string | undefined> = { pageSize: String(size), ...statusParams };
+      if (nextCursor) params.cursor = nextCursor;
       if (search) params.q = search;
       if (code && (status ?? 'ALL') === 'NEEDS_REVIEW') params.review_code = code;
       const qs = buildQs(params);
       const [inv, bat] = await Promise.all([api.list(qs), api.batches().catch(() => ({ batches: [] }))]);
       setAllInvoices(inv.invoices);
       setBatches(bat.batches);
-      setTotalRecords(inv.total);
-      setTotalPages(inv.totalPages);
-      setCurrentPage(inv.page);
+      setHasMore(inv.hasMore ?? false);
+      setNextCursor(inv.nextCursor ?? null);
     } catch (e) {
       setAllInvoices([]);
-      setTotalRecords(0);
-      setTotalPages(1);
+      setHasMore(false);
+      setNextCursor(null);
       setToast(e instanceof Error ? e.message : 'Failed to load invoices');
     } finally {
       setLoading(false);
@@ -175,16 +186,16 @@ export function InvoicesPage() {
   }, []);
 
   const refetch = useCallback(async () => {
-    await fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter);
-  }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
+    await fetchPage(cursor, pageSize, q || undefined, statusFilter, reviewCodeFilter);
+  }, [fetchPage, cursor, pageSize, q, statusFilter, reviewCodeFilter]);
 
-  useEffect(() => { void fetchPage(currentPage, pageSize, q || undefined, statusFilter, reviewCodeFilter); }, [fetchPage, currentPage, pageSize, q, statusFilter, reviewCodeFilter]);
+  useEffect(() => { void fetchPage(cursor, pageSize, q || undefined, statusFilter, reviewCodeFilter); }, [fetchPage, cursor, pageSize, q, statusFilter, reviewCodeFilter]);
   useEffect(() => { void fetchGlobalCounts(); }, [fetchGlobalCounts]);
   useEffect(() => { api.config().then((cfg) => { if (cfg.emailIntake?.enabled && cfg.emailIntake.address) setIntakeEmail(cfg.emailIntake.address); }).catch(() => {}); }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => { setQ(searchInput); setCurrentPage(1); }, 300);
+    debounceRef.current = setTimeout(() => { setQ(searchInput); resetPagination(); }, 300);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [searchInput]);
 
@@ -295,8 +306,11 @@ export function InvoicesPage() {
 
   const sortIcon = (key: SortKey) => sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : '';
 
+  const showOnboarding = localStorage.getItem('hasSeenOnboarding') !== 'true';
+
   return (
     <div className="min-h-full bg-background font-sans">
+      {showOnboarding && <WelcomeDialog />}
       {/* Duplicate banner */}
       {duplicateBanner && (
         <div className="flex items-center justify-between border-b border-warning/20 bg-warning-soft px-7 py-2.5 text-sm font-medium text-warning">
@@ -315,8 +329,8 @@ export function InvoicesPage() {
             {loading && allInvoices.length === 0
               ? 'Loading…'
               : statusFilter === 'ALL'
-                ? `${(globalCounts.ALL || totalRecords).toLocaleString()} invoice${(globalCounts.ALL || totalRecords) !== 1 ? 's' : ''}`
-                : `${(globalCounts[statusFilter] ?? totalRecords).toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${(globalCounts.ALL || totalRecords).toLocaleString()} total`}
+                ? `${globalCounts.ALL.toLocaleString()} invoice${globalCounts.ALL !== 1 ? 's' : ''}`
+                : `${(globalCounts[statusFilter] ?? 0).toLocaleString()} ${STATUS_PILLS.find((p) => p.key === statusFilter)?.label ?? statusFilter} · ${globalCounts.ALL.toLocaleString()} total`}
           </p>
         </div>
 
@@ -440,7 +454,7 @@ export function InvoicesPage() {
           const active = statusFilter === key;
           return (
             <button key={key}
-              onClick={() => { setStatusFilter(key); setReviewCodeFilter(''); setCurrentPage(1); }}
+              onClick={() => { setStatusFilter(key); setReviewCodeFilter(''); resetPagination(); }}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors cursor-pointer',
                 active
@@ -469,7 +483,7 @@ export function InvoicesPage() {
             const n = reviewCodeCounts[countKey] ?? 0;
             return (
               <button key={key || 'all'}
-                onClick={() => { setReviewCodeFilter(key); setCurrentPage(1); }}
+                onClick={() => { setReviewCodeFilter(key); resetPagination(); }}
                 className={cn(
                   'inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer',
                   active
@@ -517,7 +531,7 @@ export function InvoicesPage() {
           <Button variant="ghost" size="sm" className="text-card/80 hover:text-card hover:bg-white/10" onClick={() => void exportCsv('/api/invoices/export/csv')}>
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
-          <Button variant="ghost" size="sm" className="text-danger-soft hover:text-danger hover:bg-white/10" onClick={() => void handleBulkDelete()}>
+          <Button variant="ghost" size="sm" className="text-danger-soft hover:text-danger hover:bg-white/10" onClick={() => setShowDeleteConfirm(true)}>
             <Trash2 className="h-3.5 w-3.5" /> Delete
           </Button>
           <Button variant="ghost" size="sm" className="ml-auto text-card/60 hover:text-card hover:bg-white/10" onClick={() => setSelected(new Set())}>
@@ -538,7 +552,12 @@ export function InvoicesPage() {
                       ref={(el) => { if (el) el.indeterminate = isPartialSelected; }}
                       onChange={toggleAll} className="cursor-pointer" />
                   </TableHead>
-                  <TableHead className="cursor-pointer" onClick={() => toggleSort('status')}>Status{sortIcon('status')}</TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => toggleSort('status')}>
+                    <span className="inline-flex items-center gap-1">
+                      OCR Status{sortIcon('status')}
+                      <HelpTip text="OCR = Optical Character Recognition. Shows if data extraction succeeded." />
+                    </span>
+                  </TableHead>
                   <TableHead className="cursor-pointer" onClick={() => toggleSort('vendorName')}>Vendor{sortIcon('vendorName')}</TableHead>
                   <TableHead className="cursor-pointer" onClick={() => toggleSort('invoiceDate')}>Date{sortIcon('invoiceDate')}</TableHead>
                   <TableHead>Pipeline</TableHead>
@@ -566,8 +585,8 @@ export function InvoicesPage() {
                         <EmptyState
                           icon={<Upload className="h-10 w-10" />}
                           title="No invoices yet"
-                          description={canUpload ? "Upload your first invoice to get started." : "Insufficient balance — contact admin to add points before uploading."}
-                          action={canUpload ? <Button onClick={() => setShowUpload(true)}>Upload bills</Button> : undefined}
+                          description={canUpload ? "Upload your first PDF to get started." : "Insufficient balance — contact admin to add points before uploading."}
+                          action={canUpload ? <Button onClick={() => setShowUpload(true)}><Upload className="h-4 w-4" /> Upload</Button> : undefined}
                         />
                       ) : (
                         <EmptyState title="No invoices match this filter" />
@@ -594,7 +613,7 @@ export function InvoicesPage() {
 
                       <TableCell>
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <StatusDot status={row.status} />
+                          <StatusBadge status={row.status} />
                           {isDuplicate(row) && (
                             <Badge variant="warning" className="text-[9px] px-1.5 py-0">DUP</Badge>
                           )}
@@ -667,20 +686,31 @@ export function InvoicesPage() {
           {/* ─── Pagination ─── */}
           <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted-foreground">
             <span className="font-mono text-xs">
-              Page {currentPage} of {totalPages} ({totalRecords.toLocaleString()} records)
+              Page {cursorStack.length + 1} · showing {allInvoices.length} row{allInvoices.length !== 1 ? 's' : ''}
             </span>
             <div className="flex items-center gap-3">
               <label className="flex items-center gap-1.5 text-xs">
                 Per page
-                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); resetPagination(); }}
                   className="h-7 rounded border border-input bg-card px-2 text-xs cursor-pointer">
                   {[10, 25, 50, 100].map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </label>
-              <Button variant="outline" size="sm" disabled={currentPage <= 1 || loading} onClick={() => setCurrentPage((p) => p - 1)}>
+              <Button variant="outline" size="sm" disabled={cursorStack.length === 0 || loading} onClick={() => {
+                setCursorStack((stack) => {
+                  const next = [...stack];
+                  const prevCursor = next.pop();
+                  setCursor(prevCursor);
+                  return next;
+                });
+              }}>
                 <ChevronLeft className="h-4 w-4" /> Prev
               </Button>
-              <Button variant="outline" size="sm" disabled={currentPage >= totalPages || loading} onClick={() => setCurrentPage((p) => p + 1)}>
+              <Button variant="outline" size="sm" disabled={!hasMore || !nextCursor || loading} onClick={() => {
+                if (!nextCursor) return;
+                setCursorStack((stack) => [...stack, cursor]);
+                setCursor(nextCursor);
+              }}>
                 Next <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
@@ -691,6 +721,15 @@ export function InvoicesPage() {
       </div>
 
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title={`Delete ${selected.size} invoice${selected.size === 1 ? '' : 's'}?`}
+        description="This action cannot be undone. Selected invoices will be permanently removed."
+        confirmLabel="Delete"
+        onConfirm={() => void handleBulkDelete()}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@
 import type { Invoice } from '../types/index.js';
 import { T, STATUS } from '../theme.js';
 import { money } from '../lib/format.js';
+import { HelpTip } from './HelpTip.js';
 
 interface FieldRow {
   key: string;
@@ -138,6 +139,9 @@ export function DocumentPreview({ invoice }: { invoice: Invoice | null }) {
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: T.inkSoft }}>
               <CornerIcon />
               {f.label}
+              {f.key === 'gstin' && (
+                <HelpTip text="Goods & Services Tax ID — 15-character alphanumeric identifier" />
+              )}
             </span>
             <span style={{
               fontFamily: T.mono, fontSize: 12, textAlign: 'right',

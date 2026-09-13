@@ -94,7 +94,15 @@ export interface AuditLogEntry {
 
 export const api = {
   config: () => j<AppConfig>('/api/config'),
-  list: (qs: string) => j<{ invoices: Invoice[]; total: number; page: number; pageSize: number; totalPages: number }>(`/api/invoices${qs}`),
+  list: (qs: string) => j<{
+    invoices: Invoice[];
+    pageSize: number;
+    total?: number;
+    page?: number;
+    totalPages?: number;
+    hasMore?: boolean;
+    nextCursor?: string | null;
+  }>(`/api/invoices${qs}`),
   counts: () => j<{ counts: Record<string, number> }>('/api/invoices/counts'),
   get: (id: string) => j<Invoice>(`/api/invoices/${id}`),
   fileUrl: (id: string) => {

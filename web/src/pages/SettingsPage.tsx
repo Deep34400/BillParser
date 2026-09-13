@@ -1,93 +1,34 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { ChevronDown, ChevronUp, Plus, ChevronRight } from 'lucide-react';
 import { api } from '../api/client.js';
 import { setUsdToInr } from '../lib/format.js';
-import { T } from '../theme.js';
 import { Toast } from '../components/Toast.js';
 import type { ModelPrice, FallbackLevel } from '../types/index.js';
+import { cn } from '@/lib/utils.js';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.js';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card.js';
+import { Switch } from '@/components/ui/switch.js';
+import { Input } from '@/components/ui/input.js';
+import { Label } from '@/components/ui/label.js';
+import { Button } from '@/components/ui/button.js';
+import { Badge } from '@/components/ui/badge.js';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select.js';
+import {
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+} from '@/components/ui/table.js';
 
-/* ─── Shared styles ───────────────────────────────────────── */
-
-const card: React.CSSProperties = {
-  background: T.panel, border: `1px solid ${T.border}`,
-  borderRadius: 12, padding: '20px 24px', marginBottom: 16,
-};
-const lbl: React.CSSProperties = {
-  display: 'block', fontSize: 11, fontWeight: 700, color: T.muted,
-  marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em',
-};
-const inp: React.CSSProperties = {
-  width: '100%', padding: '8px 10px', border: `1px solid ${T.border}`,
-  borderRadius: 6, fontSize: 13, fontFamily: T.font, color: T.text,
-  background: T.bg, boxSizing: 'border-box',
-};
-const sel: React.CSSProperties = { ...inp, cursor: 'pointer' };
-const note: React.CSSProperties = { fontSize: 11, color: T.muted, marginTop: 6, lineHeight: 1.5 };
-const btnP: React.CSSProperties = {
-  background: T.accent, color: '#fff', border: 'none', borderRadius: 8,
-  padding: '9px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: T.font,
-};
-const btnS: React.CSSProperties = {
-  background: 'transparent', color: T.muted, border: `1px solid ${T.border}`,
-  borderRadius: 8, padding: '9px 20px', fontSize: 13, fontWeight: 600,
-  cursor: 'pointer', fontFamily: T.font,
-};
-const dot = (ok: boolean): React.CSSProperties => ({
-  width: 8, height: 8, borderRadius: '50%', background: ok ? T.green : T.border,
-  display: 'inline-block', marginRight: 6, flexShrink: 0,
-});
-
-
-/**
- * Reasoning-limit presets. No "off" option deliberately: with thinking disabled
- * the model got invoice arithmetic wrong on every measured attempt (₹8,083
- * against a correct ₹7,080) and the failure is silent. Labels describe headroom,
- * not a quality grade — every option here tested correct.
- */
 const THINKING_OPTIONS = [
   { value: 1024, label: 'Tight — 1,024 tokens', hint: 'Caps slow outliers. Fine for simple, single-page invoices.' },
   { value: 2048, label: 'Balanced — 2,048 tokens (default)', hint: 'Covers every invoice seen so far, including the heaviest.' },
   { value: 4096, label: 'Generous — 4,096 tokens', hint: 'Extra headroom for dense or multi-page invoices. Slower worst case.' },
 ];
 
-/* ─── Collapsible section ─────────────────────────────────── */
-
-function Section({ title, subtitle, defaultOpen = true, badge: badgeText, children }: {
-  title: string; subtitle?: string; defaultOpen?: boolean; badge?: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div style={{ marginBottom: 24 }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-          background: 'none', border: 'none', cursor: 'pointer', padding: '8px 0',
-          fontFamily: T.font, textAlign: 'left',
-        }}
-      >
-        <span style={{
-          fontSize: 18, color: T.muted, width: 20, textAlign: 'center',
-          transition: 'transform 0.2s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-        }}>
-          &#9654;
-        </span>
-        <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{title}</span>
-        {badgeText && (
-          <span style={{
-            fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 12,
-            background: T.accentSoft, color: T.accent, letterSpacing: '0.03em',
-          }}>{badgeText}</span>
-        )}
-        {subtitle && <span style={{ fontSize: 12, color: T.muted, marginLeft: 'auto' }}>{subtitle}</span>}
-      </button>
-      {open && <div style={{ paddingLeft: 30, paddingTop: 4 }}>{children}</div>}
-    </div>
-  );
-}
-
-/* ─── Provider definitions ────────────────────────────────── */
+const LEVEL_LABELS = ['Primary', 'Secondary', 'Tertiary'];
+const LEVEL_RING = ['ring-[#2E5C8A]', 'ring-[#B45309]', 'ring-[#6B7280]'];
+const LEVEL_BG = ['bg-[#EEF3FA]', 'bg-[#FFF6EB]', 'bg-[#F5F5F5]'];
+const LEVEL_DOT = ['bg-[#2E5C8A]', 'bg-[#B45309]', 'bg-[#6B7280]'];
 
 interface ProvDef {
   id: string; label: string; models: string[];
@@ -102,10 +43,6 @@ const ALL_PROVIDERS: ProvDef[] = [
   { id: 'azapi', label: 'AzAPI OCR', models: ['azapi-ocr'], canStructure: false, canSingle: true, desc: 'Third-party structured OCR (URL + Token)' },
 ];
 
-const LEVEL_LABELS = ['Primary', 'Secondary', 'Tertiary'];
-const LEVEL_COLORS = ['#2E5C8A', '#B45309', '#6B7280'];
-const LEVEL_BG = ['#EEF3FA', '#FFF6EB', '#F5F5F5'];
-
 function makeDefaultLevel(index: number): FallbackLevel {
   return {
     label: LEVEL_LABELS[index] ?? `Level ${index + 1}`,
@@ -119,87 +56,93 @@ function modelOptions(provDef: ProvDef, current?: string): string[] {
   return list;
 }
 
-/* ─── Model picker (shared by Primary + Fallback) ─────────── */
-
-function ModelPicker({
-  level, accent, onChange,
-}: {
-  level: FallbackLevel; accent: string; onChange: (l: FallbackLevel) => void;
+function ModelPicker({ level, accentClass, onChange }: {
+  level: FallbackLevel; accentClass: string; onChange: (l: FallbackLevel) => void;
 }) {
   const provDef = ALL_PROVIDERS.find((p) => p.id === level.provider) ?? ALL_PROVIDERS[1];
   const structProvDef = ALL_PROVIDERS.find((p) => p.id === (level.structuringProvider ?? 'gemini')) ?? ALL_PROVIDERS[1];
 
   return (
     <>
-      <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${T.border}`, marginBottom: 14 }}>
+      <div className="mb-3.5 flex overflow-hidden rounded-lg border border-border">
         {(['single', 'split'] as const).map((m) => (
-          <button key={m} type="button" onClick={() => onChange({ ...level, mode: m })}
-            style={{
-              flex: 1, padding: '9px 12px', fontSize: 12, fontWeight: 600,
-              border: 'none', cursor: 'pointer', fontFamily: T.font,
-              background: level.mode === m ? accent : '#fff',
-              color: level.mode === m ? '#fff' : T.text,
-              transition: 'all 0.15s',
-            }}>
+          <Button
+            key={m}
+            type="button"
+            variant="ghost"
+            className={cn(
+              'flex-1 rounded-none h-auto py-2 text-xs font-semibold',
+              level.mode === m && cn(accentClass, 'text-white hover:text-white hover:opacity-90'),
+            )}
+            onClick={() => onChange({ ...level, mode: m })}
+          >
             {m === 'single' ? 'Single — 1 API call' : 'Split — 2 API calls'}
-          </button>
+          </Button>
         ))}
       </div>
 
       {level.mode === 'single' ? (
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 160 }}>
-            <div style={lbl}>Provider</div>
-            <select style={sel} value={level.provider} onChange={(e) => {
-              const id = e.target.value;
+        <div className="flex flex-wrap gap-3">
+          <div className="min-w-[160px] flex-1 space-y-1.5">
+            <Label className="text-[11px] uppercase tracking-wide">Provider</Label>
+            <Select value={level.provider} onValueChange={(id) => {
               const def = ALL_PROVIDERS.find((p) => p.id === id);
               const firstModel = id === 'mistral' ? 'pixtral-12b-2409' : (def?.models[0] ?? '');
               onChange({ ...level, provider: id, model: firstModel });
             }}>
-              {ALL_PROVIDERS.filter((p) => p.canSingle).map((p) => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
-            </select>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {ALL_PROVIDERS.filter((p) => p.canSingle).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={lbl}>Model</div>
-            <select style={sel} value={level.model} onChange={(e) => onChange({ ...level, model: e.target.value })}>
-              {modelOptions(provDef, level.model).map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
+          <div className="min-w-[200px] flex-1 space-y-1.5">
+            <Label className="text-[11px] uppercase tracking-wide">Model</Label>
+            <Select value={level.model} onValueChange={(v) => onChange({ ...level, model: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {modelOptions(provDef, level.model).map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       ) : (
         <>
-          <div style={{
-            padding: '8px 12px', borderRadius: 6, background: '#f0f0ed',
-            fontSize: 12, color: T.muted, marginBottom: 10,
-          }}>
+          <p className="mb-2.5 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
             Step 1: <strong>Mistral OCR</strong> (mistral-ocr-latest) — always used for extraction
-          </div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <div style={lbl}>Step 2 — Structuring Provider</div>
-              <select style={sel} value={level.structuringProvider ?? 'gemini'} onChange={(e) => {
-                const id = e.target.value;
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <div className="min-w-[160px] flex-1 space-y-1.5">
+              <Label className="text-[11px] uppercase tracking-wide">Step 2 — Structuring Provider</Label>
+              <Select value={level.structuringProvider ?? 'gemini'} onValueChange={(id) => {
                 const def = ALL_PROVIDERS.find((p) => p.id === id);
                 onChange({ ...level, structuringProvider: id, structuringModel: def?.models[0] ?? '' });
               }}>
-                {ALL_PROVIDERS.filter((p) => p.canStructure).map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ALL_PROVIDERS.filter((p) => p.canStructure).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={lbl}>Structuring Model</div>
-              <select
-                style={sel}
+            <div className="min-w-[200px] flex-1 space-y-1.5">
+              <Label className="text-[11px] uppercase tracking-wide">Structuring Model</Label>
+              <Select
                 value={level.structuringModel ?? structProvDef.models[0]}
-                onChange={(e) => onChange({ ...level, structuringModel: e.target.value })}
+                onValueChange={(v) => onChange({ ...level, structuringModel: v })}
               >
-                {modelOptions(structProvDef, level.structuringModel).map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {modelOptions(structProvDef, level.structuringModel).map((m) => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </>
@@ -208,7 +151,16 @@ function ModelPicker({
   );
 }
 
-/* ─── Main SettingsPage ───────────────────────────────────── */
+function LevelSummary({ level, idx }: { level: FallbackLevel; idx: number }) {
+  const text = level.mode === 'single'
+    ? `${level.provider}/${level.model}`
+    : `Split → ${level.structuringProvider ?? 'gemini'}/${level.structuringModel ?? level.model}`;
+  return (
+    <Badge className={cn('text-xs font-semibold text-white border-0', LEVEL_DOT[idx] ?? 'bg-muted-foreground')}>
+      {idx === 0 ? 'Primary' : level.label}: {text}
+    </Badge>
+  );
+}
 
 export function SettingsPage() {
   const [chain, setChain] = useState<FallbackLevel[]>([]);
@@ -220,14 +172,15 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [modelPricing, setModelPricing] = useState<Record<string, ModelPrice>>({});
   const [defaultPricing, setDefaultPricing] = useState<Record<string, ModelPrice>>({});
-  const [pricingFilter, setPricingFilter] = useState<string>('all');
-  const [thinkingBudget, setThinkingBudget] = useState<number>(2048);
-  const [savedThinkingBudget, setSavedThinkingBudget] = useState<number>(2048);
-  const [fxRate, setFxRate] = useState<string>('');
+  const [pricingFilter, setPricingFilter] = useState('all');
+  const [thinkingBudget, setThinkingBudget] = useState(2048);
+  const [savedThinkingBudget, setSavedThinkingBudget] = useState(2048);
+  const [fxRate, setFxRate] = useState('');
   const [savedFxRate, setSavedFxRate] = useState<number | null>(null);
-  const [ocrPageRate, setOcrPageRate] = useState<string>('');
+  const [ocrPageRate, setOcrPageRate] = useState('');
   const [savingCost, setSavingCost] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
+  const [howItWorksOpen, setHowItWorksOpen] = useState(false);
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
@@ -238,17 +191,13 @@ export function SettingsPage() {
       let fc: FallbackLevel[];
       if (s.fallbackChain && s.fallbackChain.length > 0) {
         fc = s.fallbackChain.map((l, i) => ({
-          ...l,
-          label: LEVEL_LABELS[i] ?? l.label,
-          enabled: i === 0 ? true : l.enabled, // Primary always on
+          ...l, label: LEVEL_LABELS[i] ?? l.label, enabled: i === 0 ? true : l.enabled,
         }));
       } else {
         const pm = s.pipelineMode === 'split' ? 'split' : 'single';
-        if (pm === 'single') {
-          fc = [{ label: 'Primary', mode: 'single', provider: s.singleProvider || 'gemini', model: s.singleModel || 'gemini-2.5-flash', enabled: true }];
-        } else {
-          fc = [{ label: 'Primary', mode: 'split', provider: 'mistral', model: 'mistral-ocr-latest', structuringProvider: s.structuringProvider || 'gemini', structuringModel: s.structuringModel || 'gemini-2.5-flash', enabled: true }];
-        }
+        fc = pm === 'single'
+          ? [{ label: 'Primary', mode: 'single', provider: s.singleProvider || 'gemini', model: s.singleModel || 'gemini-2.5-flash', enabled: true }]
+          : [{ label: 'Primary', mode: 'split', provider: 'mistral', model: 'mistral-ocr-latest', structuringProvider: s.structuringProvider || 'gemini', structuringModel: s.structuringModel || 'gemini-2.5-flash', enabled: true }];
       }
       if (fc.length === 0) fc = [makeDefaultLevel(0)];
       setChain(fc); setSavedChain(fc);
@@ -275,14 +224,15 @@ export function SettingsPage() {
   const primary = chain[0] ?? makeDefaultLevel(0);
   const fallbacks = chain.slice(1);
   const dirty = JSON.stringify(chain) !== JSON.stringify(savedChain);
+  const savedPrimary = savedChain[0];
+  const savedFallbacks = savedChain.slice(1).filter((l) => l.enabled);
+  const costDirty = thinkingBudget !== savedThinkingBudget || (Number(fxRate) > 0 && Number(fxRate) !== savedFxRate);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       const labeled = chain.map((l, i) => ({
-        ...l,
-        label: LEVEL_LABELS[i] ?? `Level ${i + 1}`,
-        enabled: i === 0 ? true : l.enabled,
+        ...l, label: LEVEL_LABELS[i] ?? `Level ${i + 1}`, enabled: i === 0 ? true : l.enabled,
       }));
       const p = labeled[0];
       await api.saveSettings({
@@ -295,9 +245,7 @@ export function SettingsPage() {
       });
       setSavedChain(labeled); setChain(labeled);
       const fbCount = labeled.slice(1).filter((l) => l.enabled).length;
-      flash(fbCount > 0
-        ? `Saved — Primary + ${fbCount} fallback${fbCount > 1 ? 's' : ''}`
-        : 'Saved — Primary only');
+      flash(fbCount > 0 ? `Saved — Primary + ${fbCount} fallback${fbCount > 1 ? 's' : ''}` : 'Saved — Primary only');
     } catch (e) { flash(`Error: ${(e as Error).message}`); }
     finally { setSaving(false); }
   };
@@ -311,58 +259,36 @@ export function SettingsPage() {
     try { await api.saveCreds(provId, payload); await load(); flash(`${provId} credentials saved`); }
     catch (e) { flash(`Error: ${(e as Error).message}`); }
   };
+
   const handleClearCreds = async (provId: string) => {
     try {
       await api.clearCreds(provId);
       setCreds((p) => { const n = { ...p }; delete n[`${provId}.apiKey`]; delete n[`${provId}.endpoint`]; return n; });
       await load(); flash(`${provId} credentials cleared`);
-    }
-    catch (e) { flash(`Error: ${(e as Error).message}`); }
+    } catch (e) { flash(`Error: ${(e as Error).message}`); }
   };
 
-  const updatePrimary = (l: FallbackLevel) => {
-    setChain((c) => {
-      const n = [...c];
-      n[0] = { ...l, label: 'Primary', enabled: true };
-      return n;
-    });
-  };
-
-  const updateFallback = (fi: number, l: FallbackLevel) => {
-    setChain((c) => {
-      const n = [...c];
-      const idx = fi + 1;
-      n[idx] = { ...l, label: LEVEL_LABELS[idx] ?? `Level ${idx + 1}` };
-      return n;
-    });
-  };
-
-  const removeFallback = (fi: number) => {
-    setChain((c) => c.filter((_, j) => j !== fi + 1));
-  };
-
+  const updatePrimary = (l: FallbackLevel) => setChain((c) => { const n = [...c]; n[0] = { ...l, label: 'Primary', enabled: true }; return n; });
+  const updateFallback = (fi: number, l: FallbackLevel) => setChain((c) => {
+    const n = [...c]; const idx = fi + 1;
+    n[idx] = { ...l, label: LEVEL_LABELS[idx] ?? `Level ${idx + 1}` }; return n;
+  });
+  const removeFallback = (fi: number) => setChain((c) => c.filter((_, j) => j !== fi + 1));
   const addFallback = () => {
     if (chain.length >= 3) { flash('Maximum 2 fallback levels.'); return; }
     setChain((c) => [...c, makeDefaultLevel(c.length)]);
   };
-
-  const moveFallback = (fi: number, dir: -1 | 1) => {
-    setChain((c) => {
-      const n = [...c];
-      const i = fi + 1;
-      const j = i + dir;
-      if (j < 1 || j >= n.length) return c; // never swap with Primary
-      [n[i], n[j]] = [n[j], n[i]];
-      return n.map((l, idx) => ({ ...l, label: LEVEL_LABELS[idx] ?? l.label }));
-    });
-  };
+  const moveFallback = (fi: number, dir: -1 | 1) => setChain((c) => {
+    const n = [...c]; const i = fi + 1; const j = i + dir;
+    if (j < 1 || j >= n.length) return c;
+    [n[i], n[j]] = [n[j], n[i]];
+    return n.map((l, idx) => ({ ...l, label: LEVEL_LABELS[idx] ?? l.label }));
+  });
 
   const handlePricingChange = (model: string, field: 'inputPer1M' | 'outputPer1M', val: string) => {
     const n = parseFloat(val); if (Number.isNaN(n) && val !== '') return;
     setModelPricing((prev) => ({ ...prev, [model]: { ...prev[model], [field]: val === '' ? 0 : n } }));
   };
-  const costDirty = thinkingBudget !== savedThinkingBudget
-    || (Number(fxRate) > 0 && Number(fxRate) !== savedFxRate);
 
   const handleSaveCost = async () => {
     const rate = Number(fxRate);
@@ -370,14 +296,10 @@ export function SettingsPage() {
     setSavingCost(true);
     try {
       await api.saveSettings({
-        usdToInr: rate,
-        thinkingBudget,
-        ...(ocrPageRate !== '' && Number(ocrPageRate) >= 0
-          ? { mistralOcrPricePer1kPages: Number(ocrPageRate) } : {}),
+        usdToInr: rate, thinkingBudget,
+        ...(ocrPageRate !== '' && Number(ocrPageRate) >= 0 ? { mistralOcrPricePer1kPages: Number(ocrPageRate) } : {}),
       });
-      setSavedFxRate(rate);
-      setSavedThinkingBudget(thinkingBudget);
-      setUsdToInr(rate);
+      setSavedFxRate(rate); setSavedThinkingBudget(thinkingBudget); setUsdToInr(rate);
       flash('Cost settings saved');
     } catch (e) { flash(`Error: ${(e as Error).message}`); }
     finally { setSavingCost(false); }
@@ -395,7 +317,11 @@ export function SettingsPage() {
     } catch (e) { flash(`Error: ${(e as Error).message}`); }
     finally { setSavingPricing(false); }
   };
-  const handleResetPricing = (model: string) => { const def = defaultPricing[model]; if (def) setModelPricing((prev) => ({ ...prev, [model]: { ...def } })); };
+
+  const handleResetPricing = (model: string) => {
+    const def = defaultPricing[model];
+    if (def) setModelPricing((prev) => ({ ...prev, [model]: { ...def } }));
+  };
 
   const providerGroups = useMemo(() => [
     { label: 'All', id: 'all', models: Object.keys(modelPricing) },
@@ -408,404 +334,353 @@ export function SettingsPage() {
     return group ? group.models.filter((m) => m in modelPricing).sort() : Object.keys(modelPricing).sort();
   }, [pricingFilter, modelPricing, providerGroups]);
 
-  if (!loaded) return <div style={{ padding: 40, fontFamily: T.font, color: T.muted, textAlign: 'center' }}>Loading settings...</div>;
-
-  const savedPrimary = savedChain[0];
-  const savedFallbacks = savedChain.slice(1).filter((l) => l.enabled);
+  if (!loaded) {
+    return <div className="py-10 text-center text-muted-foreground">Loading settings...</div>;
+  }
 
   return (
-    <div style={{ padding: '24px 30px', fontFamily: T.font, color: T.text, maxWidth: 760 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 2px', fontFamily: T.heading }}>Settings</h1>
-      <p style={{ fontSize: 13, color: T.muted, margin: '0 0 28px' }}>
+    <div className="max-w-3xl px-7 py-6 font-sans">
+      <h1 className="font-heading text-2xl font-extrabold">Settings</h1>
+      <p className="mt-0.5 mb-6 text-sm text-muted-foreground">
         Set your Primary OCR model, then optionally add fallback models if Primary fails.
       </p>
 
-      {/* ═══ Active pipeline summary ═══ */}
-      <div style={{
-        ...card, padding: '18px 22px',
-        background: 'linear-gradient(135deg, #EEF3FA 0%, #F6F9FE 100%)',
-        borderColor: '#c5d8f0',
-      }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-          Currently Active
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {savedPrimary && (
-            <span style={{
-              fontSize: 12, fontWeight: 700, padding: '6px 14px', borderRadius: 8,
-              background: LEVEL_COLORS[0], color: '#fff',
-            }}>
-              Primary: {savedPrimary.mode === 'single'
-                ? `${savedPrimary.provider}/${savedPrimary.model}`
-                : `Split → ${savedPrimary.structuringProvider ?? 'gemini'}/${savedPrimary.structuringModel ?? savedPrimary.model}`}
-            </span>
-          )}
-          {savedFallbacks.map((l, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12, color: T.muted }}>→ if fail</span>
-              <span style={{
-                fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 8,
-                background: LEVEL_COLORS[i + 1] ?? T.muted, color: '#fff',
-              }}>
-                {l.label}: {l.mode === 'single' ? `${l.provider}/${l.model}` : `Split → ${l.structuringProvider ?? 'gemini'}`}
-              </span>
-            </div>
-          ))}
-          {savedFallbacks.length === 0 && (
-            <span style={{ fontSize: 12, color: T.muted }}>No fallback configured</span>
-          )}
-        </div>
-      </div>
+      <Tabs defaultValue="pipeline">
+        <TabsList className="mb-4">
+          <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
+          <TabsTrigger value="pricing">Pricing</TabsTrigger>
+          <TabsTrigger value="credentials">Credentials</TabsTrigger>
+          <TabsTrigger value="ocr-config">OCR Config</TabsTrigger>
+        </TabsList>
 
-      {/* ═══ PRIMARY (always editable, cannot remove) ═══ */}
-      <Section title="Primary Model" badge={dirty ? 'Unsaved' : 'Required'} defaultOpen={true}>
-        <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px', lineHeight: 1.5 }}>
-          This model runs first on every invoice. Change provider/model freely — independent of fallbacks below.
-        </p>
-        <div style={{
-          background: LEVEL_BG[0],
-          border: `1.5px solid ${LEVEL_COLORS[0]}`,
-          borderRadius: 12, padding: '18px 20px', marginBottom: 14,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: '50%', background: LEVEL_COLORS[0], color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, fontWeight: 800,
-            }}>1</div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Primary</div>
-              <div style={{ fontSize: 11, color: T.muted }}>
-                {primary.mode === 'single'
-                  ? `${primary.provider} / ${primary.model}`
-                  : `Split → ${primary.structuringProvider ?? 'gemini'} / ${primary.structuringModel ?? primary.model}`}
-              </div>
-            </div>
-            <span style={{
-              marginLeft: 'auto', fontSize: 10, fontWeight: 700, padding: '3px 10px',
-              borderRadius: 10, background: T.successSoft, color: T.green,
-            }}>ALWAYS ON</span>
-          </div>
-          <ModelPicker level={primary} accent={LEVEL_COLORS[0]} onChange={updatePrimary} />
-        </div>
-      </Section>
-
-      {/* ═══ FALLBACK (separate section) ═══ */}
-      <Section
-        title="Fallback Models"
-        badge={fallbacks.length === 0 ? 'Optional' : `${fallbacks.filter((l) => l.enabled).length} enabled`}
-        defaultOpen={true}
-      >
-        <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px', lineHeight: 1.5 }}>
-          Tried only when Primary fails (API error) or reconciliation does not match. Each fallback is independent of Primary.
-        </p>
-
-        {fallbacks.length === 0 && (
-          <div style={{
-            ...card, padding: '16px 18px', background: '#fafafa',
-            textAlign: 'center', color: T.muted, fontSize: 13,
-          }}>
-            No fallback models yet. OCR uses Primary only.
-          </div>
-        )}
-
-        {fallbacks.map((level, fi) => {
-          const idx = fi + 1;
-          const color = LEVEL_COLORS[idx] ?? T.muted;
-          const bg = LEVEL_BG[idx] ?? '#F5F5F5';
-          return (
-            <div key={idx} style={{
-              background: level.enabled ? bg : '#fafafa',
-              border: `1.5px solid ${level.enabled ? color : T.border}`,
-              borderRadius: 12, padding: '18px 20px', marginBottom: 10,
-              opacity: level.enabled ? 1 : 0.55,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: '50%', background: color, color: '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14, fontWeight: 800,
-                }}>{idx + 1}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{LEVEL_LABELS[idx]}</div>
-                  <div style={{ fontSize: 11, color: T.muted }}>
-                    {level.mode === 'single'
-                      ? `${level.provider} / ${level.model}`
-                      : `Split → ${level.structuringProvider ?? 'gemini'} / ${level.structuringModel ?? level.model}`}
-                  </div>
+        {/* ─── Pipeline ─── */}
+        <TabsContent value="pipeline" className="space-y-4">
+          <Card className="border-[#c5d8f0] bg-gradient-to-br from-[#EEF3FA] to-[#F6F9FE]">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-primary">
+                Currently Active
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center gap-2">
+              {savedPrimary && <LevelSummary level={savedPrimary} idx={0} />}
+              {savedFallbacks.map((l, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">→ if fail</span>
+                  <LevelSummary level={l} idx={i + 1} />
                 </div>
-                <div style={{ display: 'flex', gap: 2 }}>
-                  <button type="button" disabled={fi === 0} onClick={() => moveFallback(fi, -1)}
-                    style={{ background: 'none', border: 'none', cursor: fi === 0 ? 'default' : 'pointer', fontSize: 14, color: fi === 0 ? T.border : T.muted, padding: 4 }}>
-                    &#9650;
-                  </button>
-                  <button type="button" disabled={fi === fallbacks.length - 1} onClick={() => moveFallback(fi, 1)}
-                    style={{ background: 'none', border: 'none', cursor: fi === fallbacks.length - 1 ? 'default' : 'pointer', fontSize: 14, color: fi === fallbacks.length - 1 ? T.border : T.muted, padding: 4 }}>
-                    &#9660;
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => updateFallback(fi, { ...level, enabled: !level.enabled })}
-                  style={{
-                    width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
-                    background: level.enabled ? T.green : T.border, position: 'relative',
-                  }}
-                >
-                  <div style={{
-                    width: 18, height: 18, borderRadius: '50%', background: '#fff',
-                    position: 'absolute', top: 3, left: level.enabled ? 23 : 3,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                  }} />
-                </button>
-              </div>
-
-              <ModelPicker
-                level={{ ...level, label: LEVEL_LABELS[idx] }}
-                accent={color}
-                onChange={(l) => updateFallback(fi, l)}
-              />
-
-              <div style={{ marginTop: 12, textAlign: 'right' }}>
-                <button type="button" onClick={() => removeFallback(fi)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: T.red, fontFamily: T.font }}>
-                  Remove fallback
-                </button>
-              </div>
-            </div>
-          );
-        })}
-
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
-          {chain.length < 3 && (
-            <button type="button" onClick={addFallback}
-              style={{ ...btnS, padding: '8px 16px', fontSize: 12, borderStyle: 'dashed', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Add fallback model
-            </button>
-          )}
-        </div>
-      </Section>
-
-      {/* Save bar */}
-      <div style={{
-        display: 'flex', gap: 12, alignItems: 'center', marginBottom: 28,
-        padding: '14px 18px', borderRadius: 10, background: dirty ? T.warnSoft : T.panel,
-        border: `1px solid ${dirty ? T.amber : T.border}`,
-      }}>
-        <button
-          style={{ ...btnP, opacity: saving || !dirty ? 0.5 : 1 }}
-          disabled={saving || !dirty}
-          onClick={() => void handleSave()}
-        >
-          {saving ? 'Saving...' : 'Save Pipeline'}
-        </button>
-        {dirty
-          ? <span style={{ fontSize: 12, color: T.amber, fontWeight: 600 }}>Unsaved changes — Primary and fallbacks save together</span>
-          : <span style={{ fontSize: 12, color: T.muted }}>All changes saved</span>}
-      </div>
-
-      {/* ═══ API Keys ═══ */}
-      <Section title="API Keys" subtitle={`${ALL_PROVIDERS.filter((p) => p.id === 'gemini' || creds[`${p.id}.apiKey`]).length}/${ALL_PROVIDERS.length} configured`} defaultOpen={true}>
-        <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px', lineHeight: 1.5 }}>
-          Each provider needs an API key (except Gemini which uses ADC).
-        </p>
-        {ALL_PROVIDERS.map((prov) => {
-          const keyField = `${prov.id}.apiKey`;
-          const epField = `${prov.id}.endpoint`;
-          const needsEndpoint = prov.id === 'azapi';
-          const shown = !!revealed[keyField];
-          const hasKey = !!(creds[keyField]);
-          const isActive = chain.some((l) => l.enabled && (
-            l.provider === prov.id || l.structuringProvider === prov.id ||
-            (l.mode === 'split' && prov.id === 'mistral')
-          ));
-          const isGeminiAdc = prov.id === 'gemini';
-          return (
-            <div key={prov.id} style={{
-              ...card, padding: '14px 18px',
-              opacity: isActive ? 1 : 0.45,
-              borderColor: isActive && !isGeminiAdc && !hasKey ? T.amber : T.border,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={dot(isGeminiAdc || hasKey)} />
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{prov.label}</span>
-                <span style={{
-                  fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
-                  background: isGeminiAdc || hasKey ? T.successSoft : T.border,
-                  color: isGeminiAdc || hasKey ? T.green : T.muted,
-                }}>{isGeminiAdc ? 'ADC' : hasKey ? 'Configured' : 'No key'}</span>
-                {isActive && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
-                    background: T.accent, color: '#fff', marginLeft: 'auto',
-                  }}>IN USE</span>
-                )}
-              </div>
-              <div style={{ fontSize: 11, color: T.muted, marginTop: 4, marginBottom: isGeminiAdc ? 0 : 10 }}>{prov.desc}</div>
-              {!isGeminiAdc && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {needsEndpoint && (
-                    <input type="text" style={{ ...inp }}
-                      placeholder={`${prov.label} endpoint URL`} autoComplete="off"
-                      value={creds[epField] ?? ''}
-                      onChange={(e) => setCreds((p) => ({ ...p, [epField]: e.target.value }))} />
-                  )}
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type={shown ? 'text' : 'password'} style={{ ...inp, flex: 1 }}
-                      placeholder={needsEndpoint ? `${prov.label} token` : `${prov.label} API key`} autoComplete="off"
-                      value={creds[keyField] ?? ''}
-                      onChange={(e) => setCreds((p) => ({ ...p, [keyField]: e.target.value }))} />
-                    <button type="button" style={{ ...btnS, padding: '8px 12px', fontSize: 11 }} onClick={() => toggle(keyField)}>
-                      {shown ? 'Hide' : 'Show'}
-                    </button>
-                    <button style={{ ...btnP, padding: '8px 14px', fontSize: 11 }} onClick={() => void handleSaveCreds(prov.id)}>Save</button>
-                    {hasKey && (
-                      <button style={{ ...btnS, padding: '8px 12px', fontSize: 11, color: T.red, borderColor: T.red }}
-                        onClick={() => void handleClearCreds(prov.id)}>Clear</button>
-                    )}
-                  </div>
-                </div>
+              ))}
+              {savedFallbacks.length === 0 && (
+                <span className="text-xs text-muted-foreground">No fallback configured</span>
               )}
-            </div>
-          );
-        })}
-      </Section>
+            </CardContent>
+          </Card>
 
-      {/* ═══ Pricing (collapsed) ═══ */}
-      <Section title="Cost & Currency" subtitle="How extraction cost is priced and displayed">
-        <div style={card}>
-          <div style={{ marginBottom: 18 }}>
-            <div style={lbl}>USD → INR rate</div>
-            <input
-              type="number" step="0.01" min="0" value={fxRate}
-              onChange={(e) => setFxRate(e.target.value)}
-              placeholder="96"
-              style={{ ...inp, width: 160 }}
-            />
-            <div style={note}>
-              Model prices are quoted in USD; this converts them for display.
-              {savedFxRate != null && <> Currently <strong>₹{savedFxRate}</strong> per $1.</>}
-              {' '}Each invoice stores the rate in force when it was processed, so changing
-              this affects new invoices only — historical figures stay put.
-            </div>
-          </div>
+          <Card className={cn('ring-2', LEVEL_RING[0], LEVEL_BG[0])}>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base">Primary Model</CardTitle>
+                <Badge variant={dirty ? 'warning' : 'info'}>{dirty ? 'Unsaved' : 'Required'}</Badge>
+              </div>
+              <CardDescription>
+                This model runs first on every invoice. Change provider/model freely — independent of fallbacks below.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 flex items-center gap-2.5">
+                <div className={cn('flex h-8 w-8 items-center justify-center rounded-full text-sm font-extrabold text-white', LEVEL_DOT[0])}>1</div>
+                <div className="flex-1">
+                  <p className="text-sm font-bold">Primary</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {primary.mode === 'single'
+                      ? `${primary.provider} / ${primary.model}`
+                      : `Split → ${primary.structuringProvider ?? 'gemini'} / ${primary.structuringModel ?? primary.model}`}
+                  </p>
+                </div>
+                <Badge variant="success">ALWAYS ON</Badge>
+              </div>
+              <ModelPicker level={primary} accentClass={LEVEL_DOT[0]} onChange={updatePrimary} />
+            </CardContent>
+          </Card>
 
-          <div style={{ marginBottom: 18, paddingTop: 14, borderTop: `1px solid ${T.border}` }}>
-            <div style={lbl}>Reasoning limit</div>
-            <select style={{ ...sel, maxWidth: 380 }} value={thinkingBudget}
-                    onChange={(e) => setThinkingBudget(Number(e.target.value))}>
-              {THINKING_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <div style={note}>
-              {THINKING_OPTIONS.find((o) => o.value === thinkingBudget)?.hint}
-              {' '}Models use only what they need — typically 150–800 tokens — up to this cap,
-              so raising it costs nothing on ordinary invoices and only affects complex ones.
-            </div>
-          </div>
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base">Fallback Models</CardTitle>
+                <Badge variant="muted">
+                  {fallbacks.length === 0 ? 'Optional' : `${fallbacks.filter((l) => l.enabled).length} enabled`}
+                </Badge>
+              </div>
+              <CardDescription>
+                Tried only when Primary fails (API error) or reconciliation does not match.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {fallbacks.length === 0 && (
+                <p className="rounded-lg border border-dashed bg-muted/30 py-4 text-center text-sm text-muted-foreground">
+                  No fallback models yet. OCR uses Primary only.
+                </p>
+              )}
+              {fallbacks.map((level, fi) => {
+                const idx = fi + 1;
+                return (
+                  <Card key={idx} className={cn(
+                    'ring-2 transition-opacity',
+                    level.enabled ? cn(LEVEL_RING[idx], LEVEL_BG[idx]) : 'opacity-55 ring-border bg-muted/20',
+                  )}>
+                    <CardContent className="pt-4">
+                      <div className="mb-3.5 flex items-center gap-2">
+                        <div className={cn('flex h-8 w-8 items-center justify-center rounded-full text-sm font-extrabold text-white', LEVEL_DOT[idx])}>{idx + 1}</div>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold">{LEVEL_LABELS[idx]}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {level.mode === 'single'
+                              ? `${level.provider} / ${level.model}`
+                              : `Split → ${level.structuringProvider ?? 'gemini'} / ${level.structuringModel ?? level.model}`}
+                          </p>
+                        </div>
+                        <div className="flex gap-0.5">
+                          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={fi === 0} onClick={() => moveFallback(fi, -1)}>
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={fi === fallbacks.length - 1} onClick={() => moveFallback(fi, 1)}>
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        <Switch checked={level.enabled} onCheckedChange={(v) => updateFallback(fi, { ...level, enabled: v })} />
+                      </div>
+                      <ModelPicker level={{ ...level, label: LEVEL_LABELS[idx] }} accentClass={LEVEL_DOT[idx]} onChange={(l) => updateFallback(fi, l)} />
+                      <div className="mt-3 text-right">
+                        <Button type="button" variant="link" className="h-auto p-0 text-xs text-destructive" onClick={() => removeFallback(fi)}>
+                          Remove fallback
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              {chain.length < 3 && (
+                <Button type="button" variant="outline" size="sm" className="border-dashed" onClick={addFallback}>
+                  <Plus className="h-4 w-4" /> Add fallback model
+                </Button>
+              )}
+            </CardContent>
+          </Card>
 
-          <div style={{ marginBottom: 18, paddingTop: 14, borderTop: `1px solid ${T.border}` }}>
-            <div style={lbl}>Mistral OCR — $ per 1,000 pages</div>
-            <input
-              type="number" step="0.01" min="0" value={ocrPageRate}
-              onChange={(e) => setOcrPageRate(e.target.value)}
-              placeholder="4"
-              style={{ ...inp, width: 160 }}
-            />
-            <div style={note}>
-              Mistral bills OCR per page, not per token, so it cannot sit in the pricing
-              table below. Used only when a fallback level runs Split mode.
-            </div>
-          </div>
-
-          <button style={{ ...btnP, opacity: savingCost || !costDirty ? 0.5 : 1 }}
-                  disabled={savingCost || !costDirty} onClick={() => void handleSaveCost()}>
-            {savingCost ? 'Saving...' : 'Save cost settings'}
-          </button>
-          {costDirty && (
-            <span style={{ fontSize: 12, color: T.amber, fontWeight: 600, marginLeft: 10 }}>
-              Unsaved changes
+          <div className={cn(
+            'flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3.5',
+            dirty ? 'border-warning/40 bg-warning-soft' : 'border-border bg-card',
+          )}>
+            <Button disabled={saving || !dirty} onClick={() => void handleSave()}>
+              {saving ? 'Saving...' : 'Save Pipeline'}
+            </Button>
+            <span className={cn('text-xs font-semibold', dirty ? 'text-warning' : 'text-muted-foreground')}>
+              {dirty ? 'Unsaved changes — Primary and fallbacks save together' : 'All changes saved'}
             </span>
-          )}
-        </div>
-      </Section>
+          </div>
 
-      <Section title="Model Pricing" subtitle="$/1M tokens" defaultOpen={false}>
-        <p style={{ fontSize: 12, color: T.muted, margin: '0 0 12px' }}>
-          Per-model token pricing for cost calculation. Edit to override defaults.
-        </p>
-        <div style={card}>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-            {providerGroups.map((g) => (
-              <button key={g.id} type="button"
-                style={{
-                  padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 12,
-                  border: `1px solid ${pricingFilter === g.id ? T.accent : T.border}`,
-                  background: pricingFilter === g.id ? T.accent : 'transparent',
-                  color: pricingFilter === g.id ? '#fff' : T.text,
-                  cursor: 'pointer', fontFamily: T.font,
-                }}
-                onClick={() => setPricingFilter(g.id)}>{g.label}</button>
-            ))}
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: T.font }}>
-              <thead>
-                <tr style={{ borderBottom: `2px solid ${T.border}` }}>
-                  <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 700, color: T.muted, fontSize: 10, textTransform: 'uppercase' }}>Model</th>
-                  <th style={{ textAlign: 'right', padding: '8px 6px', fontWeight: 700, color: T.muted, fontSize: 10, textTransform: 'uppercase', width: 120 }}>Input $/1M</th>
-                  <th style={{ textAlign: 'right', padding: '8px 6px', fontWeight: 700, color: T.muted, fontSize: 10, textTransform: 'uppercase', width: 120 }}>Output $/1M</th>
-                  <th style={{ width: 50 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredModels.map((model) => {
-                  const price = modelPricing[model];
-                  const def = defaultPricing[model];
-                  const isModified = def && (price?.inputPer1M !== def.inputPer1M || price?.outputPer1M !== def.outputPer1M);
-                  if (!price) return null;
-                  return (
-                    <tr key={model} style={{ borderBottom: `1px solid ${T.border}` }}>
-                      <td style={{ padding: '5px 6px', fontWeight: 600, fontSize: 12 }}>
-                        {model}
-                        {isModified && <span style={{ marginLeft: 6, fontSize: 9, color: T.amber, fontWeight: 700 }}>CUSTOM</span>}
-                      </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'right' }}>
-                        <input type="number" step="0.01" min="0"
-                          style={{ ...inp, width: 90, textAlign: 'right', padding: '4px 6px', fontSize: 12 }}
-                          value={price.inputPer1M} onChange={(e) => handlePricingChange(model, 'inputPer1M', e.target.value)} />
-                      </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'right' }}>
-                        <input type="number" step="0.01" min="0"
-                          style={{ ...inp, width: 90, textAlign: 'right', padding: '4px 6px', fontSize: 12 }}
-                          value={price.outputPer1M} onChange={(e) => handlePricingChange(model, 'outputPer1M', e.target.value)} />
-                      </td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center' }}>
-                        {isModified && (
-                          <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: T.muted, textDecoration: 'underline' }}
-                            onClick={() => handleResetPricing(model)}>Reset</button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <button style={btnP} disabled={savingPricing} onClick={() => void handleSavePricing()}>
-              {savingPricing ? 'Saving...' : 'Save Pricing'}
+          <Card>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-6 py-4 text-left"
+              onClick={() => setHowItWorksOpen((o) => !o)}
+            >
+              <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', howItWorksOpen && 'rotate-90')} />
+              <span className="text-sm font-bold">How it Works</span>
             </button>
-          </div>
-        </div>
-      </Section>
+            {howItWorksOpen && (
+              <CardContent className="border-t pt-4 text-sm leading-relaxed text-muted-foreground">
+                <strong className="text-foreground">Primary</strong> — always runs first. Change it anytime without touching fallbacks.<br />
+                <strong className="text-foreground">Fallback</strong> — optional Secondary / Tertiary. Used only if Primary fails or totals don&apos;t match.<br /><br />
+                Match → <span className="font-semibold text-success">OCR_COMPLETED</span>. All fail reconcile → best attempt as{' '}
+                <span className="font-semibold text-warning">NEED_REVIEW</span>. All crash →{' '}
+                <span className="font-semibold text-destructive">FAILED</span>.
+              </CardContent>
+            )}
+          </Card>
+        </TabsContent>
 
-      <Section title="How it Works" defaultOpen={false}>
-        <div style={{ ...card, background: '#f8f9fb', fontSize: 13, color: T.muted, lineHeight: 1.8 }}>
-          <strong style={{ color: T.text }}>Primary</strong> — always runs first. Change it anytime without touching fallbacks.<br />
-          <strong style={{ color: T.text }}>Fallback</strong> — optional Secondary / Tertiary. Used only if Primary fails or totals don't match.<br /><br />
-          Match → <span style={{ color: T.green, fontWeight: 600 }}>OCR_COMPLETED</span>. All fail reconcile → best attempt as <span style={{ color: T.amber, fontWeight: 600 }}>NEED_REVIEW</span>. All crash → <span style={{ color: T.red, fontWeight: 600 }}>FAILED</span>.
-        </div>
-      </Section>
+        {/* ─── Pricing ─── */}
+        <TabsContent value="pricing" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Model Pricing</CardTitle>
+              <CardDescription>Per-model token pricing for cost calculation. Edit to override defaults.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-3.5 flex flex-wrap gap-1.5">
+                {providerGroups.map((g) => (
+                  <Button
+                    key={g.id}
+                    type="button"
+                    size="sm"
+                    variant={pricingFilter === g.id ? 'default' : 'outline'}
+                    className="h-7 rounded-full text-[11px]"
+                    onClick={() => setPricingFilter(g.id)}
+                  >
+                    {g.label}
+                  </Button>
+                ))}
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px] uppercase">Model</TableHead>
+                    <TableHead className="w-[120px] text-right text-[10px] uppercase">Input $/1M</TableHead>
+                    <TableHead className="w-[120px] text-right text-[10px] uppercase">Output $/1M</TableHead>
+                    <TableHead className="w-12" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredModels.map((model) => {
+                    const price = modelPricing[model];
+                    const def = defaultPricing[model];
+                    const isModified = def && (price?.inputPer1M !== def.inputPer1M || price?.outputPer1M !== def.outputPer1M);
+                    if (!price) return null;
+                    return (
+                      <TableRow key={model}>
+                        <TableCell className="py-1.5 text-xs font-semibold">
+                          {model}
+                          {isModified && <Badge variant="warning" className="ml-1.5 text-[9px]">CUSTOM</Badge>}
+                        </TableCell>
+                        <TableCell className="py-1 text-right">
+                          <Input type="number" step="0.01" min="0" className="ml-auto h-8 w-[90px] text-right text-xs"
+                            value={price.inputPer1M} onChange={(e) => handlePricingChange(model, 'inputPer1M', e.target.value)} />
+                        </TableCell>
+                        <TableCell className="py-1 text-right">
+                          <Input type="number" step="0.01" min="0" className="ml-auto h-8 w-[90px] text-right text-xs"
+                            value={price.outputPer1M} onChange={(e) => handlePricingChange(model, 'outputPer1M', e.target.value)} />
+                        </TableCell>
+                        <TableCell className="py-1 text-center">
+                          {isModified && (
+                            <Button type="button" variant="link" className="h-auto p-0 text-[10px]" onClick={() => handleResetPricing(model)}>
+                              Reset
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              <Button className="mt-3.5" disabled={savingPricing} onClick={() => void handleSavePricing()}>
+                {savingPricing ? 'Saving...' : 'Save Pricing'}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ─── Credentials ─── */}
+        <TabsContent value="credentials" className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Each provider needs an API key (except Gemini which uses ADC).
+          </p>
+          {ALL_PROVIDERS.map((prov) => {
+            const keyField = `${prov.id}.apiKey`;
+            const epField = `${prov.id}.endpoint`;
+            const needsEndpoint = prov.id === 'azapi';
+            const shown = !!revealed[keyField];
+            const hasKey = !!creds[keyField];
+            const isActive = chain.some((l) => l.enabled && (
+              l.provider === prov.id || l.structuringProvider === prov.id || (l.mode === 'split' && prov.id === 'mistral')
+            ));
+            const isGeminiAdc = prov.id === 'gemini';
+            return (
+              <Card key={prov.id} className={cn(
+                'transition-opacity',
+                !isActive && 'opacity-45',
+                isActive && !isGeminiAdc && !hasKey && 'border-warning/50',
+              )}>
+                <CardContent className="pt-4">
+                  <div className="flex items-center gap-2">
+                    <span className={cn('h-2 w-2 rounded-full', isGeminiAdc || hasKey ? 'bg-success' : 'bg-border')} />
+                    <span className="text-sm font-bold">{prov.label}</span>
+                    <Badge variant={isGeminiAdc || hasKey ? 'success' : 'muted'}>
+                      {isGeminiAdc ? 'ADC' : hasKey ? 'Configured' : 'No key'}
+                    </Badge>
+                    {isActive && <Badge className="ml-auto">IN USE</Badge>}
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{prov.desc}</p>
+                  {!isGeminiAdc && (
+                    <div className="mt-2.5 space-y-2">
+                      {needsEndpoint && (
+                        <Input type="text" placeholder={`${prov.label} endpoint URL`} autoComplete="off"
+                          value={creds[epField] ?? ''} onChange={(e) => setCreds((p) => ({ ...p, [epField]: e.target.value }))} />
+                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input type={shown ? 'text' : 'password'} className="flex-1 min-w-[180px]"
+                          placeholder={needsEndpoint ? `${prov.label} token` : `${prov.label} API key`} autoComplete="off"
+                          value={creds[keyField] ?? ''} onChange={(e) => setCreds((p) => ({ ...p, [keyField]: e.target.value }))} />
+                        <Button type="button" variant="outline" size="sm" onClick={() => toggle(keyField)}>
+                          {shown ? 'Hide' : 'Show'}
+                        </Button>
+                        <Button type="button" size="sm" onClick={() => void handleSaveCreds(prov.id)}>Save</Button>
+                        {hasKey && (
+                          <Button type="button" variant="outline" size="sm" className="text-destructive border-destructive/30"
+                            onClick={() => void handleClearCreds(prov.id)}>Clear</Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </TabsContent>
+
+        {/* ─── OCR Config ─── */}
+        <TabsContent value="ocr-config" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Cost &amp; Currency</CardTitle>
+              <CardDescription>How extraction cost is priced and displayed</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] uppercase tracking-wide">USD → INR rate</Label>
+                <Input type="number" step="0.01" min="0" value={fxRate} onChange={(e) => setFxRate(e.target.value)}
+                  placeholder="96" className="w-40" />
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Model prices are quoted in USD; this converts them for display.
+                  {savedFxRate != null && <> Currently <strong>₹{savedFxRate}</strong> per $1.</>}
+                  {' '}Each invoice stores the rate in force when it was processed.
+                </p>
+              </div>
+
+              <div className="space-y-1.5 border-t border-border pt-4">
+                <Label className="text-[11px] uppercase tracking-wide">Reasoning limit</Label>
+                <Select value={String(thinkingBudget)} onValueChange={(v) => setThinkingBudget(Number(v))}>
+                  <SelectTrigger className="max-w-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {THINKING_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  {THINKING_OPTIONS.find((o) => o.value === thinkingBudget)?.hint}
+                  {' '}Models use only what they need — typically 150–800 tokens — up to this cap.
+                </p>
+              </div>
+
+              <div className="space-y-1.5 border-t border-border pt-4">
+                <Label className="text-[11px] uppercase tracking-wide">Mistral OCR — $ per 1,000 pages</Label>
+                <Input type="number" step="0.01" min="0" value={ocrPageRate} onChange={(e) => setOcrPageRate(e.target.value)}
+                  placeholder="4" className="w-40" />
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Mistral bills OCR per page, not per token. Used only when a fallback level runs Split mode.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+                <Button disabled={savingCost || !costDirty} onClick={() => void handleSaveCost()}>
+                  {savingCost ? 'Saving...' : 'Save cost settings'}
+                </Button>
+                {costDirty && <span className="text-xs font-semibold text-warning">Unsaved changes</span>}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Toast message={toast} />
     </div>

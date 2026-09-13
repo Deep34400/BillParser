@@ -10,9 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge.js';
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table.js';
 import { WebhooksPanel } from '../components/WebhooksPanel.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { Skeleton } from '@/components/ui/skeleton.js';
 
 export function AccountPage() {
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
+  const [keysLoading, setKeysLoading] = useState(true);
   const [txs, setTxs] = useState<TokenTransaction[]>([]);
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [newKeyResult, setNewKeyResult] = useState<string | null>(null);
@@ -24,7 +27,11 @@ export function AccountPage() {
     setTimeout(() => setMsg(''), 4000);
   };
 
-  const loadKeys = useCallback(async () => { try { const r = await api.listApiKeys(); setKeys(r.data); } catch { /* ignore */ } }, []);
+  const loadKeys = useCallback(async () => {
+    setKeysLoading(true);
+    try { const r = await api.listApiKeys(); setKeys(r.data); } catch { /* ignore */ }
+    finally { setKeysLoading(false); }
+  }, []);
   const loadTxs = useCallback(async () => { try { const r = await api.accountTransactions(50); setTxs(r.data); } catch { /* ignore */ } }, []);
   useEffect(() => { void loadKeys(); void loadTxs(); }, [loadKeys, loadTxs]);
 
@@ -39,7 +46,6 @@ export function AccountPage() {
   };
 
   const handleDelete = async (keyId: string) => {
-    if (!confirm('Revoke this API key? Any integration using it will stop working.')) return;
     try { await api.deleteApiKey(keyId); flash('API key revoked'); void loadKeys(); } catch (e) { flash((e as Error).message, 'err'); }
   };
 
@@ -57,9 +63,18 @@ export function AccountPage() {
       )}
 
       {/* Account summary cards */}
-      {acct && (
-        <Card className="mb-4">
-          <CardContent className="pt-5">
+      <Card className="mb-4">
+        <CardContent className="pt-5">
+          {keysLoading ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i}>
+                  <Skeleton className="h-3 w-16 mb-2" />
+                  <Skeleton className="h-7 w-24" />
+                </div>
+              ))}
+            </div>
+          ) : acct ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               {[
                 { label: 'Balance', value: formatBalance(acct.role, acct.token_balance) },
@@ -73,9 +88,9 @@ export function AccountPage() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          ) : null}
+        </CardContent>
+      </Card>
 
       {/* API Keys */}
       <Card className="mb-4">
@@ -102,7 +117,18 @@ export function AccountPage() {
             </div>
           )}
 
-          {keys.length > 0 ? (
+          {keysLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-4 flex-1" />
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-8 w-20" />
+                </div>
+              ))}
+            </div>
+          ) : keys.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow><TableHead>Label</TableHead><TableHead>API Key</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Actions</TableHead></TableRow>

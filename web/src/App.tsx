@@ -14,6 +14,7 @@ import { AccountPage } from './pages/AccountPage.js';
 import { ActivityPage } from './pages/ActivityPage.js';
 import { api, type SessionUser } from './api/client.js';
 import { setUsdToInr } from './lib/format.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 
 export default function App() {
   const [user, setUser] = useState<SessionUser | null>(() => {
@@ -44,14 +45,14 @@ export default function App() {
   // Load the configured USD→INR rate once signed in; until then rupee figures use
   // the built-in fallback. Failure is non-fatal — the fallback still renders.
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.role !== 'admin') return;
     api.settings()
       .then((s) => setUsdToInr((s as { usdToInr?: number }).usdToInr))
       .catch(() => { /* keep fallback */ });
   }, [user]);
 
   return (
-    <>
+    <ErrorBoundary>
       {!user ? (
         <LoginPage onLogin={handleLogin} />
       ) : (
@@ -65,16 +66,20 @@ export default function App() {
               <Route path="/fraud" element={<FraudPage />} />
               <Route path="/odometer" element={<OdometerPage />} />
               <Route path="/organization" element={<Navigate to="/invoices" replace />} />
-              <Route path="/settings" element={<SettingsPage />} />
               <Route path="/account" element={<AccountPage />} />
-              {user.role === 'admin'
-                ? <Route path="/admin" element={<AdminPage />} />
-                : <Route path="/activity" element={<ActivityPage />} />}
+              {user.role === 'admin' ? (
+                <>
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/admin" element={<AdminPage />} />
+                </>
+              ) : (
+                <Route path="/activity" element={<ActivityPage />} />
+              )}
             </Routes>
           </Shell>
         </BrowserRouter>
       )}
       <Toaster />
-    </>
+    </ErrorBoundary>
   );
 }
