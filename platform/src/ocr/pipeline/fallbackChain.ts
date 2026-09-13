@@ -16,6 +16,7 @@ import { runSplitMode } from './split.js';
 import { enrichParsedInvoice } from '../transformer/normalize/index.js';
 import { reconcileInvoiceTotal, type TotalReconciliation } from '../transformer/reconcileTotal.js';
 import { computeReview } from '../transformer/review.js';
+import { roundMoney } from '../../shared/numbers.js';
 
 export interface ReconBreakdown {
   matched: boolean;
@@ -71,10 +72,6 @@ export interface FallbackChainResult extends PipelineResult {
   fallbackAttempts: number;
   fallbackHistory: FallbackAttempt[];
   totalReconciliation: TotalReconciliation;
-}
-
-function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 function buildSummary(parsed: ParsedInvoiceData) {

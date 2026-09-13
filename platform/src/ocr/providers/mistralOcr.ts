@@ -9,7 +9,7 @@ import { resolveProviderKey } from './resolveKey.js';
 
 const MISTRAL_OCR_URL = 'https://api.mistral.ai/v1/ocr';
 const OCR_MODEL = 'mistral-ocr-latest';
-const TIMEOUT_MS = 120_000;
+import { LLM_TIMEOUT_MS as TIMEOUT_MS } from '../../shared/ocrConstants.js';
 
 /**
  * Fallback price per 1,000 pages, used only when Settings has no value.

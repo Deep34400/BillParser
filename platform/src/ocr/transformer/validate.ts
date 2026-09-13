@@ -12,13 +12,12 @@ import type { ValidationIssue } from '../types/parser.js';
 import { toNum } from '../parser/parser.js';
 import { partsTaxableMismatch, roundMoney, columnNet } from './normalize/index.js';
 
-/** Full GST rates allowed on line items / IGST footer. */
-const FULL_GST_RATES = new Set([0, 3, 5, 12, 18, 28]);
-/** CGST/SGST half-rates (intra-state). */
-const HALF_GST_RATES = new Set([0, 1.5, 2.5, 6, 9, 14]);
+import {
+  FULL_GST_RATES, HALF_GST_RATES, GST_TOLERANCE,
+  isValidFullGstRate, isValidHalfGstRate,
+} from '../../shared/ocrConstants.js';
 
 const INDIAN_REG_RE = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$|^\d{2}BH\d{4}[A-Z]$/;
-const GST_TOLERANCE = 1;
 
 function warn(path: string, message: string): ValidationIssue {
   return { path, message, severity: 'warning' };
@@ -26,14 +25,6 @@ function warn(path: string, message: string): ValidationIssue {
 
 function error(path: string, message: string): ValidationIssue {
   return { path, message, severity: 'error' };
-}
-
-function isValidFullGstRate(rate: number): boolean {
-  return FULL_GST_RATES.has(rate);
-}
-
-function isValidHalfGstRate(rate: number): boolean {
-  return HALF_GST_RATES.has(rate);
 }
 
 function isValidIndianReg(raw: string): boolean {

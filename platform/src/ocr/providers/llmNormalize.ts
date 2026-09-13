@@ -12,7 +12,7 @@ import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
 import { getSettings } from '../../shared/settings.js';
 import { computeLlmCost } from '../../shared/modelPricing.js';
 
-const TIMEOUT_MS = 120_000;
+import { LLM_TIMEOUT_MS as TIMEOUT_MS } from '../../shared/ocrConstants.js';
 
 function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();

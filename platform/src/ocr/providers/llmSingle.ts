@@ -15,7 +15,7 @@ import { isPdf } from '../../shared/storage.js';
 import { getSettings } from '../../shared/settings.js';
 import { computeLlmCost } from '../../shared/modelPricing.js';
 
-const TIMEOUT_MS = 120_000;
+import { LLM_TIMEOUT_MS as TIMEOUT_MS } from '../../shared/ocrConstants.js';
 
 export interface SingleResult {
   parsed: ParsedInvoiceData;

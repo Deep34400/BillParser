@@ -9,7 +9,7 @@ import { getSettings } from '../../shared/settings.js';
 import { computeLlmCost, resolveModelPricing, type ModelPrice } from '../../shared/modelPricing.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 
-const TIMEOUT_MS = 120_000;
+import { LLM_TIMEOUT_MS as TIMEOUT_MS } from '../../shared/ocrConstants.js';
 
 /**
  * Cap on Gemini reasoning tokens per call.

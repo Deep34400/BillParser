@@ -1,8 +1,6 @@
 import type { TotalsAndTaxSummary, GstBreakdownLine } from '../../types/invoice.js';
 
-function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+import { roundMoney } from '../../../shared/numbers.js';
 
 export function parseMoneyToken(s: string): number | null {
   const n = parseFloat(s.replace(/,/g, '').trim());

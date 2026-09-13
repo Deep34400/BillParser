@@ -6,7 +6,7 @@ import type { ParsedInvoiceData, TotalsAndTaxSummary } from '../types/invoice.js
 import type { OcrStepCost, LlmUsage } from '../types/provider.js';
 import type { SingleResult } from './llmSingle.js';
 
-const AZAPI_TIMEOUT_MS = 180_000;
+import { AZAPI_TIMEOUT_MS } from '../../shared/ocrConstants.js';
 
 export interface AzapiRawResponse {
   status?: string;

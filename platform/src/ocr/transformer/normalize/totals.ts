@@ -6,9 +6,7 @@ import {
   extractCashMemoTotal,
 } from './footer.js';
 
-function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+import { roundMoney } from '../../../shared/numbers.js';
 
 function sumParts(items: PartsLineItem[]): number | null {
   if (!items.length) return null;

@@ -12,11 +12,10 @@ import type { ParsedInvoiceData } from '../types/invoice.js';
 import { reconcileInvoiceTotal, sumPartsBase, type TotalReconciliation } from './reconcileTotal.js';
 import type { ReviewReasonCode } from './reviewCodes.js';
 
-const TOLERANCE = 2;
+import { roundMoney } from '../../shared/numbers.js';
+import { RECONCILIATION_TOLERANCE } from '../../shared/ocrConstants.js';
 
-function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+const TOLERANCE = RECONCILIATION_TOLERANCE;
 
 function labourBase(parsed: ParsedInvoiceData): number {
   return roundMoney(

@@ -8,7 +8,7 @@ import { resolveProviderKey } from '../ocr/providers/resolveKey.js';
 import { getSettings, type AppSettings } from '../shared/settings.js';
 import { env } from '../config/env.js';
 
-const TIMEOUT_MS = 60_000;
+import { ODOMETER_TIMEOUT_MS as TIMEOUT_MS } from '../shared/ocrConstants.js';
 const MIN_ACCEPT_CONFIDENCE = 0.55;
 const MAX_PLAUSIBLE_JUMP_KM = 2000;
 

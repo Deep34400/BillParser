@@ -51,9 +51,8 @@ export function filterLabourLineItems(items: LabourServiceLineItem[]): LabourSer
 
 // ── Core normalize helpers ──────────────────────────────────────
 
-export function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+import { roundMoney } from '../../../shared/numbers.js';
+export { roundMoney } from '../../../shared/numbers.js';
 
 export function taxableTolerance(expected: number): number {
   return Math.max(0.05, Math.abs(expected) * 0.02);

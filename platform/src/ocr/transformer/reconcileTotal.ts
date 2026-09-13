@@ -14,9 +14,7 @@ export interface TotalReconciliation {
   reason: string | null;
 }
 
-function roundMoney(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+import { roundMoney } from '../../shared/numbers.js';
 
 /**
  * Parts line amount for reconciliation:
@@ -104,7 +102,8 @@ function sideTax(
   return roundMoney(tax);
 }
 
-const TOLERANCE = 2;
+import { RECONCILIATION_TOLERANCE } from '../../shared/ocrConstants.js';
+const TOLERANCE = RECONCILIATION_TOLERANCE;
 
 export function reconcileInvoiceTotal(parsed: ParsedInvoiceData): TotalReconciliation {
   const t = parsed.totals_and_tax_summary ?? ({} as TotalsAndTaxSummary);
