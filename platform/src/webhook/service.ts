@@ -10,12 +10,15 @@
  */
 import { v4 as uuid } from 'uuid';
 import { createHmac } from 'crypto';
+import { Op } from 'sequelize';
 import {
   createWebhook, listWebhooks, getWebhook, updateWebhook, deleteWebhook,
   findActiveWebhooksForEvent,
   type WebhookEndpointDoc,
 } from './repository.js';
 import { WEBHOOK_EVENTS, WebhookDelivery, type WebhookEvent } from './models/index.js';
+import { WebhookEndpoint } from './models/webhookEndpoint.js';
+import { User } from '../users/models/user.js';
 import { NotFoundError, ValidationError } from '../shared/errors.js';
 import { audit } from '../audit/service.js';
 
@@ -72,6 +75,20 @@ export async function toggleEndpoint(endpointId: string, userId: string, active:
   if (!ep || ep.user_id !== userId) throw new NotFoundError('Webhook endpoint', endpointId);
   await updateWebhook(endpointId, { active });
   audit('webhook:update', { userId, resourceType: 'webhook', resourceId: endpointId, details: { active } });
+  if (active) replayFailedDeliveries(ep);
+}
+
+export async function adminToggleEndpoint(endpointId: string, adminUserId: string, active: boolean): Promise<void> {
+  const ep = await getWebhook(endpointId);
+  if (!ep) throw new NotFoundError('Webhook endpoint', endpointId);
+  await updateWebhook(endpointId, { active });
+  audit('webhook:update', {
+    userId: adminUserId,
+    resourceType: 'webhook',
+    resourceId: endpointId,
+    details: { active, admin: true, ownerUserId: ep.user_id },
+  });
+  if (active) replayFailedDeliveries({ ...ep, active: true });
 }
 
 export async function removeEndpoint(endpointId: string, userId: string): Promise<void> {
@@ -101,6 +118,201 @@ export async function getDeliveryLog(endpointId: string, limit = 50) {
     error: row.error,
     created_at: row.createdAt.toISOString(),
   }));
+}
+
+function payloadData(payload: unknown): Record<string, unknown> {
+  if (!payload || typeof payload !== 'object') return {};
+  const raw = payload as { data?: Record<string, unknown>; id?: string };
+  return raw.data ?? (raw as Record<string, unknown>);
+}
+
+function deliveryGroupKey(endpointId: string, event: string, payload: unknown): string {
+  const data = payloadData(payload);
+  const billId = typeof data.billId === 'string' ? data.billId : '';
+  const envelopeId = payload && typeof payload === 'object' ? String((payload as { id?: string }).id ?? '') : '';
+  return `${endpointId}:${event}:${billId || envelopeId}`;
+}
+
+async function loadUserMap(userIds: string[]) {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return new Map<string, { email: string; name: string }>();
+  const rows = await User.findAll({
+    where: { userId: { [Op.in]: ids } },
+    attributes: ['userId', 'email', 'name'],
+  });
+  return new Map(rows.map((u) => [u.userId, { email: u.email, name: u.name }]));
+}
+
+/** Replay events that never succeeded for this endpoint (used when it is enabled again). */
+export function replayFailedDeliveries(endpoint: WebhookEndpointDoc): void {
+  WebhookDelivery.findAll({
+    where: { endpointId: endpoint.endpoint_id },
+    order: [['createdAt', 'DESC']],
+    limit: 400,
+  })
+    .then((rows) => {
+      const succeeded = new Set<string>();
+      const pending = new Map<string, { event: WebhookEvent; data: Record<string, unknown> }>();
+      for (const row of rows) {
+        const key = deliveryGroupKey(row.endpointId, row.event, row.payload);
+        if (row.success) {
+          succeeded.add(key);
+          pending.delete(key);
+          continue;
+        }
+        if (succeeded.has(key) || pending.has(key)) continue;
+        pending.set(key, { event: row.event as WebhookEvent, data: payloadData(row.payload) });
+      }
+      for (const item of pending.values()) {
+        scheduleWebhookDelivery(endpoint, item.event, item.data);
+      }
+    })
+    .catch((err) => {
+      console.error(`[webhook] Failed to replay deliveries for ${endpoint.url}:`, err);
+    });
+}
+
+// ─── Admin delivery queries ─────────────────────────────────────────────────
+
+export async function getAdminDeliveryLog(limit = 100) {
+  const rows = await WebhookDelivery.findAll({
+    order: [['createdAt', 'DESC']],
+    limit: Math.min(Math.max(limit, 1), 500),
+  });
+
+  const epIds = [...new Set(rows.map((r) => r.endpointId))];
+  const endpoints = epIds.length > 0
+    ? await WebhookEndpoint.findAll({
+        where: { endpointId: { [Op.in]: epIds } },
+        attributes: ['endpointId', 'url', 'active', 'userId'],
+      })
+    : [];
+  const epMap = new Map(endpoints.map((e) => [e.endpointId, { url: e.url, active: e.active, userId: e.userId }]));
+  const userMap = await loadUserMap(endpoints.map((e) => e.userId));
+
+  const successfulKeys = new Set<string>();
+  for (const row of rows) {
+    if (row.success) successfulKeys.add(deliveryGroupKey(row.endpointId, row.event, row.payload));
+  }
+
+  return rows.map((row) => {
+    const data = payloadData(row.payload);
+    const epInfo = epMap.get(row.endpointId);
+    const user = epInfo ? userMap.get(epInfo.userId) : undefined;
+    const key = deliveryGroupKey(row.endpointId, row.event, row.payload);
+
+    return {
+      id: row.id,
+      endpoint_id: row.endpointId,
+      endpoint_url: epInfo?.url ?? '(deleted)',
+      endpoint_active: epInfo?.active ?? false,
+      user_id: epInfo?.userId ?? null,
+      user_email: user?.email ?? null,
+      user_name: user?.name ?? null,
+      event: row.event,
+      bill_id: typeof data.billId === 'string' ? data.billId : null,
+      file_name: typeof data.fileName === 'string' ? data.fileName : null,
+      payload: data,
+      status_code: row.statusCode,
+      attempt: row.attempt,
+      success: row.success,
+      error: row.error,
+      retryable: !row.success && !successfulKeys.has(key),
+      created_at: row.createdAt.toISOString(),
+    };
+  });
+}
+
+export async function getAdminDeliveryStats() {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  const rows = await WebhookDelivery.findAll({
+    attributes: [
+      [WebhookDelivery.sequelize!.fn('DATE', WebhookDelivery.sequelize!.col('created_at')), 'day'],
+      [WebhookDelivery.sequelize!.fn('SUM', WebhookDelivery.sequelize!.literal('CASE WHEN success = true THEN 1 ELSE 0 END')), 'ok'],
+      [WebhookDelivery.sequelize!.fn('SUM', WebhookDelivery.sequelize!.literal('CASE WHEN success = false THEN 1 ELSE 0 END')), 'fail'],
+      [WebhookDelivery.sequelize!.fn('COUNT', WebhookDelivery.sequelize!.col('id')), 'total'],
+    ],
+    where: { createdAt: { [Op.gte]: since } },
+    group: [WebhookDelivery.sequelize!.fn('DATE', WebhookDelivery.sequelize!.col('created_at'))],
+    order: [[WebhookDelivery.sequelize!.fn('DATE', WebhookDelivery.sequelize!.col('created_at')), 'ASC']],
+    raw: true,
+  });
+
+  const totalOk = rows.reduce((s, r: any) => s + Number(r.ok), 0);
+  const totalFail = rows.reduce((s, r: any) => s + Number(r.fail), 0);
+
+  const allEndpoints = await WebhookEndpoint.findAll({
+    attributes: ['endpointId', 'url', 'events', 'active', 'userId', 'description'],
+    order: [['updatedAt', 'DESC']],
+  });
+  const userMap = await loadUserMap(allEndpoints.map((e) => e.userId));
+
+  const recent = await WebhookDelivery.findAll({
+    attributes: ['endpointId', 'success', 'attempt', 'error', 'event', 'payload', 'createdAt'],
+    order: [['createdAt', 'DESC']],
+    limit: 800,
+  });
+
+  const succeeded = new Set<string>();
+  const failedPending = new Map<string, number>();
+  const lastError = new Map<string, string>();
+  const lastFailAttempt = new Map<string, number>();
+  for (const row of recent) {
+    const key = deliveryGroupKey(row.endpointId, row.event, row.payload);
+    if (row.success) {
+      succeeded.add(key);
+      continue;
+    }
+    if (!lastError.has(row.endpointId) && row.error) lastError.set(row.endpointId, row.error);
+    lastFailAttempt.set(row.endpointId, Math.max(lastFailAttempt.get(row.endpointId) ?? 0, row.attempt));
+    if (!succeeded.has(key)) {
+      succeeded.add(key);
+      failedPending.set(row.endpointId, (failedPending.get(row.endpointId) ?? 0) + 1);
+    }
+  }
+
+  const endpoints = allEndpoints.map((e) => {
+    const user = userMap.get(e.userId);
+    const pending = failedPending.get(e.endpointId) ?? 0;
+    const autoPaused = !e.active && (lastFailAttempt.get(e.endpointId) ?? 0) >= MAX_ATTEMPTS;
+    return {
+      id: e.endpointId,
+      url: e.url,
+      events: e.events,
+      active: e.active,
+      user_id: e.userId,
+      user_email: user?.email ?? null,
+      user_name: user?.name ?? null,
+      failed_pending: pending,
+      last_error: lastError.get(e.endpointId) ?? null,
+      auto_paused: autoPaused,
+    };
+  });
+
+  return {
+    daily: rows.map((r: any) => ({ day: r.day, ok: Number(r.ok), fail: Number(r.fail) })),
+    totalOk,
+    totalFail,
+    successRate: totalOk + totalFail > 0 ? Math.round((totalOk / (totalOk + totalFail)) * 100) : 100,
+    endpoints,
+    activeEndpoints: endpoints.filter((e) => e.active).length,
+    totalEndpoints: endpoints.length,
+  };
+}
+
+export async function retryDelivery(deliveryId: string) {
+  const delivery = await WebhookDelivery.findByPk(deliveryId);
+  if (!delivery) throw new NotFoundError('Webhook delivery', deliveryId);
+  if (delivery.success) throw new ValidationError('Delivery already succeeded');
+
+  const ep = await getWebhook(delivery.endpointId);
+  if (!ep) throw new NotFoundError('Webhook endpoint', delivery.endpointId);
+  if (!ep.active) throw new ValidationError('Enable the webhook before retrying deliveries');
+
+  const payload = typeof delivery.payload === 'string' ? JSON.parse(delivery.payload) : delivery.payload;
+  const envelopeId = payload && typeof payload === 'object' ? (payload as { id?: string }).id : undefined;
+  scheduleWebhookDelivery(ep, delivery.event as WebhookEvent, payloadData(payload), 1, envelopeId);
 }
 
 // ─── Event Dispatch ─────────────────────────────────────────────────────────
@@ -137,15 +349,20 @@ function scheduleWebhookDelivery(
   event: WebhookEvent,
   payload: Record<string, unknown>,
   attempt = 1,
+  envelopeId?: string,
 ): void {
   const delayMs = RETRY_DELAYS_MS[attempt - 1] ?? 0;
+  const id = envelopeId ?? uuid();
 
   setTimeout(() => {
-    executeDeliveryAttempt(endpoint, event, payload, attempt)
-      .then((result) => {
-        if (!result.success && attempt < MAX_ATTEMPTS) {
-          scheduleWebhookDelivery(endpoint, event, payload, attempt + 1);
+    executeDeliveryAttempt(endpoint, event, payload, attempt, id)
+      .then(async (result) => {
+        if (result.success) return;
+        if (attempt < MAX_ATTEMPTS) {
+          scheduleWebhookDelivery(endpoint, event, payload, attempt + 1, id);
+          return;
         }
+        await pauseEndpointAfterRetries(endpoint);
       })
       .catch((err) => {
         console.error(`[webhook] Failed to deliver ${event} to ${endpoint.url} (attempt ${attempt}):`, err);
@@ -153,14 +370,30 @@ function scheduleWebhookDelivery(
   }, delayMs);
 }
 
+async function pauseEndpointAfterRetries(endpoint: WebhookEndpointDoc): Promise<void> {
+  try {
+    await updateWebhook(endpoint.endpoint_id, { active: false });
+    audit('webhook:update', {
+      userId: endpoint.user_id,
+      resourceType: 'webhook',
+      resourceId: endpoint.endpoint_id,
+      details: { active: false, reason: 'auto_paused_after_retries' },
+    });
+    console.warn(`[webhook] Auto-paused ${endpoint.url} after ${MAX_ATTEMPTS} failed attempts`);
+  } catch (err) {
+    console.error(`[webhook] Failed to auto-pause ${endpoint.url}:`, err);
+  }
+}
+
 async function executeDeliveryAttempt(
   endpoint: WebhookEndpointDoc,
   event: WebhookEvent,
   payload: Record<string, unknown>,
   attempt: number,
+  envelopeId: string,
 ): Promise<DeliveryAttemptResult> {
   const envelope = {
-    id: uuid(),
+    id: envelopeId,
     event,
     timestamp: new Date().toISOString(),
     data: payload,

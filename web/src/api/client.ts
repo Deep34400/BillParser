@@ -81,6 +81,79 @@ export interface WebhookEndpointInfo {
   updated_at: string;
 }
 
+export interface WebhookDeliveryInfo {
+  id: string;
+  endpoint_id: string;
+  endpoint_url?: string;
+  endpoint_active?: boolean;
+  user_id?: string | null;
+  user_email?: string | null;
+  user_name?: string | null;
+  event: string;
+  payload?: unknown;
+  bill_id?: string | null;
+  file_name?: string | null;
+  status_code: number | null;
+  response_body?: string | null;
+  attempt: number;
+  success: boolean;
+  error: string | null;
+  retryable?: boolean;
+  created_at: string;
+}
+
+export interface QueueJobInfo {
+  id: string;
+  state: string;
+  billId: string | null;
+  fileName: string | null;
+  userId: string | null;
+  userEmail?: string | null;
+  userName?: string | null;
+  payload: Record<string, unknown>;
+  retryCount: number;
+  retryLimit: number;
+  createdAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+}
+
+export interface QueueStats {
+  initialized: boolean;
+  queue: string;
+  pending: number;
+  active: number;
+  completed: number;
+  failed: number;
+  expired: number;
+  concurrency: number;
+  jobs?: QueueJobInfo[];
+}
+
+export interface WebhookEndpointSummary {
+  id: string;
+  url: string;
+  events: string[];
+  active: boolean;
+  user_id: string;
+  user_email?: string | null;
+  user_name?: string | null;
+  failed_pending?: number;
+  last_error?: string | null;
+  auto_paused?: boolean;
+}
+
+export interface WebhookStats {
+  daily: Array<{ day: string; ok: number; fail: number }>;
+  totalOk: number;
+  totalFail: number;
+  successRate: number;
+  endpoints: WebhookEndpointSummary[];
+  activeEndpoints: number;
+  totalEndpoints: number;
+}
+
 export interface AuditLogEntry {
   log_id: string;
   user_id: string | null;
@@ -279,6 +352,20 @@ export const api = {
     j<{ success: boolean }>(`/api/webhooks/${id}/toggle`, { method: 'PATCH', body: JSON.stringify({ active }) }),
   deleteWebhook: (id: string) =>
     j<{ success: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE', body: '{}' }),
+  webhookDeliveries: (endpointId: string, limit = 50) =>
+    j<{ success: boolean; data: WebhookDeliveryInfo[] }>(`/api/webhooks/${endpointId}/deliveries?limit=${limit}`),
+
+  // ─── Admin: Monitoring ──────────────────────────────────────────────────
+  queueStats: () =>
+    j<{ success: boolean; data: QueueStats }>('/api/queue/stats'),
+  adminWebhookDeliveries: (limit = 100) =>
+    j<{ success: boolean; data: WebhookDeliveryInfo[] }>(`/api/admin/webhooks/deliveries?limit=${limit}`),
+  adminWebhookStats: () =>
+    j<{ success: boolean; data: WebhookStats }>('/api/admin/webhooks/stats'),
+  adminRetryDelivery: (deliveryId: string) =>
+    j<{ success: boolean; message: string }>(`/api/admin/webhooks/deliveries/${deliveryId}/retry`, { method: 'POST', body: '{}' }),
+  adminToggleWebhook: (id: string, active: boolean) =>
+    j<{ success: boolean; message: string }>(`/api/admin/webhooks/${id}/toggle`, { method: 'PATCH', body: JSON.stringify({ active }) }),
 
   // ─── Audit Logs ─────────────────────────────────────────────────────────
   auditLogs: (params?: { action?: string; limit?: number; offset?: number }) => {

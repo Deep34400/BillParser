@@ -3,6 +3,12 @@ import { createHmac } from 'crypto';
 
 vi.mock('../../src/webhook/repository.js', () => ({
   findActiveWebhooksForEvent: vi.fn(),
+  updateWebhook: vi.fn().mockResolvedValue(undefined),
+  getWebhook: vi.fn(),
+}));
+
+vi.mock('../../src/audit/service.js', () => ({
+  audit: vi.fn(),
 }));
 
 vi.mock('../../src/webhook/models/index.js', async (importOriginal) => {
@@ -14,7 +20,7 @@ vi.mock('../../src/webhook/models/index.js', async (importOriginal) => {
 });
 
 import { dispatchWebhookEvent } from '../../src/webhook/service.js';
-import { findActiveWebhooksForEvent } from '../../src/webhook/repository.js';
+import { findActiveWebhooksForEvent, updateWebhook } from '../../src/webhook/repository.js';
 import type { WebhookEndpointDoc } from '../../src/webhook/repository.js';
 
 const mockFindActive = vi.mocked(findActiveWebhooksForEvent);
@@ -147,5 +153,25 @@ describe('dispatchWebhookEvent', () => {
       'https://a.example/hook',
       'https://b.example/hook',
     ]);
+  });
+
+  it('pauses the endpoint after 3 failed attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      mockFindActive.mockResolvedValue([makeEndpoint({ endpoint_id: 'ep-dead' })]);
+      mockFetch.mockResolvedValue({ ok: false, status: 500, text: async () => 'down' });
+
+      dispatchWebhookEvent('user-1', 'invoice.completed', { billId: 'bill-9' });
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await Promise.resolve();
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(updateWebhook).toHaveBeenCalledWith('ep-dead', { active: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Plus, Trash2, Webhook } from 'lucide-react';
-import { api, type WebhookEndpointInfo } from '../api/client.js';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, CheckCircle2, XCircle, Copy, Plus, Trash2, Webhook } from 'lucide-react';
+import { api, type WebhookEndpointInfo, type WebhookDeliveryInfo } from '../api/client.js';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
@@ -18,8 +18,57 @@ const DEFAULT_EVENTS = [
   'invoice.deleted',
 ];
 
+function DeliveryLog({ endpointId }: { endpointId: string }) {
+  const [deliveries, setDeliveries] = useState<WebhookDeliveryInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.webhookDeliveries(endpointId, 20)
+      .then((r) => setDeliveries(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [endpointId]);
+
+  if (loading) return <p className="text-xs text-muted-foreground py-2">Loading deliveries…</p>;
+  if (deliveries.length === 0) return <p className="text-xs text-muted-foreground py-2">No deliveries yet</p>;
+
+  return (
+    <div className="rounded-md border mt-2 overflow-auto max-h-48">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-[10px]">Time</TableHead>
+            <TableHead className="text-[10px]">Event</TableHead>
+            <TableHead className="text-[10px]">Attempt</TableHead>
+            <TableHead className="text-[10px]">Status</TableHead>
+            <TableHead className="text-[10px]">Error</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {deliveries.map((d) => (
+            <TableRow key={d.id}>
+              <TableCell className="text-[10px] text-muted-foreground whitespace-nowrap">
+                {new Date(d.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </TableCell>
+              <TableCell><Badge variant="secondary" className="text-[9px]">{d.event}</Badge></TableCell>
+              <TableCell className="text-[10px] text-center">{d.attempt}/3</TableCell>
+              <TableCell>
+                {d.success
+                  ? <Badge variant="success" className="text-[9px]"><CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />{d.status_code}</Badge>
+                  : <Badge variant="danger" className="text-[9px]"><XCircle className="h-2.5 w-2.5 mr-0.5" />{d.status_code ?? 'ERR'}</Badge>}
+              </TableCell>
+              <TableCell className="text-[10px] text-muted-foreground max-w-32 truncate">{d.error ?? '—'}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export function WebhooksPanel({ onFlash }: { onFlash?: (text: string, type?: 'ok' | 'err') => void }) {
   const [hooks, setHooks] = useState<WebhookEndpointInfo[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [events, setEvents] = useState<string[]>([...DEFAULT_EVENTS]);
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
@@ -135,30 +184,46 @@ export function WebhooksPanel({ onFlash }: { onFlash?: (text: string, type?: 'ok
             </TableHeader>
             <TableBody>
               {hooks.map((h) => (
-                <TableRow key={h.endpoint_id}>
-                  <TableCell>
-                    <div className="font-mono text-xs break-all">{h.url}</div>
-                    {h.description && <p className="text-[11px] text-muted-foreground mt-1">{h.description}</p>}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {h.events.map((event) => <Badge key={event} variant="secondary" className="text-[10px]">{event}</Badge>)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={h.active ? 'success' : 'danger'}>{h.active ? 'Active' : 'Paused'}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button type="button" size="sm" variant="outline" onClick={() => void handleToggle(h.endpoint_id, !h.active)}>
-                        {h.active ? 'Pause' : 'Enable'}
-                      </Button>
-                      <Button type="button" size="sm" variant="destructive" onClick={() => void handleDelete(h.endpoint_id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                <React.Fragment key={h.endpoint_id}>
+                  <TableRow>
+                    <TableCell>
+                      <div className="font-mono text-xs break-all">{h.url}</div>
+                      {h.description && <p className="text-[11px] text-muted-foreground mt-1">{h.description}</p>}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {h.events.map((event) => <Badge key={event} variant="secondary" className="text-[10px]">{event}</Badge>)}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={h.active ? 'success' : 'danger'}>{h.active ? 'Active' : 'Paused'}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button" size="sm" variant="ghost"
+                          onClick={() => setExpandedId(expandedId === h.endpoint_id ? null : h.endpoint_id)}
+                        >
+                          {expandedId === h.endpoint_id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          Log
+                        </Button>
+                        <Button type="button" size="sm" variant="outline" onClick={() => void handleToggle(h.endpoint_id, !h.active)}>
+                          {h.active ? 'Pause' : 'Enable'}
+                        </Button>
+                        <Button type="button" size="sm" variant="destructive" onClick={() => void handleDelete(h.endpoint_id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {expandedId === h.endpoint_id && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="bg-muted/30 py-2 px-4">
+                        <DeliveryLog endpointId={h.endpoint_id} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </React.Fragment>
               ))}
             </TableBody>
           </Table>

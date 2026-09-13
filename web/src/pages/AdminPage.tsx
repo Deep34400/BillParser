@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Users, Mail, Plus, UserPlus, Crown, History,
+  Users, Mail, Plus, UserPlus, Crown, History, Activity,
   ShieldCheck, CircleSlash, Lock, Power, PowerOff,
 } from 'lucide-react';
 import {
@@ -26,10 +26,11 @@ import {
 } from '@/components/ui/dialog.js';
 import { Separator } from '@/components/ui/separator.js';
 import { AuditLogPanel } from '../components/AuditLogPanel.js';
+import { MonitoringPanel } from '../components/MonitoringPanel.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { Skeleton } from '@/components/ui/skeleton.js';
 
-type AdminTab = 'users' | 'email-intake' | 'activity';
+type AdminTab = 'users' | 'email-intake' | 'activity' | 'monitoring';
 
 function FlashMsg({ msg, type }: { msg: string; type: 'ok' | 'err' }) {
   if (!msg) return null;
@@ -260,6 +261,7 @@ export function AdminPage() {
         <TabBtn id="users" icon={Users} label="Users" count={users.length} />
         <TabBtn id="email-intake" icon={Mail} label="Email Intake" />
         <TabBtn id="activity" icon={History} label="Activity" />
+        <TabBtn id="monitoring" icon={Activity} label="Monitoring" />
       </div>
 
       <Separator className="mb-5" />
@@ -498,6 +500,10 @@ export function AdminPage() {
           title="Platform activity"
           description="All users — uploads, OCR results, approvals, token credits, and webhook changes."
         />
+      )}
+
+      {tab === 'monitoring' && (
+        <MonitoringPanel />
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════
