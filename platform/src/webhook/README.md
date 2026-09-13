@@ -10,20 +10,36 @@ You add a URL on Account → Webhooks
         ▼
 webhook_endpoints  (url, events[], secret, active, user_id)
         │
-Invoice lifecycle in invoiceService
+Invoice lifecycle (ocrLifecycle / invoiceService / ocrWorker)
         │
         ▼
-dispatchWebhookEvent(userId, 'invoice.completed', { billId, ... })
-        │  fire-and-forget
+recordActivity() → dispatchWebhookEvent(userId, 'invoice.completed', { billId, ... })
+        │
         ▼
 For each matching active endpoint:
+  Attempt 1 (immediate) → Attempt 2 (+10s) → Attempt 3 (+30s)
   POST url
   Content-Type: application/json
   X-Webhook-Event: invoice.completed
   X-Webhook-Signature: sha256=<hmac>
+        │
+        ▼
+webhook_deliveries  (one row per attempt)
 ```
 
-Delivery is fire-and-forget: a down receiver is logged (`[webhook] ...`) and never rolls back OCR or approval.
+Delivery is fire-and-forget from the caller's perspective: a down receiver is logged and retried, but never rolls back OCR or approval.
+
+## Retry policy
+
+| Attempt | Delay | Notes |
+|---------|-------|-------|
+| 1 | 0s | Immediate |
+| 2 | 10s | After first failure |
+| 3 | 30s | After second failure |
+
+Each attempt is logged in `webhook_deliveries` with `status_code`, `response_body` (truncated to 4096 chars), `success`, and `error`.
+
+View delivery history: **Account → Webhooks** or `GET /api/webhooks/:id/deliveries?limit=50`.
 
 ## Where you see it
 
@@ -85,19 +101,22 @@ Use the raw bytes, not a re-serialized JSON object.
 
 - Remote URLs must start with `https://`
 - `http://localhost` and `http://127.0.0.1` are allowed for a local receiver
-- Timeout: 10 seconds; non-2xx responses are logged and not retried
+- Timeout: 10 seconds per attempt; non-2xx responses trigger retry (up to 3 attempts total)
 
 ## API
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/webhooks` | List your endpoints + `availableEvents` |
-| `POST` | `/api/webhooks` | `{ url, events, description? }` — returns `secret` |
+| `POST` | `/api/webhooks` | `{ url, events, description? }` — returns `secret` (Zod-validated) |
 | `PATCH` | `/api/webhooks/:id/toggle` | `{ active: true \| false }` |
 | `DELETE` | `/api/webhooks/:id` | Remove endpoint |
+| `GET` | `/api/webhooks/:id/deliveries` | Recent delivery attempts (`?limit=50`, max 200) |
 
-You can only toggle or delete **your** endpoints.
+You can only toggle, delete, or view deliveries for **your** endpoints.
 
-## Table
+## Tables
 
-See [DATABASE.md](../../DATABASE.md) — `webhook_endpoints`.
+See [DATABASE.md](../../DATABASE.md):
+- `webhook_endpoints` — subscription config
+- `webhook_deliveries` — per-attempt delivery log

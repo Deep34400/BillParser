@@ -1,7 +1,7 @@
 # Database Design — BillParser Platform
 
 > **ORM:** Sequelize 6 · **Database:** PostgreSQL 15+ · **Extension:** pg_trgm (trigram search)
-> **Tables:** users, vendors, bills, bill_parts, api_keys, token_transactions, app_settings, provider_credentials, audit_logs, webhook_endpoints
+> **Tables:** users, vendors, bills, bill_parts, invoice_comments, api_keys, token_transactions, app_settings, provider_credentials, audit_logs, webhook_endpoints, webhook_deliveries
 
 ---
 
@@ -12,10 +12,10 @@
 │    vendors       │ 1    N  │               bills                  │
 │─────────────────│◄────────│──────────────────────────────────────│
 │ vendor_id  PK   │         │ bill_id         PK                   │
-│ legal_name      │         │ vendor_id       FK → vendors (NULL)  │
-│ display_name    │         │ bill_type       NOT NULL              │
-│ gstin           │         │ ocr_status      NOT NULL              │
-│ pan             │         │ vendor_name, vendor_gstin             │
+│ legal_name      │         │ user_id         FK owner (NULL)      │
+│ display_name    │         │ vendor_id       FK → vendors (NULL)  │
+│ gstin           │         │ bill_type       NOT NULL              │
+│ pan             │         │ ocr_status      NOT NULL              │
 │ invoice_count   │         │ vendor_name, vendor_gstin             │
 │ first_seen      │         │ invoice_number, invoice_date          │
 │ last_seen       │         │ grand_total_amount, parts_amount ...  │
@@ -37,6 +37,17 @@
                             │ name, quantity, rate, amount           │
                             │ hsn_sac_code, tax_percentage           │
                             │ created_at                             │
+                            └───────────────┬──────────────────────┘
+                                            │ 1
+                                            │ N (CASCADE)
+                            ┌───────────────▼──────────────────────┐
+                            │        invoice_comments               │
+                            │──────────────────────────────────────│
+                            │ id            PK (UUID)               │
+                            │ bill_id       FK → bills (CASCADE)    │
+                            │ user_id       author                  │
+                            │ text          NOT NULL                │
+                            │ created_at                            │
                             └──────────────────────────────────────┘
 
 ┌─────────────────┐         ┌──────────────────────────────────────┐
@@ -82,6 +93,18 @@
 │                 │         │ url, events[], secret                │
 │                 │         │ active, description                  │
 │                 │         │ created_at, updated_at               │
+│                 │         └───────────────┬──────────────────────┘
+│                 │                         │ 1
+│                 │                         │ N
+│                 │         ┌───────────────▼──────────────────────┐
+│                 │         │        webhook_deliveries             │
+│                 │         │──────────────────────────────────────│
+│                 │         │ id            PK (UUID)               │
+│                 │         │ endpoint_id   FK → webhook_endpoints  │
+│                 │         │ event, payload JSONB                  │
+│                 │         │ status_code, response_body            │
+│                 │         │ attempt, success, error               │
+│                 │         │ created_at                            │
 │                 │         └──────────────────────────────────────┘
 └─────────────────┘
 
@@ -138,6 +161,7 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 |--------|------|-------------|-------------|
 | **Identity** | | | |
 | `bill_id` | TEXT | **PK** | UUID |
+| `user_id` | TEXT | Indexed | Owner — regular users see only their bills; NULL for legacy/system rows |
 | `fleet_id` | TEXT | | Fleet identifier |
 | `vehicle_id` | TEXT | Indexed | Vehicle identifier |
 | `bill_type` | TEXT | NOT NULL, CHECK | MAINTENANCE, FUEL, INSURANCE, TYRE, TOLL, ACCIDENT_REPAIR, BATTERY_REPLACEMENT, AMC_CONTRACT, OTHER |
@@ -230,11 +254,14 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 
 **Indexes:**
 - `bills_updated_at_idx` — `updated_at DESC` (pagination default sort)
-- `bills_created_at_idx` — `created_at DESC` (date range queries)
+- `bills_created_at_idx` — `created_at DESC` (date range queries; cursor pagination)
 - `bills_status_updated_idx` — `(ocr_status, updated_at DESC)` (filtered pagination)
 - `bills_vehicle_idx` — `vehicle_id` (vehicle analytics)
 - `bills_vendor_idx` — `vendor_id` (vendor drilldown)
 - `bills_dup_idx` — `(invoice_number, vendor_gstin)` (duplicate detection)
+- `idx_bills_user_id` — `user_id` (data isolation)
+- `idx_bills_user_status` — `(user_id, ocr_status)` (filtered list per user)
+- `idx_bills_user_created` — `(user_id, created_at DESC)` (cursor list per user)
 
 **GST Rules:**
 - Intra-state: CGST + SGST (IGST = NULL)
@@ -270,6 +297,26 @@ One row per part or labour line item. Cascade-deleted when parent bill is remove
 **Indexes:**
 - `parts_bill_idx` — `bill_id` (join to parent)
 - `parts_created_idx` — `created_at DESC`
+
+---
+
+### 3. `invoice_comments` — Invoice Notes
+
+User-authored notes on the invoice detail page. Cascade-deleted when the parent bill is removed.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | UUID | **PK** | Comment id |
+| `bill_id` | TEXT | **FK → bills**, CASCADE | Parent invoice |
+| `user_id` | TEXT | NOT NULL | Author |
+| `text` | TEXT | NOT NULL | Comment body (max 2000 chars via Zod) |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `invoice_comments_bill_idx` — `bill_id`
+- `invoice_comments_created_idx` — `created_at ASC`
+
+See [src/ocr/README.md](./src/ocr/README.md) — Comments section.
 
 ---
 
@@ -399,7 +446,7 @@ See [src/audit/README.md](./src/audit/README.md).
 
 ### 12. `webhook_endpoints` — Outbound Event Subscriptions
 
-Per-user HTTPS receivers. Dispatch is fire-and-forget HMAC POST.
+Per-user HTTPS receivers. Dispatch is HMAC POST with 3× exponential backoff retry; each attempt logged in `webhook_deliveries`.
 
 See [src/webhook/README.md](./src/webhook/README.md).
 
@@ -421,12 +468,38 @@ See [src/webhook/README.md](./src/webhook/README.md).
 
 ---
 
+### 13. `webhook_deliveries` — Webhook Delivery Log
+
+Append-only log of each webhook POST attempt (including retries).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | UUID | **PK** | Delivery id |
+| `endpoint_id` | TEXT | NOT NULL | Target webhook endpoint |
+| `event` | TEXT | NOT NULL | e.g. `invoice.completed` |
+| `payload` | JSONB | NOT NULL | Full signed envelope sent |
+| `status_code` | INTEGER | | HTTP response status (null on network error) |
+| `response_body` | TEXT | | Truncated response (max 4096 chars) |
+| `attempt` | INTEGER | NOT NULL | 1, 2, or 3 |
+| `success` | BOOLEAN | NOT NULL | `true` if HTTP 2xx |
+| `error` | TEXT | | Error message on failure |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+
+**Indexes:**
+- `webhook_deliveries_endpoint_idx` — `(endpoint_id, created_at DESC)`
+
+API: `GET /api/webhooks/:id/deliveries`
+
+---
+
 ## Foreign Key Relationships
 
 | From | To | On Delete | Why |
 |------|----|-----------|-----|
 | `bills.vendor_id` | `vendors.vendor_id` | SET NULL | Vendor is optional; deleting vendor doesn't delete bills |
 | `bill_parts.bill_id` | `bills.bill_id` | CASCADE | Parts are owned by a bill; no orphans |
+| `invoice_comments.bill_id` | `bills.bill_id` | CASCADE | Comments deleted with bill |
+| `bills.user_id` | — | none | Owner id stored as text (data isolation) |
 | `api_keys.user_id` | `users.user_id` | CASCADE | Keys are owned by a user |
 | `token_transactions.user_id` | `users.user_id` | RESTRICT | Can't delete user with billing history |
 | `audit_logs.user_id` | — | none | Actor id stored as text (no FK; keep history if a user is removed) |
@@ -437,7 +510,7 @@ See [src/webhook/README.md](./src/webhook/README.md).
 ## Schema Management
 
 - **ORM:** Sequelize 6 with `sync({ alter: true })` on startup
-- **Init order:** Vendor → User → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential → AuditLog → WebhookEndpoint
+- **Init order:** Vendor → User → Bill → BillPart → InvoiceComment → ApiKey → TokenTransaction → AppSettings → ProviderCredential → AuditLog → WebhookEndpoint → WebhookDelivery
 - **Extension:** `pg_trgm` created automatically for trigram search
 - **NUMERIC handling:** pg type parser overrides OID 1700 → `parseFloat()` so all decimal columns return JS numbers (not strings)
 - **Timestamps:** Managed by application code, not Sequelize auto-timestamps
@@ -448,8 +521,10 @@ See [src/webhook/README.md](./src/webhook/README.md).
 ## Connection Pool
 
 ```
-max: 2          ← per Cloud Run instance (2 × 8 instances = 16 total)
+max: 10         ← per instance (supports higher concurrency under load)
 min: 0          ← idle connections released
 idle: 10,000ms  ← close idle connections after 10s
 acquire: 30,000ms ← timeout waiting for connection
 ```
+
+pg-boss also uses the same PostgreSQL database for the `ocr-processing` job queue.

@@ -3,6 +3,8 @@
 Extracts structured invoice data from uploaded PDF/image files using LLM-based OCR.
 This is the core module — everything else (analytics, fraud, vendor) depends on its output.
 
+End-to-end flow diagram: [FLOW.md](./FLOW.md).
+
 ## Folder Structure
 
 ```
@@ -10,6 +12,7 @@ ocr/
 ├── models/
 │   ├── bill.ts                   # Bill Sequelize model + initBillModel()
 │   ├── billPart.ts               # BillPart Sequelize model + initBillPartModel()
+│   ├── invoiceComment.ts         # InvoiceComment model (invoice_comments table)
 │   └── index.ts                  # Barrel re-export
 ├── process.ts                    # Pipeline entry point — reads settings, builds fallback chain
 ├── pipeline/
@@ -18,6 +21,7 @@ ocr/
 │   └── fallbackChain.ts          # Multi-level fallback orchestration
 ├── providers/
 │   ├── geminiClient.ts           # Gemini via Vertex AI — ADC auth, global endpoint
+│   ├── visionCall.ts             # Shared helper for vision LLM calls (single mode)
 │   ├── llmSingle.ts              # Single-call: image + prompt → structured JSON
 │   ├── llmNormalize.ts           # Split structuring: markdown + prompt → JSON
 │   ├── mistralOcr.ts             # Mistral OCR API: PDF/image → markdown
@@ -33,16 +37,24 @@ ocr/
 │   │   ├── vendor.ts             # Seller vs buyer detection, junk name filtering
 │   │   ├── vehicle.ts            # Registration number normalization + markdown fallback
 │   │   ├── date.ts               # Invoice date normalization + markdown fallback
-│   │   ├── footer.ts             # OCR markdown footer parser (GST, discount, totals)
+│   │   ├── footer/               # OCR markdown footer parser (split from monolithic footer.ts)
+│   │   │   ├── index.ts          # Footer orchestration
+│   │   │   ├── gst.ts            # GST line extraction
+│   │   │   ├── chargeTable.ts    # Charge table parsing
+│   │   │   ├── discount.ts       # Discount lines
+│   │   │   └── cashMemo.ts       # Cash memo totals
 │   │   └── totals.ts             # Bill summary reconciliation pipeline
 │   ├── validate.ts               # Structural validation rules (amounts, formats)
 │   ├── review.ts                 # Human-review flag generation
 │   ├── reviewCodes.ts            # Review code constants
 │   └── reconcileTotal.ts         # Total reconciliation
 ├── service/
-│   ├── invoiceService.ts         # All invoice business logic (388 lines)
-│   ├── exportService.ts          # CSV export (bills + line items)
+│   ├── invoiceService.ts         # CRUD, list, filters, cursor pagination (~279 lines)
+│   ├── ocrLifecycle.ts           # Upload, queue, OCR, approval workflow (~424 lines)
+│   ├── recordActivity.ts         # Shared audit + webhook dispatch helper
+│   ├── exportService.ts          # CSV + Excel export (~141 lines)
 │   └── reconcileRange.ts         # Date range reconciliation
+├── commentRepository.ts          # Invoice comments CRUD
 ├── mapper.ts                     # Data transformations: ParsedData ↔ BillDoc ↔ FrontendInvoice
 ├── repository.ts                 # PostgreSQL CRUD (Sequelize)
 ├── types/
@@ -50,20 +62,29 @@ ocr/
 │   ├── parser.ts                 # ValidationIssue, ParseResult
 │   ├── provider.ts               # LlmUsage, OcrStepCost, OcrCostInfo
 │   └── index.ts                  # Barrel export
-├── route.ts                      # Thin HTTP controller (delegates to services)
+├── route.ts                      # Thin HTTP controller (~548 lines, Zod-validated)
 ├── COST.md                       # Cost documentation
+├── FLOW.md                       # End-to-end upload → webhook flow
 └── README.md
 ```
+
+Shared constants used by this module:
+- `shared/numbers.ts` — `roundMoney` and numeric helpers
+- `shared/ocrConstants.ts` — GST rates, reconciliation tolerances, API timeouts
+- `shared/validation.ts` — Zod schemas for upload, comments, invoice updates
 
 ## How It Works — Full Flow
 
 ### 1. Upload
 
-`POST /api/invoices/upload` → `route.ts` → `invoiceService.uploadInvoices()`:
-1. Validates the file (PDF, JPEG, PNG, or WebP)
+`POST /api/invoices/upload` → `route.ts` → `ocrLifecycle.uploadInvoices()`:
+1. Zod-validates request; validates the file (PDF, JPEG, PNG, or WebP)
 2. Uploads to Cloud Storage
-3. Creates a placeholder `BillDoc` with `ocr_status: 'PROCESSING'`
-4. Returns `HTTP 202` immediately — OCR runs in the background
+3. Creates a placeholder `BillDoc` with `ocr_status: PROCESSING` and `user_id`
+4. Enqueues job via pg-boss (`queue/ocrQueue.ts`) — inline fallback in tests
+5. Returns `HTTP 202` immediately — OCR runs in the background
+
+See [FLOW.md](./FLOW.md) for the complete diagram.
 
 ### 2. Pipeline Orchestration
 
@@ -72,7 +93,8 @@ ocr/
 **Single Mode**:
 ```
 Buffer → pipeline/single.ts → providers/llmSingle.ts
-  → One multimodal LLM call (image + prompt → JSON)
+  → visionCall.ts (shared multimodal helper)
+  → One LLM call (image + prompt → JSON)
   → Supports: Gemini, Claude, OpenAI, Mistral
 ```
 
@@ -104,7 +126,7 @@ Each configured level in Settings is tried in order. The chain moves to the next
 5. **Invoice number fallback** — Job Card No, Bill No from markdown
 6. **PAN from GSTIN** — derives PAN from GSTIN middle 10 chars
 7. **Labour filtering** — removes section headers mistakenly extracted as line items
-8. **Bill summary** (`totals.ts` + `footer.ts`) — reconciles subtotals, GST, discounts
+8. **Bill summary** (`totals.ts` + `footer/`) — reconciles subtotals, GST, discounts
 
 ### 5. Validation & Review
 
@@ -117,46 +139,103 @@ Each configured level in Settings is tried in order. The chain moves to the next
 - `mapper.ts → mapParsedToBill()` — converts to `BillDoc` for PostgreSQL
 - `mapper.ts → toApiParsed()` — stable API response contract (IMMUTABLE)
 - `mapper.ts → billToInvoice()` — frontend-ready shape
-- `models/bill.ts` + `models/billPart.ts` — Sequelize model definitions
+- `models/bill.ts` + `models/billPart.ts` + `models/invoiceComment.ts` — Sequelize model definitions
 - `repository.ts` — PostgreSQL CRUD for bills and bill_parts via `./models/index.js`
 
-## Service Layer (Phase 1 Refactor)
+Worker persistence (`queue/ocrWorker.ts`): update bill → saveBillParts → upsertVendor → deductTokens → `recordActivity`.
 
-Business logic was extracted from the monolithic route handler into dedicated services:
+## Service Layer
 
-### `service/invoiceService.ts` (388 lines)
+Business logic is split between CRUD and OCR lifecycle:
 
-All invoice business logic in one file. Route handlers call these functions — never access repository directly.
+### `service/invoiceService.ts` (~279 lines)
 
-| Function | What it does |
-|----------|-------------|
-| `listInvoices(filters)` | Paginated list |
-| `getInvoiceCounts()` | Status counts |
-| `getInvoice(id)` | Single invoice + parts |
-| `getInvoiceFile(id)` | Signed file URL from GCS |
-| `uploadInvoices(files, opts)` | Validate → store → create PROCESSING bill → trigger OCR |
-| `importFromUrls(urls, opts)` | Download from URLs → process like uploads |
-| `reextractInvoice(id)` | Re-run OCR pipeline on existing bill |
-| `processOcrDraft(id)` | Process a DRAFT bill (from email intake) |
-| `updateInvoice(id, patch)` | Human edit (preserves `parsed_data`) |
-| `cancelInvoice(id)` | Cancel processing |
-| `deleteInvoice(id)` | Delete bill + parts + GCS file |
-| `bulkAction(action, ids)` | Bulk delete/reextract/cancel |
-| `reconcileRange(range, mode)` | Batch reconcile by date range |
-| `statelessParse(buffer, opts)` | Parse without persisting |
-| `syncOcr(buffer, opts)` | Synchronous OCR via API key |
-| `asyncOcr(buffer, opts)` | Async OCR via API key |
-
-Invoice create / complete / fail / approve / reject / delete also write `audit_logs` and fire user webhooks. See [../audit/README.md](../audit/README.md) and [../webhook/README.md](../webhook/README.md).
-
-### `service/exportService.ts` (63 lines)
+Invoice CRUD and queries. Route handlers call these functions — never access repository directly for business rules.
 
 | Function | What it does |
 |----------|-------------|
-| `exportBillsCsv()` | Bills CSV |
+| `listInvoices(filters)` | Cursor-paginated list with server-side filters |
+| `getStatusCounts()` | Status counts (scoped to user unless admin) |
+| `getInvoice(id, userId?)` | Single invoice + parts |
+| `getInvoiceForUi(id, userId?)` | Frontend-ready shape |
+| `getInvoiceForApi(bill)` | API response shape |
+| `getInvoiceFile(id, userId?)` | Signed file URL from GCS |
+| `updateInvoice(id, patch, userId?)` | Human edit (preserves `parsed_data`) |
+| `deleteInvoice(id, userId?)` | Delete bill + parts + GCS file |
+| `bulkAction(action, ids, userId?)` | Bulk delete/reextract/cancel |
+| `reconcileRange(params)` | Batch reconcile by date range |
+
+### `service/ocrLifecycle.ts` (~424 lines)
+
+Upload, background OCR, sync/async API, and approval workflow.
+
+| Function | What it does |
+|----------|-------------|
+| `uploadInvoices(files, userId?)` | Validate → store → create PROCESSING bill → enqueue OCR |
+| `importFromUrls(urls, userId?)` | Download from URLs → process like uploads |
+| `reextractInvoice(id, userId?)` | Re-run OCR pipeline on existing bill |
+| `processDraft(id, userId?)` | Process a DRAFT bill (from email intake) |
+| `cancelInvoice(id, userId?)` | Cancel processing |
+| `statelessParse(buf)` | Parse without persisting |
+| `syncOcr(buf, opts)` | Synchronous OCR via API key |
+| `asyncOcr(buf, opts)` | Async OCR via API key |
+| `submitForApproval(id, userId?)` | Submit for approval |
+| `approveInvoice(id, approvedBy)` | Approve + audit + webhook |
+| `rejectInvoice(id, rejectedBy, reason)` | Reject + audit + webhook |
+
+### `service/recordActivity.ts`
+
+Shared helper called after invoice lifecycle events:
+
+```typescript
+recordActivity(userId, action, webhookEvent, billId, details?)
+// → audit() + dispatchWebhookEvent() (if event is non-null)
+```
+
+Used by `invoiceService.ts`, `ocrLifecycle.ts`, and `queue/ocrWorker.ts`.
+
+See [../audit/README.md](../audit/README.md) and [../webhook/README.md](../webhook/README.md).
+
+### `service/exportService.ts` (~141 lines)
+
+| Function | What it does |
+|----------|-------------|
+| `exportInvoicesCsv()` | Bills CSV |
 | `exportLineItemsCsv()` | Line items CSV |
+| `exportFilteredInvoicesExcel(filters)` | Filtered .xlsx via exceljs |
+| `exportToExcel(bills)` | Build Excel workbook buffer |
 
-### 7. Batch Reconciliation
+### Server-Side Filters & Pagination
+
+`GET /api/invoices` supports:
+
+| Query param | Effect |
+|-------------|--------|
+| `cursor` | ISO timestamp — returns rows with `created_at < cursor` (not OFFSET) |
+| `limit` | Page size (1–100, default 10) |
+| `status` / `statuses` | Filter by OCR status |
+| `q` | Search vendor name, company name, invoice #, registration (ILIKE) |
+| `vendor` | Company name ILIKE filter |
+| `minTotal` / `maxTotal` | Grand total range |
+| `dateFrom` / `dateTo` | Invoice date range |
+| `needsReview` / `reviewCode` | Review flags |
+
+Regular users automatically get `user_id` scoped to their session. Admins see all bills.
+
+Implemented in `repository.ts` (`buildBillListWhere`, `listBillsCursor`).
+
+## Comments
+
+Users can add notes on the invoice detail page.
+
+| Method | Path | Handler |
+|--------|------|---------|
+| `GET` | `/api/invoices/:id/comments` | `commentRepository.getComments` |
+| `POST` | `/api/invoices/:id/comments` | `commentRepository.addComment` (Zod: 1–2000 chars) |
+
+Model: `models/invoiceComment.ts` → table `invoice_comments` (see [DATABASE.md](../../DATABASE.md)).
+
+## Batch Reconciliation
 
 `service/reconcileRange.ts` — re-runs review and total reconciliation for bills in a `created_at` date range. Exposed as `POST /api/invoices/reconcile-range` with `mode=check` (dry-run preview) or `mode=update` (persist review fields and status).
 
@@ -170,7 +249,7 @@ Invoice create / complete / fail / approve / reject / delete also write `audit_l
 ## How to Add a New LLM Provider
 
 1. Add provider config in `providers/resolveKey.ts`
-2. Add API call in `providers/llmSingle.ts` (single) or `providers/llmNormalize.ts` (split)
+2. Add API call in `providers/llmSingle.ts` (single, via `visionCall.ts`) or `providers/llmNormalize.ts` (split)
 3. The rest of the pipeline (parsing, enrichment, mapping) is provider-agnostic
 
 ## Testing

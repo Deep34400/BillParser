@@ -8,7 +8,8 @@ Every important user action writes one append-only row to `audit_logs`. The UI r
 Invoice upload / OCR / approve / admin action
         │
         ▼
-invoiceService / users route / webhook service
+ocr/service/recordActivity.ts  (invoice lifecycle)
+  or audit() directly           (admin, webhook CRUD)
         │
         ▼
 audit(action, { userId, resourceType, resourceId, details })
@@ -17,6 +18,8 @@ audit(action, { userId, resourceType, resourceId, details })
 audit_logs  ── GET /api/audit/logs ──► Account → My activity
                                       Admin  → Activity tab
 ```
+
+`recordActivity()` in `ocr/service/recordActivity.ts` is the shared helper for invoice events — it writes audit rows and optionally dispatches webhooks in one call.
 
 `audit()` is fire-and-forget. A failed insert is logged to the console and does not fail the original request.
 

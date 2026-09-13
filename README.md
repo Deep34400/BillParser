@@ -35,8 +35,14 @@ SaaS platform for extracting structured data from automotive invoices (PDF/image
 | **Token Billing** | Per-user token balance with atomic debit, audit trail |
 | **Email Intake** | IMAP polling for invoices sent via email |
 | **Audit history** | Every upload, OCR result, approval, and admin action on Account / Admin |
-| **Webhooks** | Signed HTTPS POSTs when invoices are uploaded, completed, approved, or deleted |
-| **Modern UI** | Tailwind CSS + shadcn/ui components, Lucide icons, responsive layout |
+| **Webhooks** | Signed HTTPS POSTs with HMAC, 3× exponential backoff retry, delivery log |
+| **Job queue** | pg-boss durable OCR queue (`ocr-processing`); worker concurrency 3 |
+| **Data isolation** | `bills.user_id` — regular users see only their own invoices |
+| **Comments** | Per-invoice notes on the detail page (`invoice_comments` table) |
+| **Export** | CSV + Excel (.xlsx via exceljs) with server-side filters |
+| **Validation** | Zod request schemas on login, upload, comments, updates, webhooks, settings |
+| **API docs** | Public `GET /api/docs` — invoice endpoints with request/response/error examples |
+| **Modern UI** | Tailwind + shadcn/ui, dark mode, React Query, guided tour, recharts analytics |
 
 ## Docs
 
@@ -47,6 +53,7 @@ SaaS platform for extracting structured data from automotive invoices (PDF/image
 | [platform/src/audit/README.md](platform/src/audit/README.md) | Activity history (how it is written and shown) |
 | [platform/src/webhook/README.md](platform/src/webhook/README.md) | Outbound webhooks + HMAC verification |
 | [platform/src/ocr/README.md](platform/src/ocr/README.md) | OCR pipeline (how the code runs) |
+| [platform/src/ocr/FLOW.md](platform/src/ocr/FLOW.md) | End-to-end flow: upload → queue → webhook → UI |
 | [platform/src/users/README.md](platform/src/users/README.md) | Auth, API keys, token billing |
 | [platform/src/vendor/README.md](platform/src/vendor/README.md) | Vendor matching |
 | [platform/src/analytics/README.md](platform/src/analytics/README.md) | KPIs and spend |
@@ -64,6 +71,8 @@ SaaS platform for extracting structured data from automotive invoices (PDF/image
 | Storage | Google Cloud Storage |
 | OCR / AI | Mistral OCR · Gemini (Vertex AI) · Claude · OpenAI · AzAPI |
 | Frontend | React 18 · Tailwind CSS v4 · shadcn/ui · Lucide React · Vite 5 |
+| Frontend data | @tanstack/react-query · recharts · sonner |
+| Backend extras | pg-boss · exceljs · zod |
 | Tests | Vitest |
 | Deploy | Docker · Cloud Run · Cloud SQL |
 
@@ -95,40 +104,39 @@ cd web && npm test
 ```
 ├── platform/                # Backend API
 │   └── src/
-│       ├── config/          # Database, env, GCS
+│       ├── config/          # Database (pool max 10), env, GCS
 │       ├── db/              # Schema init + migrations
-│       ├── middleware/       # Auth, error handler, rate limit
+│       ├── middleware/      # Auth, error handler, rate limit
+│       ├── queue/           # pg-boss OCR queue (ocrQueue, ocrWorker)
 │       ├── ocr/             # OCR pipeline + invoice CRUD
-│       │   ├── models/      # Bill, BillPart Sequelize models
+│       │   ├── models/      # Bill, BillPart, InvoiceComment
 │       │   ├── pipeline/    # Single, Split, FallbackChain
-│       │   ├── providers/   # Gemini, Mistral, Claude, OpenAI
+│       │   ├── providers/   # Gemini, Mistral, Claude, OpenAI, visionCall
 │       │   ├── parser/      # JSON repair + structuring
-│       │   ├── transformer/ # Normalize, validate, review
-│       │   └── service/     # InvoiceService, ExportService
+│       │   ├── transformer/ # Normalize (footer split), validate, review
+│       │   └── service/     # invoiceService, ocrLifecycle, recordActivity, export
 │       ├── users/           # Auth, API keys, token billing
 │       ├── vendor/          # Vendor matching
 │       ├── analytics/       # Spend KPIs
 │       ├── fraud/           # Anomaly detection
 │       ├── email-intake/    # IMAP poller
 │       ├── audit/           # Activity history
-│       ├── webhook/         # Signed outbound events
+│       ├── webhook/         # Signed outbound events + delivery log
 │       ├── odometerOcr/     # Standalone odometer OCR
-│       ├── shared/          # Types, constants, errors, settings
-│       │   └── errors.ts    # AppError hierarchy
-│       ├── routes/          # Settings + config
+│       ├── shared/          # Types, validation (Zod), numbers, ocrConstants
+│       ├── routes/          # Settings, config, queue stats, apiDocs
 │       ├── app.ts           # Fastify app factory
-│       └── index.ts         # Boot: init DB, seed admin, listen
+│       └── index.ts         # Boot: init DB, queue, seed admin, listen
 │
 ├── web/                     # Frontend SPA
 │   └── src/
-│       ├── components/      # Reusable components
-│       │   └── ui/          # shadcn/ui primitives (Button, Card, Badge, etc.)
-│       ├── pages/           # Route-level pages
+│       ├── components/      # Shell, ProductTour, CommentsPanel, invoice/*, ui/*
+│       ├── pages/           # Invoices, Detail, Analytics, Admin, Tutorial, ApiDocs, …
 │       ├── api/             # HTTP client
-│       ├── hooks/           # usePolling
-│       ├── lib/             # Utilities (format, cn, balance)
-│       ├── overlays/        # Modals (Compare, Bakeoff)
-│       ├── styles/          # globals.css (Tailwind config)
+│       ├── hooks/           # usePolling (legacy; React Query preferred)
+│       ├── lib/             # format, tourFlow, utils
+│       ├── overlays/        # Compare, Bakeoff modals
+│       ├── styles/          # globals.css (Tailwind + dark mode)
 │       └── types/           # Shared TypeScript interfaces
 │
 └── openspec/                # Feature specs

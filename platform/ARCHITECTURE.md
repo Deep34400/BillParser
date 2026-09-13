@@ -6,6 +6,7 @@ Index for how the backend is wired. Table columns live in [DATABASE.md](./DATABA
 |-------|-----|
 | Tables, FKs, indexes | [DATABASE.md](./DATABASE.md) |
 | OCR pipeline | [src/ocr/README.md](./src/ocr/README.md) |
+| OCR end-to-end flow | [src/ocr/FLOW.md](./src/ocr/FLOW.md) |
 | OCR cost math | [src/ocr/COST.md](./src/ocr/COST.md) |
 | Auth / tokens | [src/users/README.md](./src/users/README.md) |
 | Vendor registry | [src/vendor/README.md](./src/vendor/README.md) |
@@ -26,8 +27,11 @@ Index for how the backend is wired. Table columns live in [DATABASE.md](./DATABA
 | API | Fastify 5 |
 | Database | PostgreSQL + Sequelize 6 |
 | Files | Google Cloud Storage |
-| OCR / AI | Mistral OCR, Gemini / Claude / OpenAI |
-| Frontend | React 18 + Vite |
+| OCR / AI | Mistral OCR, Gemini / Claude / OpenAI / AzAPI |
+| Queue | pg-boss (PostgreSQL-backed job queue) |
+| Validation | Zod (`shared/validation.ts`) |
+| Export | exceljs (.xlsx) + CSV |
+| Frontend | React 18 + Vite + React Query |
 | Tests | Vitest |
 | Deploy | Docker + Cloud Run + Cloud SQL |
 
@@ -37,35 +41,44 @@ Index for how the backend is wired. Table columns live in [DATABASE.md](./DATABA
 
 ```
 platform/src/
-├── config/          # db.ts (Sequelize + NUMERIC parser), env.ts, gcs.ts
+├── config/          # db.ts (Sequelize + NUMERIC parser, pool max 10), env.ts, gcs.ts
 ├── db/              # schema.ts (initModels + associations), migrate.ts
 ├── middleware/
 │   ├── auth.ts            # JWT + API key authentication
 │   ├── rateLimit.ts       # Per-user 60 req/min
 │   └── errorHandler.ts   # Global Fastify error handler (AppError → HTTP)
+├── queue/
+│   ├── ocrQueue.ts        # pg-boss init, enqueue, worker registration
+│   └── ocrWorker.ts       # processOcrJob — pipeline + persist + recordActivity
 ├── ocr/             # pipeline, providers, parser, transformer, models, repo
-│   ├── route.ts           # Thin HTTP controller (338 lines)
-│   └── service/           # Business logic
-│       ├── invoiceService.ts  # All invoice operations (388 lines)
-│       └── exportService.ts   # CSV export logic
+│   ├── route.ts           # Thin HTTP controller (~548 lines, Zod-validated)
+│   ├── commentRepository.ts  # Invoice comments CRUD
+│   └── service/
+│       ├── invoiceService.ts  # CRUD, list, filters, cursor pagination (~279 lines)
+│       ├── ocrLifecycle.ts    # Upload, queue, OCR, approval (~424 lines)
+│       ├── recordActivity.ts  # Shared audit + webhook dispatch helper
+│       └── exportService.ts   # CSV + Excel export (~141 lines)
 ├── users/           # auth, API keys, token ledger
 ├── vendor/          # vendor upsert from invoices
 ├── analytics/       # spend / cost KPIs
 ├── fraud/           # duplicate, GST, price, odometer checks
 ├── email-intake/    # IMAP → DRAFT bills
 ├── audit/           # append-only activity log
-├── webhook/         # outbound signed POSTs
+├── webhook/         # outbound signed POSTs + delivery log
 ├── odometerOcr/     # standalone odometer extract
 ├── shared/
 │   ├── constants.ts       # Bill types, OCR statuses
 │   ├── errors.ts          # AppError hierarchy (NotFound, Validation, Forbidden, etc.)
+│   ├── validation.ts      # Zod schemas (login, upload, comments, webhooks, settings)
+│   ├── numbers.ts         # roundMoney and numeric helpers
+│   ├── ocrConstants.ts    # GST rates, tolerances, timeouts
 │   ├── settings.ts        # Pipeline settings
 │   ├── storage.ts         # GCS upload/download
 │   ├── cache.ts           # Analytics cache
 │   └── types.ts           # BillDoc, ParsedInvoiceData, etc.
-├── routes/          # settings + config
+├── routes/          # settings, config, queue stats, apiDocs
 ├── app.ts           # Fastify factory (auth → errorHandler → routes)
-└── index.ts         # init DB, seed admin, listen
+└── index.ts         # init DB, queue, seed admin, listen
 ```
 
 Models live in `{domain}/models/`. `db/schema.ts` is the only place that calls `initModels()` and sets associations.
@@ -74,8 +87,8 @@ Models live in `{domain}/models/`. `db/schema.ts` is the only place that calls `
 
 ## Database Layer (code)
 
-- **`config/db.ts`** — singleton Sequelize from `DATABASE_URL`. Pool `max: 2` (Cloud Run). `pg` OID 1700 parser so NUMERIC is a JS number.
-- **`db/schema.ts`** — init order: Vendor → User → Bill → BillPart → ApiKey → TokenTransaction → AppSettings → ProviderCredential → AuditLog → WebhookEndpoint. Associations: Bill↔Vendor, Bill↔BillPart, User↔ApiKey, User↔TokenTransaction.
+- **`config/db.ts`** — singleton Sequelize from `DATABASE_URL`. Pool `max: 10` (supports higher concurrency per instance). `pg` OID 1700 parser so NUMERIC is a JS number.
+- **`db/schema.ts`** — init order: Vendor → User → Bill → BillPart → InvoiceComment → ApiKey → TokenTransaction → AppSettings → ProviderCredential → AuditLog → WebhookEndpoint → WebhookDelivery. Associations: Bill↔Vendor, Bill↔BillPart, Bill↔InvoiceComment, User↔ApiKey, User↔TokenTransaction.
 - **`db/migrate.ts`** — drops retired org tables, then `CREATE EXTENSION pg_trgm` + `sync({ alter: true })`.
 - **`shared/constants.ts`** — bill types, OCR statuses, pagination, pricing defaults.
 
@@ -116,21 +129,25 @@ Full column list: [DATABASE.md](./DATABASE.md).
 
 ```
 POST /api/invoices/upload
-  → validate PDF/image
+  → Zod validate + validate PDF/image
   → shared/storage.ts → GCS
-  → createBill(PROCESSING)
+  → createBill(PROCESSING, user_id)
+  → enqueueOcr (pg-boss) — or inline if queue unavailable (tests)
   → return 202 + bill_id immediately
 
-Background:
+Background (ocrWorker):
   runPipeline() → fallbackChain (single or split)
   parser + enrichParsedInvoice + reconcileTotal
   mapParsedToBill → updateBill (OCR_COMPLETED | NEED_REVIEW | FAILED)
   saveBillParts
   upsertVendorFromInvoice (fire-and-forget)
   deductTokens (if user session)
+  recordActivity → audit_logs + webhook dispatch (3× retry)
 ```
 
-Frontend polls `GET /api/invoices`. Detail page uses `GET /api/invoices/:id`.
+Frontend polls `GET /api/invoices` via React Query (`refetchInterval: 3s` while PROCESSING). Detail page uses `GET /api/invoices/:id`.
+
+Full diagram: [src/ocr/FLOW.md](./src/ocr/FLOW.md).
 
 | Status | Meaning |
 |--------|---------|
@@ -164,24 +181,31 @@ Gemini on Cloud Run uses Vertex + ADC (no `GEMINI_API_KEY`).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/invoices` | Paginated list |
-| `GET` | `/api/invoices/counts` | Status counts |
+| `GET` | `/api/invoices` | Cursor-paginated list (filters: status, q, minTotal, maxTotal, dateFrom, dateTo, vendor) |
+| `GET` | `/api/invoices/counts` | Status counts (scoped to user unless admin) |
 | `GET` | `/api/invoices/:id` | Detail + parts |
 | `GET` | `/api/invoices/:id/file` | PDF/image |
-| `POST` | `/api/invoices/upload` | Upload (async OCR) |
+| `GET` | `/api/invoices/:id/comments` | List comments |
+| `POST` | `/api/invoices/:id/comments` | Add comment (Zod-validated) |
+| `POST` | `/api/invoices/upload` | Upload (async OCR via pg-boss) |
 | `POST` | `/api/invoices/import` | Import from URLs |
 | `POST` | `/api/invoices/:id/reextract` | Re-run OCR |
 | `POST` | `/api/invoices/:id/cancel` | Cancel |
 | `POST` | `/api/invoices/:id/process-ocr` | OCR a DRAFT |
-| `PATCH` | `/api/invoices/:id` | Human edit |
+| `POST` | `/api/invoices/:id/submit-approval` | Submit for approval |
+| `POST` | `/api/invoices/:id/approve` | Approve invoice |
+| `POST` | `/api/invoices/:id/reject` | Reject invoice |
+| `PATCH` | `/api/invoices/:id` | Human edit (Zod-validated) |
 | `DELETE` | `/api/invoices/:id` | Delete bill + parts |
 | `POST` | `/api/invoices/bulk` | Bulk actions |
 | `POST` | `/api/invoices/reconcile-range` | Batch reconcile |
 | `GET` | `/api/invoices/export/csv` | Bills CSV |
 | `GET` | `/api/invoices/export/line-items.csv` | Line items CSV |
+| `GET` | `/api/invoices/export/xlsx` | Filtered Excel export (exceljs) |
 | `POST` | `/api/parse` | Stateless parse |
 | `POST` | `/api/ocr/sync` | Sync OCR (API key) |
 | `POST` | `/api/ocr/async` | Async OCR (API key) |
+| `GET` | `/api/docs` | Public API reference (invoice endpoints) |
 
 ### Auth / Account / Admin
 
@@ -193,6 +217,8 @@ Gemini on Cloud Run uses Vertex + ADC (no `GEMINI_API_KEY`).
 | `GET` | `/api/account/transactions` | JWT / key |
 | `GET` | `/api/audit/logs` | JWT (own rows; admin sees all) |
 | `GET/POST/PATCH/DELETE` | `/api/webhooks` | JWT |
+| `GET` | `/api/webhooks/:id/deliveries` | JWT — delivery attempt log |
+| `GET` | `/api/queue/stats` | Admin — pg-boss queue monitoring |
 | `GET/POST` | `/api/admin/users` | Admin |
 | `PATCH` | `/api/admin/users/:id/block` | Admin |
 | `POST` | `/api/admin/users/:id/tokens` | Admin |

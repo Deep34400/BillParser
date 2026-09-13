@@ -1,6 +1,6 @@
 # Web Architecture
 
-React 18 + TypeScript SPA for invoice management, built with Vite 5, Tailwind CSS v4, and shadcn/ui.
+React 18 + TypeScript SPA for invoice management, built with Vite 5, Tailwind CSS v4, shadcn/ui, and @tanstack/react-query.
 
 ## Tech Stack
 
@@ -8,8 +8,11 @@ React 18 + TypeScript SPA for invoice management, built with Vite 5, Tailwind CS
 |-------|------------|
 | Framework | React 18 + TypeScript |
 | Build | Vite 5 |
-| Styling | Tailwind CSS v4 (CSS-first config) |
-| Components | shadcn/ui (Radix primitives + CVA) |
+| Styling | Tailwind CSS v4 (CSS-first config) + dark mode (`.dark` class) |
+| Components | shadcn/ui (Radix primitives + CVA) — 18 primitives |
+| Data fetching | @tanstack/react-query (AnalyticsPage, InvoicesPage, AdminPage, AuditLogPanel, ApiDocsPage) |
+| Charts | recharts (donut, stacked bars, composed chart, sparklines on Analytics) |
+| Toasts | sonner (replaces custom Toast for notifications) |
 | Icons | Lucide React |
 | Tests | Vitest + React Testing Library |
 | Path alias | `@/` → `./src` (tsconfig + Vite) |
@@ -19,136 +22,160 @@ React 18 + TypeScript SPA for invoice management, built with Vite 5, Tailwind CS
 ```
 web/
 ├── src/
-│   ├── main.tsx               # App entry point (imports globals.css)
-│   ├── App.tsx                # Router + top-level layout
-│   ├── theme.ts               # Legacy color tokens (for unconverted pages)
+│   ├── main.tsx               # App entry (globals.css, ErrorBoundary)
+│   ├── App.tsx                # QueryClientProvider, Router, sonner Toaster
+│   ├── theme.ts               # Legacy color tokens (kept for a few shared helpers)
 │   │
 │   ├── styles/
-│   │   └── globals.css        # Tailwind v4 config + design tokens (@theme)
+│   │   └── globals.css        # Tailwind v4 @theme + dark mode tokens
 │   │
-│   ├── api/                   # API client layer
+│   ├── api/
 │   │   └── client.ts          # HTTP methods for all backend endpoints
 │   │
-│   ├── types/                 # TypeScript type definitions
+│   ├── types/
 │   │   └── index.ts           # Invoice, AppConfig, SettingsData, etc.
 │   │
-│   ├── lib/                   # Pure utilities & business logic
+│   ├── lib/
 │   │   ├── utils.ts           # cn() — clsx + tailwind-merge
 │   │   ├── format.ts          # Money, date, confidence formatting
-│   │   ├── structuringModels.ts  # LLM model suggestions per provider
-│   │   └── summaryFromMarkdown.ts # Client-side bill summary parser
+│   │   ├── tourFlow.ts        # ProductTour step definitions
+│   │   ├── structuringModels.ts
+│   │   └── summaryFromMarkdown.ts
 │   │
-│   ├── components/            # Reusable UI components
-│   │   ├── ui/                # shadcn/ui primitives (15 components)
-│   │   │   ├── button.tsx     # 8 variants × 4 sizes (CVA)
-│   │   │   ├── card.tsx       # Card + Header/Title/Description/Content/Footer
-│   │   │   ├── badge.tsx      # 9 variants (success, warning, danger, info, etc.)
-│   │   │   ├── input.tsx      # Styled text input
-│   │   │   ├── table.tsx      # Table/Header/Body/Row/Cell
-│   │   │   ├── tabs.tsx       # Radix Tabs
-│   │   │   ├── dialog.tsx     # Modal with overlay + animations
-│   │   │   ├── dropdown-menu.tsx  # Radix DropdownMenu
-│   │   │   ├── select.tsx     # Radix Select with check indicator
-│   │   │   ├── tooltip.tsx    # Radix Tooltip
-│   │   │   ├── separator.tsx  # Horizontal/vertical
-│   │   │   ├── textarea.tsx   # Multi-line text input
-│   │   │   ├── switch.tsx     # Toggle switch
-│   │   │   ├── label.tsx      # Form label
-│   │   │   └── empty-state.tsx # Empty state with icon + action
+│   ├── components/
+│   │   ├── ui/                # shadcn/ui primitives (18 components)
+│   │   │   ├── alert-dialog.tsx, badge.tsx, button.tsx, card.tsx
+│   │   │   ├── dialog.tsx, dropdown-menu.tsx, empty-state.tsx
+│   │   │   ├── input.tsx, label.tsx, select.tsx, separator.tsx
+│   │   │   ├── sheet.tsx, skeleton.tsx, switch.tsx, table.tsx
+│   │   │   ├── tabs.tsx, textarea.tsx, tooltip.tsx
 │   │   │
-│   │   ├── Shell.tsx          # App shell (sidebar nav + header)
-│   │   ├── WebhooksPanel.tsx  # Create / pause / delete webhook endpoints
-│   │   ├── AuditLogPanel.tsx  # Activity history table
-│   │   ├── Toast.tsx          # Toast notification (3 variants)
-│   │   ├── StatusDot.tsx      # OCR status indicator with pulse animation
-│   │   ├── ConfidenceBar.tsx  # Confidence score progress bar
-│   │   ├── DocNote.tsx        # Term-description list for fraud/analytics
-│   │   ├── InvoiceBreakdown.tsx   # ⚠ Legacy — parts/labour/GST breakdown
-│   │   ├── SummaryBreakdown.tsx   # ⚠ Legacy — compact bill summary
-│   │   ├── SummaryColumns.tsx     # ⚠ Legacy — parts vs labour columns
-│   │   ├── SearchableTable.tsx    # ⚠ Legacy — search table
-│   │   └── DocumentPreview.tsx    # ⚠ Legacy — PDF/image preview
+│   │   ├── invoice/           # InvoiceDetailPage sub-components (14)
+│   │   │   ├── StatusBadge.tsx, StatusTimeline.tsx
+│   │   │   ├── InvoiceHeader.tsx, InvoiceToolbar.tsx, InvoiceFieldGrid.tsx
+│   │   │   ├── PartsTable.tsx, LabourTable.tsx, CostBreakdown.tsx
+│   │   │   ├── OcrCostPanel.tsx, FallbackComparePanel.tsx
+│   │   │   ├── InvoiceEditForm.tsx, ApprovalBar.tsx
+│   │   │   ├── CommentsPanel.tsx, InvoicePdfSplit.tsx
+│   │   │
+│   │   ├── Shell.tsx          # Sidebar nav, dark mode toggle, Help menu, mobile Sheet
+│   │   ├── ProductTour.tsx    # Custom guided tour (replaces react-joyride)
+│   │   ├── GuidedTour.tsx     # Tour orchestration wrapper
+│   │   ├── WebhooksPanel.tsx
+│   │   ├── AuditLogPanel.tsx  # React Query
+│   │   ├── ConfirmDialog.tsx  # Replaces browser confirm()
+│   │   ├── PromptDialog.tsx   # Replaces browser prompt()
+│   │   ├── ErrorBoundary.tsx, ErrorState.tsx
+│   │   ├── UploadProgress.tsx, WelcomeDialog.tsx
+│   │   ├── FeatureHint.tsx, HelpTip.tsx
+│   │   ├── StatusDot.tsx, ConfidenceBar.tsx, DocNote.tsx
+│   │   ├── DocumentPreview.tsx, InvoiceBreakdown.tsx
+│   │   ├── SummaryBreakdown.tsx, SummaryColumns.tsx
+│   │   └── Toast.tsx          # Legacy; sonner preferred
 │   │
-│   ├── pages/                 # Route-level page components
-│   │   ├── LoginPage.tsx      # ✅ Converted — shadcn Card/Input/Button
-│   │   ├── InvoicesPage.tsx   # ✅ Converted — shadcn Table/Badge/Button
-│   │   ├── AccountPage.tsx    # API keys, webhooks, my activity, usage
-│   │   ├── FraudPage.tsx      # ✅ Converted — shadcn Card/Badge/EmptyState
-│   │   ├── AnalyticsPage.tsx  # ✅ Converted — shadcn Tabs/Card/Table
-│   │   ├── OdometerPage.tsx   # ✅ Converted — shadcn Card/Badge/EmptyState
-│   │   ├── InvoiceDetailPage.tsx  # ⚠ Legacy — uses theme.ts tokens
-│   │   ├── SettingsPage.tsx       # ⚠ Legacy — uses theme.ts tokens
-│   │   └── AdminPage.tsx          # ⚠ Legacy — uses theme.ts tokens
+│   ├── pages/
+│   │   ├── LoginPage.tsx
+│   │   ├── InvoicesPage.tsx       # React Query, drag-and-drop upload, cursor pagination
+│   │   ├── InvoiceDetailPage.tsx  # Orchestrates invoice/* components (~438 lines)
+│   │   ├── AnalyticsPage.tsx      # React Query + recharts
+│   │   ├── FraudPage.tsx
+│   │   ├── OdometerPage.tsx
+│   │   ├── AccountPage.tsx
+│   │   ├── ActivityPage.tsx
+│   │   ├── SettingsPage.tsx       # shadcn/Tailwind (~705 lines)
+│   │   ├── AdminPage.tsx          # shadcn/Tailwind + React Query (~552 lines)
+│   │   ├── TutorialPage.tsx     # Video-style slide walkthrough
+│   │   ├── UserGuidePage.tsx      # Written how-to guide
+│   │   ├── ApiDocsPage.tsx        # Interactive API reference (fetches GET /api/docs)
+│   │   └── tutorialSlides.ts
 │   │
-│   ├── hooks/                 # Custom React hooks
-│   │   └── usePolling.ts      # Auto-refresh while extraction runs
+│   ├── hooks/
+│   │   └── usePolling.ts      # Legacy; React Query refetchInterval preferred
 │   │
-│   └── overlays/              # Modal/overlay components
-│       ├── CompareOverlay.tsx # ⚠ Legacy — side-by-side comparison
-│       └── BakeoffOverlay.tsx # ⚠ Legacy — multi-provider comparison
+│   └── overlays/
+│       ├── CompareOverlay.tsx
+│       └── BakeoffOverlay.tsx
 │
-├── tests/                     # Mirrors src/ structure
-├── index.html                 # Vite HTML entry
-├── nginx.conf                 # Production reverse-proxy config
-├── vite.config.ts             # Vite + @tailwindcss/vite + @ alias
-├── tsconfig.json              # baseUrl + paths for @/* alias
+├── tests/
+├── index.html
+├── nginx.conf
+├── vite.config.ts
+├── tsconfig.json
 ├── package.json
 └── Dockerfile
 ```
-
-> **⚠ Legacy** = still uses inline styles + `theme.ts` tokens. These files work correctly via backward-compatible `theme.ts`, but should be converted to Tailwind in a future pass.
 
 ## Design System
 
 ### Design Tokens
 
-All design tokens are defined in `src/styles/globals.css` using Tailwind v4's `@theme` directive:
+All design tokens are defined in `src/styles/globals.css` using Tailwind v4's `@theme` directive. Dark mode toggles the `.dark` class on `<html>` (persisted in `localStorage` via `Shell.tsx`).
 
-| Token | CSS Variable | Value | Usage |
-|-------|-------------|-------|-------|
-| Background | `--color-background` | `#F7F6F1` | Page background (warm paper) |
-| Foreground | `--color-foreground` | `#1B1D19` | Primary text (ink) |
-| Primary | `--color-primary` | `#2E5C8A` | Buttons, links, accents |
-| Secondary | `--color-secondary` | `#B8BFAA` | Muted elements |
-| Muted | `--color-muted` | `#E8E6DF` | Borders, disabled states |
-| Success | `--color-success` | `#3E7B4C` | Good confidence, completed |
-| Warning | `--color-warning` | `#B8860B` | Medium confidence, review |
-| Danger | `--color-danger` | `#9B2C2C` | Low confidence, errors |
+| Token | CSS Variable | Usage |
+|-------|-------------|-------|
+| Background | `--color-background` | Page background |
+| Foreground | `--color-foreground` | Primary text |
+| Primary | `--color-primary` | Buttons, links, accents |
+| Secondary | `--color-secondary` | Muted elements |
+| Muted | `--color-muted` | Borders, disabled states |
+| Success | `--color-success` | Completed, good confidence |
+| Warning | `--color-warning` | Review, medium confidence |
+| Danger | `--color-danger` | Errors, low confidence |
 
 ### Component Library (shadcn/ui)
 
 Built on [Radix UI](https://www.radix-ui.com/) primitives with [class-variance-authority](https://cva.style/) for variant management.
 
 **Key patterns:**
-- **`cn()` utility** — merges Tailwind classes using `clsx` + `tailwind-merge` (avoids conflicts)
-- **CVA variants** — each component defines variants (e.g., Button has `default | destructive | outline | success | warning`)
+- **`cn()` utility** — merges Tailwind classes using `clsx` + `tailwind-merge`
+- **CVA variants** — each component defines variants (e.g., Button: `default | destructive | outline | success | warning`)
 - **`forwardRef`** — all components forward refs for composition
 - **Slot pattern** — `asChild` prop renders the child element instead of a wrapper
+- **Skeleton** — loading placeholders on InvoicesPage, AnalyticsPage, AdminPage, detail views
 
-### Backward Compatibility
+## Help & Onboarding
 
-- `theme.ts` is preserved — unconverted pages still import `T` tokens for inline styles
-- `tokens.css` is preserved — for any CSS that references old custom properties
-- `globals.css` is imported in `main.tsx` — provides all Tailwind utilities globally
+The **Help** menu in `Shell.tsx` provides:
+
+| Item | Route / action |
+|------|----------------|
+| Watch tutorial | `/tutorial` — slide walkthrough (upload → extract → detail → analytics → API key → export) |
+| Take a tour | `ProductTour` — custom guided tour with multi-page navigation |
+| User guide | `/docs` — written how-to (`UserGuidePage.tsx`) |
+| API reference | `/api-docs` — interactive docs from `GET /api/docs` |
+
+`react-joyride` is installed but **replaced** by the custom `ProductTour.tsx` component.
 
 ## Key Design Decisions
 
-- **`api/client.ts`** is the single point of contact with the backend — all HTTP calls go through this module. Easy to mock in tests.
+- **`api/client.ts`** is the single point of contact with the backend — all HTTP calls go through this module.
+- **`@tanstack/react-query`** caches GET responses with 30s stale time; invoice list polls every 3s while any bill is `PROCESSING`.
 - **`lib/summaryFromMarkdown.ts`** parses OCR markdown on the client for a live breakdown without an extra API call.
 - **`types/index.ts`** centralizes all TypeScript interfaces shared across the app.
-- **`lib/`** keeps formatting and model utilities separate from React components — pure functions, easy to test.
-- **Pages** are route-level; **components** are reusable within pages; **overlays** are modal UIs that appear over pages.
-- **`components/ui/`** contains shadcn/ui primitives — unstyled Radix + Tailwind, no business logic.
+- **Pages** are route-level; **`components/invoice/`** holds detail-page sub-components; **overlays** are modal UIs.
+- **`ConfirmDialog` / `PromptDialog`** replace native `confirm()` / `prompt()` for consistent UX.
+- **Mobile** — hamburger menu via shadcn `Sheet` in `Shell.tsx`.
 
 ## Data Loading
 
-The UI does **not** cache GET responses. Invoice list, counts, and analytics tabs call the API on each visit.
+### React Query
+
+| Page / component | Query key pattern | Notes |
+|------------------|-------------------|-------|
+| `InvoicesPage` | invoices, counts, batches | `refetchInterval: 3000` while PROCESSING |
+| `AnalyticsPage` | kpis, months, workshops, vehicles, costs | Lazy tabs fetch on first open |
+| `AdminPage` | admin users | |
+| `AuditLogPanel` | audit logs | |
+| `ApiDocsPage` | `/api/docs` | Public endpoint |
+
+Default options (`App.tsx`): `staleTime: 30_000`, `retry: 1`, `refetchOnWindowFocus: true`.
 
 Analytics tabs stay lazy (fetch when first opened). Search is debounced 300ms.
 
 Server-side only (`platform/src/shared/cache.ts`): 30s TTL on analytics aggregations, cleared when bills change.
 
 ### Analytics Split APIs
+
 Instead of one monolithic `GET /api/analytics`, the frontend calls:
 - `analyticsKpis()` — KPIs + workshops (loaded on page mount)
 - `analyticsVehicles(?q=)` — vehicles (lazy, searchable)
@@ -157,28 +184,47 @@ Instead of one monolithic `GET /api/analytics`, the frontend calls:
 - `analyticsCostkm()` — cost/km (lazy)
 - `analyticsCosts()` — OCR API costs (lazy, on "API Costs" tab)
 
-### Search
-Workshops and Vehicles views have debounced search inputs (300ms) that hit server-side filtered endpoints.
+Charts use **recharts**: donut (status breakdown), stacked bars (monthly spend), composed chart (cost/km), sparklines (vehicle trends).
+
+### Search & Filters
+
+Workshops and Vehicles views have debounced search inputs (300ms). Invoice list supports server-side filters: `minTotal`, `maxTotal`, `dateFrom`, `dateTo`, `vendor` (ILIKE), plus cursor pagination.
 
 ## Conversion Status
 
+All pages and primary components are converted to Tailwind + shadcn/ui.
+
 | Page/Component | Status | Styling |
 |----------------|--------|---------|
-| Shell.tsx | ✅ Converted | Tailwind + shadcn Button/Separator |
+| Shell.tsx | ✅ Converted | Tailwind + dark mode + Help menu + mobile Sheet |
 | LoginPage.tsx | ✅ Converted | shadcn Card/Input/Label/Button |
-| InvoicesPage.tsx | ✅ Converted | shadcn Table/Badge/Button/Input/Card |
+| InvoicesPage.tsx | ✅ Converted | React Query, drag-and-drop, Skeleton, sonner |
+| InvoiceDetailPage.tsx | ✅ Converted | 14 sub-components in `components/invoice/` |
 | AccountPage.tsx | ✅ Converted | API keys, webhooks, activity, usage |
 | FraudPage.tsx | ✅ Converted | shadcn Card/Badge/Button/EmptyState |
-| AnalyticsPage.tsx | ✅ Converted | shadcn Tabs/Card/Table/Input/Button |
+| AnalyticsPage.tsx | ✅ Converted | React Query + recharts + shadcn Tabs/Card |
 | OdometerPage.tsx | ✅ Converted | shadcn Card/Badge/Button/EmptyState |
-| StatusDot.tsx | ✅ Converted | Tailwind + ioc-pulse animation |
-| Toast.tsx | ✅ Converted | Tailwind + variants (default/success/error) |
+| SettingsPage.tsx | ✅ Converted | shadcn/Tailwind (~705 lines) |
+| AdminPage.tsx | ✅ Converted | shadcn/Tailwind + React Query (~552 lines) |
+| TutorialPage.tsx | ✅ Converted | Slide walkthrough |
+| UserGuidePage.tsx | ✅ Converted | Written guide |
+| ApiDocsPage.tsx | ✅ Converted | Interactive API reference |
+| ActivityPage.tsx | ✅ Converted | Activity history |
+| ProductTour.tsx | ✅ Converted | Custom guided tour |
+| CommentsPanel.tsx | ✅ Converted | Invoice detail comments |
+| StatusBadge.tsx | ✅ Converted | OCR status chip |
+| StatusTimeline.tsx | ✅ Converted | Pipeline progress |
+| UploadProgress.tsx | ✅ Converted | Batch upload progress |
+| ConfirmDialog.tsx | ✅ Converted | Replaces browser confirm |
+| PromptDialog.tsx | ✅ Converted | Replaces browser prompt |
+| ErrorBoundary.tsx | ✅ Converted | Top-level error catch |
+| ErrorState.tsx | ✅ Converted | Inline error + retry |
+| AuditLogPanel.tsx | ✅ Converted | React Query + Skeleton |
+| WebhooksPanel.tsx | ✅ Converted | Webhook CRUD |
+| StatusDot.tsx | ✅ Converted | Tailwind + pulse animation |
 | ConfidenceBar.tsx | ✅ Converted | Tailwind progress bar |
 | DocNote.tsx | ✅ Converted | Tailwind term/desc list |
-| InvoiceDetailPage.tsx | ⏳ Pending | Inline styles + theme.ts (2,218 lines) |
-| SettingsPage.tsx | ⏳ Pending | Inline styles + theme.ts (813 lines) |
-| AdminPage.tsx | ⏳ Pending | Inline styles + theme.ts (527 lines) |
-| DocumentPreview.tsx | ⏳ Pending | Inline styles |
-| InvoiceBreakdown.tsx | ⏳ Pending | Inline styles |
-| CompareOverlay.tsx | ⏳ Pending | Inline styles |
-| BakeoffOverlay.tsx | ⏳ Pending | Inline styles |
+| DocumentPreview.tsx | ✅ Converted | PDF/image preview |
+| InvoiceBreakdown.tsx | ✅ Converted | Parts/labour/GST breakdown |
+| CompareOverlay.tsx | ✅ Converted | Side-by-side comparison |
+| BakeoffOverlay.tsx | ✅ Converted | Multi-provider comparison |
