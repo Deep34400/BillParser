@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Search, SlidersHorizontal, Download, X, Mail, Copy, Square, CheckSquare, RotateCcw, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, Search, SlidersHorizontal, Download, X, Mail, Copy, RotateCcw, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api/client.js';
 import type { Invoice, Batch } from '../types/index.js';
 import { money, dateFmt, costFmt } from '../lib/format.js';

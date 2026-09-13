@@ -150,6 +150,8 @@ export async function runFallbackChain(
             contextId,
           );
 
+      // Single enrichment point — parser returns raw schema so resolveBillSummary
+      // runs here once with real OCR markdown (not LLM JSON).
       const enriched = enrichParsedInvoice(result.parsed, result.ocrMarkdown ?? result.rawOcr);
       const recon = reconcileInvoiceTotal(enriched);
       const breakdown = buildReconBreakdown(enriched, recon);

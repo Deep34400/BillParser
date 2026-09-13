@@ -3,6 +3,7 @@ import type { AnalyticsKpis, VehicleSpend, CostPerKm, OcrCostSummary } from '../
 import { api } from '../api/client.js';
 import { moneyCompact, moneyFull, countFmt, usdToInrRate } from '../lib/format.js';
 import { DocNote, type DocItem } from '../components/DocNote.js';
+import { ErrorState } from '../components/ErrorState.js';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
@@ -22,10 +23,28 @@ const PAGE_SIZE = 20;
 export function AnalyticsPage() {
   const [kpis, setKpis] = useState<AnalyticsKpis | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { api.analyticsKpis().then(setKpis).finally(() => setLoading(false)); }, []);
+  const loadKpis = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api.analyticsKpis()
+      .then(setKpis)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load analytics'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { loadKpis(); }, [loadKpis]);
 
   if (loading) return <PageShell><p className="text-muted-foreground py-2">Loading analytics…</p></PageShell>;
+
+  if (error) {
+    return (
+      <PageShell>
+        <ErrorState title="Failed to load analytics" message={error} onRetry={loadKpis} />
+      </PageShell>
+    );
+  }
 
   if (!kpis || kpis.completedCount === 0) {
     return (

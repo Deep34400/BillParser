@@ -1,24 +1,19 @@
 /**
  * Single-call OCR+structure: PDF/image → ParsedInvoiceData in one LLM call.
  * Supports: Gemini, Claude, OpenAI (vision), Mistral Pixtral (images).
- * Each call has a 120s timeout.
  */
 import { STRUCTURING_PROMPT } from '../parser/prompt.js';
 import { structureFromLlmResponse } from '../parser/parser.js';
-import type { ParsedInvoiceData } from '../types/invoice.js';
 import type { LlmUsage, OcrStepCost } from '../types/provider.js';
 import { resolveProviderKey } from './resolveKey.js';
 import { getProviderCredentials } from '../../shared/settings.js';
 import { azapiSingle } from './azapiOcr.js';
 import { geminiGenerateContent, toGeminiStepCost } from './geminiClient.js';
 import { isPdf } from '../../shared/storage.js';
-import { getSettings } from '../../shared/settings.js';
-import { computeLlmCost } from '../../shared/modelPricing.js';
-
-import { LLM_TIMEOUT_MS as TIMEOUT_MS } from '../../shared/ocrConstants.js';
+import { callVisionLlm, type VisionProviderConfig } from './visionCall.js';
 
 export interface SingleResult {
-  parsed: ParsedInvoiceData;
+  parsed: import('../types/invoice.js').ParsedInvoiceData;
   rawOcr: string;
   /** Real OCR markdown when available (Mistral PDF path). */
   ocrMarkdown?: string;
@@ -28,31 +23,111 @@ export interface SingleResult {
 export const SINGLE_PROVIDERS = ['gemini', 'claude', 'openai', 'mistral', 'azapi'] as const;
 export type SingleProvider = (typeof SINGLE_PROVIDERS)[number];
 
+const USER_TEXT = STRUCTURING_PROMPT + '\n\nExtract all data from this document and return only JSON.';
+
+// ── Provider configs for callVisionLlm ──────────────────────────
+
+const CLAUDE_CONFIG: VisionProviderConfig = {
+  provider: 'claude',
+  apiUrl: 'https://api.anthropic.com/v1/messages',
+  buildHeaders: (key) => ({
+    'content-type': 'application/json',
+    'x-api-key': key,
+    'anthropic-version': '2023-06-01',
+  }),
+  buildBody: (model, mime, b64) => {
+    const mediaBlock = mime === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+      : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
+    return {
+      model,
+      max_tokens: 16384,
+      temperature: 0,
+      system: STRUCTURING_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [mediaBlock, { type: 'text', text: 'Extract all data from this document and return only JSON.' }],
+      }],
+    };
+  },
+  extractText: (json) => (json.content ?? []).map((b: any) => b.text ?? '').join(''),
+  extractUsage: (json) => ({
+    prompt_tokens: json.usage?.input_tokens ?? 0,
+    completion_tokens: json.usage?.output_tokens ?? 0,
+    total_tokens: (json.usage?.input_tokens ?? 0) + (json.usage?.output_tokens ?? 0),
+  }),
+};
+
+const OPENAI_CONFIG: VisionProviderConfig = {
+  provider: 'openai',
+  apiUrl: 'https://api.openai.com/v1/chat/completions',
+  buildHeaders: (key) => ({
+    'content-type': 'application/json',
+    authorization: `Bearer ${key}`,
+  }),
+  buildBody: (model, mime, b64) => ({
+    model,
+    temperature: 0,
+    max_tokens: 16384,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: STRUCTURING_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Extract all data from this document and return only JSON.' },
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
+        ],
+      },
+    ],
+  }),
+  extractText: (json) => json.choices?.[0]?.message?.content ?? '',
+  extractUsage: (json) => ({
+    prompt_tokens: json.usage?.prompt_tokens ?? 0,
+    completion_tokens: json.usage?.completion_tokens ?? 0,
+    total_tokens: json.usage?.total_tokens ?? 0,
+  }),
+};
+
+const MISTRAL_IMAGE_CONFIG: VisionProviderConfig = {
+  provider: 'mistral',
+  apiUrl: 'https://api.mistral.ai/v1/chat/completions',
+  buildHeaders: (key) => ({
+    'content-type': 'application/json',
+    authorization: `Bearer ${key}`,
+  }),
+  buildBody: (model, mime, b64) => ({
+    model,
+    temperature: 0,
+    response_format: { type: 'json_object' },
+    max_tokens: 16384,
+    messages: [
+      { role: 'system', content: STRUCTURING_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Extract all data from this document and return only JSON.' },
+          { type: 'image_url', image_url: `data:${mime};base64,${b64}` },
+        ],
+      },
+    ],
+  }),
+  extractText: (json) => json.choices?.[0]?.message?.content ?? '',
+  extractUsage: (json) => ({
+    prompt_tokens: json.usage?.prompt_tokens ?? 0,
+    completion_tokens: json.usage?.completion_tokens ?? 0,
+    total_tokens: json.usage?.total_tokens ?? 0,
+  }),
+};
+
+// ── Provider entry points ───────────────────────────────────────
+
 function detectMime(buf: Buffer): string {
   if (isPdf(buf)) return 'application/pdf';
   if (buf[0] === 0x89) return 'image/png';
   if (buf.subarray(0, 4).toString() === 'RIFF') return 'image/webp';
   return 'image/jpeg';
 }
-
-/**
- * Cost for one call. Delegates to the shared rule so thinking-token billing and
- * the >200k long-context tier stay identical across providers — this file used to
- * carry its own copy that never applied the tier.
- */
-async function estimateCost(usage: LlmUsage, model: string) {
-  const settings = await getSettings();
-  return computeLlmCost(usage, model, settings.modelPricing);
-}
-
-function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...init, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
-}
-
-const USER_TEXT = STRUCTURING_PROMPT + '\n\nExtract all data from this document and return only JSON.';
 
 async function geminiSingle(buf: Buffer, modelOverride?: string): Promise<SingleResult> {
   const { apiKey, model } = await resolveProviderKey('gemini', modelOverride);
@@ -77,131 +152,20 @@ async function geminiSingle(buf: Buffer, modelOverride?: string): Promise<Single
 
 async function claudeSingle(buf: Buffer, modelOverride?: string): Promise<SingleResult> {
   const { apiKey, model } = await resolveProviderKey('claude', modelOverride);
-  const mime = detectMime(buf);
-  const b64 = buf.toString('base64');
-  const t0 = Date.now();
-
-  const mediaBlock = mime === 'application/pdf'
-    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
-    : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };
-
-  const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 16384,
-      temperature: 0,
-      system: STRUCTURING_PROMPT,
-      messages: [{
-        role: 'user',
-        content: [mediaBlock, { type: 'text', text: 'Extract all data from this document and return only JSON.' }],
-      }],
-    }),
-  });
-
-  const latency_ms = Date.now() - t0;
-  if (!res.ok) {
-    const err = await res.text().catch(() => '');
-    throw new Error(`Claude single HTTP ${res.status}: ${err.slice(0, 300)}`);
-  }
-
-  const json = await res.json() as any;
-  const text = (json.content ?? []).map((b: any) => b.text ?? '').join('');
-  if (!text) throw new Error('Claude single returned empty response');
-
-  const usage: LlmUsage = {
-    prompt_tokens: json.usage?.input_tokens ?? 0,
-    completion_tokens: json.usage?.output_tokens ?? 0,
-    total_tokens: (json.usage?.input_tokens ?? 0) + (json.usage?.output_tokens ?? 0),
-  };
-  const breakdown = await estimateCost(usage, model);
-  const cost: OcrStepCost = {
-    provider: 'claude',
-    model,
-    usage,
-    ...breakdown,
-    latency_ms,
-  };
-
-  const structured = structureFromLlmResponse(text, '');
-  if (!structured.parsedData) throw new Error('Claude single returned no parsed_data');
-  return { parsed: structured.parsedData, rawOcr: text, cost };
+  return callVisionLlm(buf, apiKey, model, CLAUDE_CONFIG);
 }
 
 async function openaiSingle(buf: Buffer, modelOverride?: string): Promise<SingleResult> {
   const { apiKey, model } = await resolveProviderKey('openai', modelOverride);
-  const mime = detectMime(buf);
-  if (mime === 'application/pdf') {
+  if (isPdf(buf)) {
     throw new Error('OpenAI single mode supports images only (JPEG/PNG/WebP). Use Split mode or Gemini/Claude for PDF.');
   }
-
-  const t0 = Date.now();
-  const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
-
-  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      max_tokens: 16384,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: STRUCTURING_PROMPT },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Extract all data from this document and return only JSON.' },
-            { type: 'image_url', image_url: { url: dataUrl } },
-          ],
-        },
-      ],
-    }),
-  });
-
-  const latency_ms = Date.now() - t0;
-  if (!res.ok) {
-    const err = await res.text().catch(() => '');
-    throw new Error(`OpenAI single HTTP ${res.status}: ${err.slice(0, 300)}`);
-  }
-
-  const json = await res.json() as any;
-  const text = json.choices?.[0]?.message?.content ?? '';
-  if (!text) throw new Error('OpenAI single returned empty response');
-
-  const usage: LlmUsage = {
-    prompt_tokens: json.usage?.prompt_tokens ?? 0,
-    completion_tokens: json.usage?.completion_tokens ?? 0,
-    total_tokens: json.usage?.total_tokens ?? 0,
-  };
-  const breakdown = await estimateCost(usage, model);
-  const cost: OcrStepCost = {
-    provider: 'openai',
-    model,
-    usage,
-    ...breakdown,
-    latency_ms,
-  };
-
-  const structured = structureFromLlmResponse(text, '');
-  if (!structured.parsedData) throw new Error('OpenAI single returned no parsed_data');
-  return { parsed: structured.parsedData, rawOcr: text, cost };
+  return callVisionLlm(buf, apiKey, model, OPENAI_CONFIG);
 }
 
 async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<SingleResult> {
-  const mime = detectMime(buf);
-
-  // PDF: Mistral has no true one-shot PDF→JSON. Honour Settings "Single + Mistral"
-  // by running OCR + structure with Mistral only (no fallback to "split" mode).
-  if (mime === 'application/pdf') {
+  // PDF: Mistral has no true one-shot PDF→JSON. Run OCR + structure with Mistral only.
+  if (isPdf(buf)) {
     const { mistralOcr } = await import('./mistralOcr.js');
     const { llmNormalize } = await import('./llmNormalize.js');
     const t0 = Date.now();
@@ -233,61 +197,8 @@ async function mistralSingle(buf: Buffer, modelOverride?: string): Promise<Singl
   }
 
   const { apiKey, model } = await resolveProviderKey('mistral', modelOverride ?? 'pixtral-12b-2409');
-  const t0 = Date.now();
-  const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
   const visionModel = model.startsWith('pixtral') || model.includes('vision') ? model : 'pixtral-12b-2409';
-
-  const res = await fetchWithTimeout('https://api.mistral.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: visionModel,
-      temperature: 0,
-      response_format: { type: 'json_object' },
-      max_tokens: 16384,
-      messages: [
-        { role: 'system', content: STRUCTURING_PROMPT },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Extract all data from this document and return only JSON.' },
-            { type: 'image_url', image_url: dataUrl },
-          ],
-        },
-      ],
-    }),
-  });
-
-  const latency_ms = Date.now() - t0;
-  if (!res.ok) {
-    const err = await res.text().catch(() => '');
-    throw new Error(`Mistral single HTTP ${res.status}: ${err.slice(0, 300)}`);
-  }
-
-  const json = await res.json() as any;
-  const text = json.choices?.[0]?.message?.content ?? '';
-  if (!text) throw new Error('Mistral single returned empty response');
-
-  const usage: LlmUsage = {
-    prompt_tokens: json.usage?.prompt_tokens ?? 0,
-    completion_tokens: json.usage?.completion_tokens ?? 0,
-    total_tokens: json.usage?.total_tokens ?? 0,
-  };
-  const mistralBreakdown = await estimateCost(usage, visionModel);
-  const cost: OcrStepCost = {
-    provider: 'mistral',
-    model: visionModel,
-    usage,
-    ...mistralBreakdown,
-    latency_ms,
-  };
-
-  const structured = structureFromLlmResponse(text, '');
-  if (!structured.parsedData) throw new Error('Mistral single returned no parsed_data');
-  return { parsed: structured.parsedData, rawOcr: text, cost };
+  return callVisionLlm(buf, apiKey, visionModel, MISTRAL_IMAGE_CONFIG);
 }
 
 /**

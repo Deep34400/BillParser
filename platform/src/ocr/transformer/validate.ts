@@ -96,6 +96,34 @@ function checkVehicle(data: ParsedInvoiceData, issues: ValidationIssue[]): void 
   }
 }
 
+// ── Shared line-item checks (parts + labour) ───────────────────
+
+interface TaxableLineItem {
+  tax_percentage?: number | null;
+  hsn_sac_code?: string | null;
+}
+
+function checkLineItemTaxAndHsn(li: TaxableLineItem, path: string, issues: ValidationIssue[]): void {
+  if (li.tax_percentage != null && (li.tax_percentage < 0 || li.tax_percentage > 28)) {
+    issues.push(warn(`${path}.tax_percentage`, 'Tax percentage outside 0–28 GST range'));
+  }
+  if (li.tax_percentage != null && !isValidFullGstRate(li.tax_percentage)) {
+    issues.push(warn(
+      `${path}.tax_percentage`,
+      `Tax percentage ${li.tax_percentage}% is not among valid Indian GST rates (0, 3, 5, 12, 18, 28)`,
+    ));
+  }
+
+  if (li.hsn_sac_code && /^\d{1,2}$/.test(li.hsn_sac_code)) {
+    issues.push(warn(`${path}.hsn_sac_code`, 'HSN/SAC looks like a tax rate, not a code'));
+  } else if (li.hsn_sac_code?.trim()) {
+    const digits = li.hsn_sac_code.replace(/\D/g, '');
+    if (digits.length > 0 && ![4, 6, 8].includes(digits.length)) {
+      issues.push(warn(`${path}.hsn_sac_code`, 'HSN/SAC should generally be 4, 6, or 8 digits'));
+    }
+  }
+}
+
 // ── Parts line items ────────────────────────────────────────────
 
 function checkPartsLineItems(parts: PartsLineItem[], issues: ValidationIssue[]): void {
@@ -103,24 +131,7 @@ function checkPartsLineItems(parts: PartsLineItem[], issues: ValidationIssue[]):
     const li = parts[i];
     const p = `parsed_data.parts_line_items[${i}]`;
 
-    if (li.tax_percentage != null && (li.tax_percentage < 0 || li.tax_percentage > 28)) {
-      issues.push(warn(`${p}.tax_percentage`, 'Tax percentage outside 0–28 GST range'));
-    }
-    if (li.tax_percentage != null && !isValidFullGstRate(li.tax_percentage)) {
-      issues.push(warn(
-        `${p}.tax_percentage`,
-        `Tax percentage ${li.tax_percentage}% is not among valid Indian GST rates (0, 3, 5, 12, 18, 28)`,
-      ));
-    }
-
-    if (li.hsn_sac_code && /^\d{1,2}$/.test(li.hsn_sac_code)) {
-      issues.push(warn(`${p}.hsn_sac_code`, 'HSN/SAC looks like a tax rate, not a code'));
-    } else if (li.hsn_sac_code?.trim()) {
-      const digits = li.hsn_sac_code.replace(/\D/g, '');
-      if (digits.length > 0 && ![4, 6, 8].includes(digits.length)) {
-        issues.push(warn(`${p}.hsn_sac_code`, 'HSN/SAC should generally be 4, 6, or 8 digits'));
-      }
-    }
+    checkLineItemTaxAndHsn(li, p, issues);
 
     if (partsTaxableMismatch(li)) {
       const expected = roundMoney((li.quantity ?? 0) * (li.rate ?? 0));
@@ -155,24 +166,7 @@ function checkLabourLineItems(labour: LabourServiceLineItem[], issues: Validatio
     const li = labour[i];
     const p = `parsed_data.labour_service_line_items[${i}]`;
 
-    if (li.tax_percentage != null && (li.tax_percentage < 0 || li.tax_percentage > 28)) {
-      issues.push(warn(`${p}.tax_percentage`, 'Tax percentage outside 0–28 GST range'));
-    }
-    if (li.tax_percentage != null && !isValidFullGstRate(li.tax_percentage)) {
-      issues.push(warn(
-        `${p}.tax_percentage`,
-        `Tax percentage ${li.tax_percentage}% is not among valid Indian GST rates (0, 3, 5, 12, 18, 28)`,
-      ));
-    }
-
-    if (li.hsn_sac_code && /^\d{1,2}$/.test(li.hsn_sac_code)) {
-      issues.push(warn(`${p}.hsn_sac_code`, 'HSN/SAC looks like a tax rate, not a code'));
-    } else if (li.hsn_sac_code?.trim()) {
-      const digits = li.hsn_sac_code.replace(/\D/g, '');
-      if (digits.length > 0 && ![4, 6, 8].includes(digits.length)) {
-        issues.push(warn(`${p}.hsn_sac_code`, 'HSN/SAC should generally be 4, 6, or 8 digits'));
-      }
-    }
+    checkLineItemTaxAndHsn(li, p, issues);
 
     if (li.labour_charges == null) {
       issues.push(warn(`${p}.labour_charges`, 'Labour row missing labour_charges'));

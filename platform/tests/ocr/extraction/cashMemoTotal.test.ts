@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractCashMemoTotal } from '../../../src/ocr/transformer/normalize/footer.js';
+import { extractCashMemoTotal } from '../../../src/ocr/transformer/normalize/footer/index.js';
 import { enrichParsedInvoice } from '../../../src/ocr/transformer/normalize/index.js';
 import { computeReviewReasons } from '../../../src/ocr/transformer/review.js';
 import type { ParsedInvoiceData } from '../../../src/ocr/types/invoice.js';

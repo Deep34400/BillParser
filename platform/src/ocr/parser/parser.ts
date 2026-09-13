@@ -1,5 +1,6 @@
 /**
- * LLM response parser — raw JSON text → validated, enriched ParsedInvoiceData.
+ * LLM response parser — raw JSON text → validated ParsedInvoiceData.
+ * Enrichment (vendor, footer, totals) happens once in fallbackChain.
  *
  * Handles multiple JSON wrappers the LLM may produce:
  *   1. Canonical: { output: { entries: [{ parsed_data }] } }
@@ -17,7 +18,6 @@ import type { ParseResult, ValidationIssue } from '../types/parser.js';
 import type { CanonicalResult } from '../types/provider.js';
 import { prepareLlmJson, prepareLlmJsonWithRepair } from './repair.js';
 import { validateParsedInvoice } from '../transformer/validate.js';
-import { enrichParsedInvoice } from '../transformer/normalize/index.js';
 
 // ── Primitive coercion helpers ──────────────────────────────────
 
@@ -393,9 +393,8 @@ export function parseStructuredOutput(raw: string, markdown?: string): ParseResu
 
   const schemaParsed = unwrapSchemaPayload(obj);
   if (schemaParsed) {
-    const parsed = enrichParsedInvoice(schemaParsed, markdown);
-    const validation = validateParsedInvoice(parsed, markdown);
-    return { parsed, raw: obj, format: 'schema', validation };
+    const validation = validateParsedInvoice(schemaParsed, markdown);
+    return { parsed: schemaParsed, raw: obj, format: 'schema', validation };
   }
 
   if (isLegacyCanonical(obj)) {

@@ -90,7 +90,7 @@ describe('structureFromLlmResponse — diverse invoice types', () => {
     expect(r.parsedData!.totals_and_tax_summary?.grand_total_invoice).toBe(4500.00);
   });
 
-  it('strips junk company_name "Invoice" even without markdown (single mode)', () => {
+  it('returns raw company_name — junk stripping is enrichment, not parse', () => {
     const json = JSON.stringify({
       output: { entries: [{ parsed_data: {
         company_name: 'Invoice',
@@ -104,11 +104,11 @@ describe('structureFromLlmResponse — diverse invoice types', () => {
     });
     const r = structureFromLlmResponse(json, '');
     expect(r.parsedData).toBeTruthy();
-    expect(r.parsedData!.company_name).toBeNull();
+    expect(r.parsedData!.company_name).toBe('Invoice');
     expect(r.parsedData!.invoice_number).toBe('E3TSVYGG-0003');
   });
 
-  it('strips raw JSON blob dumped into company_name', () => {
+  it('returns raw JSON blob in company_name — cleanup is enrichment, not parse', () => {
     const blob = '{"output":{"entries":[{"parsed_data":{"company_name":"Anysphere, Inc."}}]}}';
     const json = JSON.stringify({
       output: { entries: [{ parsed_data: {
@@ -119,7 +119,7 @@ describe('structureFromLlmResponse — diverse invoice types', () => {
     });
     const r = structureFromLlmResponse(json, '');
     expect(r.parsedData).toBeTruthy();
-    expect(r.parsedData!.company_name).toBeNull();
+    expect(r.parsedData!.company_name).toBe(blob);
   });
 
   it('parses Gemini shortcut shape: output as array (not entries)', () => {

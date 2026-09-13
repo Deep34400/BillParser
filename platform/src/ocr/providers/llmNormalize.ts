@@ -31,6 +31,8 @@ interface ModelDef {
 }
 
 const PROVIDERS: Record<string, ModelDef> = {
+  // NOTE: Gemini is handled via Vertex AI in llmNormalize() before this map is
+  // consulted. This entry exists only so SUPPORTED_PROVIDERS includes 'gemini'.
   gemini: {
     provider: 'gemini',
     apiUrl: (model, key) =>

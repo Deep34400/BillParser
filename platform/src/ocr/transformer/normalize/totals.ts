@@ -4,7 +4,7 @@ import {
   stripCalculatedFooterAmounts,
   extractGatePassAmount,
   extractCashMemoTotal,
-} from './footer.js';
+} from './footer/index.js';
 
 import { roundMoney } from '../../../shared/numbers.js';
 

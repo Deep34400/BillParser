@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { Shell } from './components/Shell.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { InvoicesPage } from './pages/InvoicesPage.js';
@@ -49,28 +50,31 @@ export default function App() {
       .catch(() => { /* keep fallback */ });
   }, [user]);
 
-  if (!user) {
-    return <LoginPage onLogin={handleLogin} />;
-  }
-
   return (
-    <BrowserRouter>
-      <Shell user={user} onLogout={handleLogout} onUserUpdate={setUser}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/invoices" />} />
-          <Route path="/invoices" element={<InvoicesPage />} />
-          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/fraud" element={<FraudPage />} />
-          <Route path="/odometer" element={<OdometerPage />} />
-          <Route path="/organization" element={<Navigate to="/invoices" replace />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/account" element={<AccountPage />} />
-          {user.role === 'admin'
-            ? <Route path="/admin" element={<AdminPage />} />
-            : <Route path="/activity" element={<ActivityPage />} />}
-        </Routes>
-      </Shell>
-    </BrowserRouter>
+    <>
+      {!user ? (
+        <LoginPage onLogin={handleLogin} />
+      ) : (
+        <BrowserRouter>
+          <Shell user={user} onLogout={handleLogout} onUserUpdate={setUser}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/invoices" />} />
+              <Route path="/invoices" element={<InvoicesPage />} />
+              <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/fraud" element={<FraudPage />} />
+              <Route path="/odometer" element={<OdometerPage />} />
+              <Route path="/organization" element={<Navigate to="/invoices" replace />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/account" element={<AccountPage />} />
+              {user.role === 'admin'
+                ? <Route path="/admin" element={<AdminPage />} />
+                : <Route path="/activity" element={<ActivityPage />} />}
+            </Routes>
+          </Shell>
+        </BrowserRouter>
+      )}
+      <Toaster />
+    </>
   );
 }

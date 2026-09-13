@@ -21,7 +21,7 @@ export {
   extractSummaryFromMarkdown, applyFooterFromMarkdown, stripCalculatedFooterAmounts,
   extractGatePassAmount, footerMissingInMarkdown, clearUntrustedZeroDiscounts,
   isCalculatedGstAmount, footerColumnAmounts, extractCashMemoTotal,
-} from './footer.js';
+} from './footer/index.js';
 
 // ── Labour line item filtering ──────────────────────────────────
 
