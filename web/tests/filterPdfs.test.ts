@@ -11,10 +11,11 @@ describe('filterPdfs', () => {
     const out = filterPdfs([mk('invoice.pdf', ''), mk('SCAN.PDF', 'application/octet-stream')]);
     expect(out.map((f) => f.name)).toEqual(['invoice.pdf', 'SCAN.PDF']);
   });
-  it('drops non-PDF files', () => {
-    expect(filterPdfs([mk('notes.txt', 'text/plain'), mk('img.png', 'image/png')]).length).toBe(0);
+  it('drops unrelated files but keeps images and zip', () => {
+    expect(filterPdfs([mk('notes.txt', 'text/plain')]).length).toBe(0);
+    expect(filterPdfs([mk('img.png', 'image/png'), mk('pack.zip', 'application/zip')]).map((f) => f.name)).toEqual(['img.png', 'pack.zip']);
   });
-  it('filters a mixed selection, keeping only PDFs', () => {
+  it('filters a mixed selection, keeping invoices and zip', () => {
     const out = filterPdfs([mk('x.pdf', 'application/pdf'), mk('y.doc', 'application/msword'), mk('z.pdf', '')]);
     expect(out.map((f) => f.name)).toEqual(['x.pdf', 'z.pdf']);
   });

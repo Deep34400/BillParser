@@ -40,6 +40,7 @@ export interface InvoiceListFilters {
   vendor?: string;
   /** When set, restrict results to this owner's bills (non-admin users). */
   userId?: string;
+  batchId?: string;
 }
 
 export interface ReconcileRangeParams {
@@ -82,6 +83,7 @@ export async function listInvoices(filters: InvoiceListFilters) {
     dateTo: filters.dateTo,
     vendor: filters.vendor,
     userId: filters.userId,
+    batchId: filters.batchId,
   };
 
   const useCursor = filters.cursor !== undefined || filters.page === undefined;

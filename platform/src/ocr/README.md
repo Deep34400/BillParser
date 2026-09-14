@@ -62,6 +62,7 @@ ocr/
 │   ├── parser.ts                 # ValidationIssue, ParseResult
 │   ├── provider.ts               # LlmUsage, OcrStepCost, OcrCostInfo
 │   └── index.ts                  # Barrel export
+├── compare/                      # Two-invoice diff: rules + Gemini leftover match + validation
 ├── route.ts                      # Thin HTTP controller (~548 lines, Zod-validated)
 ├── COST.md                       # Cost documentation
 ├── FLOW.md                       # End-to-end upload → webhook flow
@@ -78,11 +79,15 @@ Shared constants used by this module:
 ### 1. Upload
 
 `POST /api/invoices/upload` → `route.ts` → `ocrLifecycle.uploadInvoices()`:
-1. Zod-validates request; validates the file (PDF, JPEG, PNG, or WebP)
-2. Uploads to Cloud Storage
-3. Creates a placeholder `BillDoc` with `ocr_status: PROCESSING` and `user_id`
-4. Enqueues job via pg-boss (`queue/ocrQueue.ts`) — inline fallback in tests
-5. Returns `HTTP 202` immediately — OCR runs in the background
+1. Reads `batchName` plus files (PDF, JPEG, PNG, WebP, or one zip)
+2. Zip is expanded (`service/expandZip.ts`); nested zip rejected; cap 25 invoices
+3. Creates a `batches` row and stamps `batch_id` on each bill
+4. Each file: Cloud Storage → `BillDoc` (`PROCESSING`) → pg-boss
+5. Invalid files are rejected; valid ones still form the batch
+
+`POST /api/invoices/import` does the same from http / signed S3 URLs.
+
+`POST /api/invoices/compare` compares two processed invoices, two JSON bodies, or two files (OCR first). Rules match totals and names. Settings **Compare model** (Gemini by default) only pairs leftover names, then a second prompt writes the note. Validation drops weak pairs; `mismatches` is the review list. See [compare/README.md](./compare/README.md).
 
 See [FLOW.md](./FLOW.md) for the complete diagram.
 
@@ -171,8 +176,8 @@ Upload, background OCR, sync/async API, and approval workflow.
 
 | Function | What it does |
 |----------|-------------|
-| `uploadInvoices(files, userId?)` | Validate → store → create PROCESSING bill → enqueue OCR |
-| `importFromUrls(urls, userId?)` | Download from URLs → process like uploads |
+| `uploadInvoices(files, userId?, { batchId })` | Validate → store → create PROCESSING bill → enqueue OCR |
+| `importFromUrls(urls, userId?, { batchId })` | Download from URLs → process like uploads |
 | `reextractInvoice(id, userId?)` | Re-run OCR pipeline on existing bill |
 | `processDraft(id, userId?)` | Process a DRAFT bill (from email intake) |
 | `cancelInvoice(id, userId?)` | Cancel processing |

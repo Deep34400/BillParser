@@ -128,7 +128,7 @@ export interface Invoice {
     } | null;
   }> | null;
 }
-export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; }
+export interface Batch { id: string; name: string; createdAt: string; total: number; completed: number; failed: number; processing: number; review?: number; source?: string; }
 export interface ProviderInfo { name: string; displayName: string; kind: string; configured: boolean; requiredCredentials?: string[]; masked?: Record<string, string>; }
 export interface AppConfig {
   providers: ProviderInfo[];
@@ -138,6 +138,8 @@ export interface AppConfig {
   pipelineMode?: 'split' | 'single';
   singleProvider?: string;
   singleModel?: string;
+  compareProvider?: string;
+  compareModel?: string;
   emailIntake?: {
     enabled: boolean;
     address: string | null;
@@ -169,6 +171,8 @@ export interface SettingsData {
   extractionModel?: string;
   singleProvider?: string;
   singleModel?: string;
+  compareProvider?: string;
+  compareModel?: string;
   fallbackChain?: FallbackLevel[] | null;
   providers: ProviderInfo[];
   modelPricing?: Record<string, ModelPrice>;

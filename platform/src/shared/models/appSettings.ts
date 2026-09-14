@@ -12,6 +12,8 @@ export interface AppSettingsAttributes {
   extractionModel: string | null;
   singleProvider: string | null;
   singleModel: string | null;
+  compareProvider: string | null;
+  compareModel: string | null;
   emailIntakeEnabled: boolean | null;
   emailIntakeUser: string | null;
   emailIntakePollIntervalSec: number | null;
@@ -32,6 +34,8 @@ export class AppSettingsModel extends Model<AppSettingsAttributes> implements Ap
   declare extractionModel: string | null;
   declare singleProvider: string | null;
   declare singleModel: string | null;
+  declare compareProvider: string | null;
+  declare compareModel: string | null;
   declare emailIntakeEnabled: boolean | null;
   declare emailIntakeUser: string | null;
   declare emailIntakePollIntervalSec: number | null;
@@ -53,6 +57,8 @@ export function initAppSettingsModel(seq: Sequelize): void {
     extractionModel: { type: DataTypes.TEXT, field: 'extraction_model' },
     singleProvider: { type: DataTypes.TEXT, field: 'single_provider' },
     singleModel: { type: DataTypes.TEXT, field: 'single_model' },
+    compareProvider: { type: DataTypes.TEXT, field: 'compare_provider' },
+    compareModel: { type: DataTypes.TEXT, field: 'compare_model' },
     emailIntakeEnabled: { type: DataTypes.BOOLEAN, field: 'email_intake_enabled' },
     emailIntakeUser: { type: DataTypes.TEXT, field: 'email_intake_user' },
     emailIntakePollIntervalSec: { type: DataTypes.INTEGER, field: 'email_intake_poll_interval_sec' },

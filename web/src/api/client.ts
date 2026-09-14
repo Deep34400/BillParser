@@ -175,6 +175,55 @@ export interface InvoiceComment {
   user_name?: string;
 }
 
+export interface CompareFieldDiff {
+  field: string;
+  a: string | number | null;
+  b: string | number | null;
+  status: string;
+  delta?: number;
+  deltaPct?: number;
+}
+
+export interface CompareLineDiff {
+  status: string;
+  how: string;
+  description: string;
+  a?: string | null;
+  b?: string | null;
+  aAmount?: number | null;
+  bAmount?: number | null;
+  changes?: CompareFieldDiff[];
+  confidence?: number;
+}
+
+export interface CompareMismatch {
+  kind: 'header' | 'total' | 'missing' | 'extra' | 'changed' | 'rejected_ai';
+  label: string;
+  detail: string;
+  check: 'review';
+}
+
+export interface CompareResult {
+  source: string;
+  invoiceA: { id: string | null; vendorName: string | null; invoiceNumber: string | null; invoiceDate: string | null; total: number | null };
+  invoiceB: { id: string | null; vendorName: string | null; invoiceNumber: string | null; invoiceDate: string | null; total: number | null };
+  header: CompareFieldDiff[];
+  totals: CompareFieldDiff[];
+  parts: CompareLineDiff[];
+  labour: CompareLineDiff[];
+  counts: { matched: number; changed: number; missing: number; extra: number; aiPairs: number };
+  summary: { rules: string; ai: string | null };
+  model?: { provider: string; model: string; used: boolean; error?: string };
+  validation?: {
+    acceptedAi: number;
+    rejectedAi: Array<{ a: string; b: string; reason: string; confidence: number }>;
+    summaryOk: boolean;
+    summaryIssues: string[];
+  };
+  mismatches?: CompareMismatch[];
+  status?: string;
+}
+
 export interface InvoiceListParams {
   pageSize?: number;
   cursor?: string;
@@ -189,6 +238,7 @@ export interface InvoiceListParams {
   dateFrom?: string;
   dateTo?: string;
   vendor?: string;
+  batchId?: string;
 }
 
 export const api = {
@@ -250,6 +300,34 @@ export const api = {
   fraudPrices: (limit = 20, offset = 0) => j<FraudScanResult>(`/api/fraud/price-anomalies?limit=${limit}&offset=${offset}`),
   fraudOdometer: (limit = 20, offset = 0) => j<FraudScanResult>(`/api/fraud/odometer?limit=${limit}&offset=${offset}`),
   batches: () => j<{ batches: Batch[] }>('/api/batches'),
+  batchDetail: (id: string) => j<{ batch: Batch; invoices: Invoice[]; summary: Batch }>(`/api/invoices/batch/${id}`),
+  retryBatchFailed: (id: string) => j<{ success: boolean; retried: number }>(`/api/invoices/batch/${id}/retry-failed`, { method: 'POST', body: '{}' }),
+  compareInvoices: (body: {
+    id1?: string;
+    id2?: string;
+    left?: unknown;
+    right?: unknown;
+    mode?: string;
+    ai?: boolean;
+    compareProvider?: string;
+    compareModel?: string;
+  }) =>
+    j<{ success: boolean; data: CompareResult }>(`/api/invoices/compare`, { method: 'POST', body: JSON.stringify(body) }),
+  compareFiles: async (fileA: File, fileB: File, ai = true) => {
+    const fd = new FormData();
+    fd.append('fileA', fileA);
+    fd.append('fileB', fileB);
+    fd.append('ai', ai ? '1' : '0');
+    const token = localStorage.getItem('session_token');
+    const headers: Record<string, string> = {};
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await fetch('/api/invoices/compare', { method: 'POST', body: fd, headers });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { message?: string }).message ?? `Compare failed: HTTP ${res.status}`);
+    }
+    return res.json() as Promise<{ success: boolean; data: CompareResult | { status: string; invoiceA: { id: string | null }; invoiceB: { id: string | null } } }>;
+  },
   settings: () => j<SettingsData>('/api/settings'),
   revealCreds: () => j<{ credentials: Record<string, Record<string, string>> }>('/api/settings/reveal'),
   saveSettings: (b: unknown) => j('/api/settings', { method: 'PUT', body: JSON.stringify(b) }),

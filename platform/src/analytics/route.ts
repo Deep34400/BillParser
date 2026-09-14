@@ -131,5 +131,4 @@ export async function analyticsRoutes(app: FastifyInstance) {
     return { ...kpis, vehicleSpend, costPerKm, ocrCosts };
   });
 
-  app.get('/api/batches', async () => ({ batches: [] }));
 }

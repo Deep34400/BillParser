@@ -26,6 +26,8 @@ export interface AppSettings {
   extractionModel?: string;
   singleProvider?: string;
   singleModel?: string;
+  compareProvider?: string;
+  compareModel?: string;
   fallbackChain?: FallbackLevel[];
   usdToInr?: number;
   thinkingBudget?: number;
@@ -46,6 +48,8 @@ function rowToSettings(row: AppSettingsModel): AppSettings {
     extractionModel: row.extractionModel ?? undefined,
     singleProvider: row.singleProvider ?? undefined,
     singleModel: row.singleModel ?? undefined,
+    compareProvider: row.compareProvider ?? undefined,
+    compareModel: row.compareModel ?? undefined,
     fallbackChain: (row.fallbackChain as FallbackLevel[] | null) ?? undefined,
     emailIntakeEnabled: row.emailIntakeEnabled ?? undefined,
     emailIntakeUser: row.emailIntakeUser ?? undefined,
@@ -65,6 +69,8 @@ const DEFAULTS: AppSettings = {
   structuringModel: 'gemini-2.5-flash',
   singleProvider: 'gemini',
   singleModel: 'gemini-2.5-flash',
+  compareProvider: 'gemini',
+  compareModel: 'gemini-2.5-flash',
   usdToInr: DEFAULT_USD_TO_INR,
   thinkingBudget: DEFAULT_THINKING_BUDGET,
   mistralOcrPricePer1kPages: DEFAULT_MISTRAL_OCR_PRICE_PER_1K,
@@ -89,6 +95,8 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<AppS
     extractionModel: merged.extractionModel ?? null,
     singleProvider: merged.singleProvider ?? null,
     singleModel: merged.singleModel ?? null,
+    compareProvider: merged.compareProvider ?? null,
+    compareModel: merged.compareModel ?? null,
     fallbackChain: (merged.fallbackChain as any) ?? null,
     emailIntakeEnabled: merged.emailIntakeEnabled ?? null,
     emailIntakeUser: merged.emailIntakeUser ?? null,

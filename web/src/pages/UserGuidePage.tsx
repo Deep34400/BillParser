@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { FileText, Search, CheckCircle2, BarChart3, Download, MessageSquare, KeyRound, Settings } from 'lucide-react';
+import { FileText, Search, CheckCircle2, BarChart3, Download, MessageSquare, KeyRound, Settings, Columns2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.js';
 import { Button } from '@/components/ui/button.js';
 
@@ -7,7 +7,12 @@ const SECTIONS = [
   {
     icon: FileText,
     title: 'Upload invoices',
-    body: 'On Invoices, click Upload or drop PDFs and images onto the page. Several files can go in at once. Each file is queued for OCR and appears in the list while it processes.',
+    body: 'On Invoices, click Upload. Drop many PDFs or images, one zip of invoices, or paste http / signed S3 URLs. Optional batch name groups them. Each file still runs OCR on its own. Use the batch dropdown and Retry failed when a file errors.',
+  },
+  {
+    icon: Columns2,
+    title: 'Compare two invoices',
+    body: 'Open Compare, or tick exactly two rows on Invoices and click Compare 2. You can also paste two JSON extracts or upload two PDFs (OCR runs first). Totals are compared with rules. Gemini (or the Compare model in Settings) only pairs leftover names like brake pad vs pads, then writes a short note. Check the mismatch list — AI cannot change money.',
   },
   {
     icon: Search,
@@ -42,7 +47,7 @@ const SECTIONS = [
   {
     icon: Settings,
     title: 'Settings (admin)',
-    body: 'Admins set the OCR pipeline, fallback models, provider credentials, and cost rates. Regular users do not see this page.',
+    body: 'Admins set the OCR pipeline, the Compare model (Gemini by default), fallback models, provider credentials, and cost rates. Regular users do not see this page.',
   },
 ];
 

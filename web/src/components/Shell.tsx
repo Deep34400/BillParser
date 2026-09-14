@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, LogOut, History, Menu,
+  FileText, BarChart3, ShieldAlert, Gauge, Settings, User, Shield, LogOut, History, Menu, Columns2,
   Sun, Moon, HelpCircle, BookOpen, Play, Map, Code,
 } from 'lucide-react';
 import { useTour } from './GuidedTour.js';
@@ -41,6 +41,7 @@ function useTheme() {
 
 const PRIMARY_NAV = [
   { label: 'Invoices', to: '/invoices', icon: FileText },
+  { label: 'Compare', to: '/compare', icon: Columns2 },
   { label: 'Analytics', to: '/analytics', icon: BarChart3, dataTour: 'nav-analytics' },
   { label: 'Fraud', to: '/fraud', icon: ShieldAlert },
   { label: 'Odometer', to: '/odometer', icon: Gauge },

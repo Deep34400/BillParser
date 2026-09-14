@@ -4,7 +4,8 @@
  */
 import { v4 as uuid } from 'uuid';
 import { Op, fn, col, literal } from 'sequelize';
-import { Bill, BillPart } from './models/index.js';
+import { Bill, BillPart, InvoiceBatch } from './models/index.js';
+import type { BatchSource } from './models/batch.js';
 import { toNum } from '../shared/numbers.js';
 import { getSettings } from '../shared/settings.js';
 import type { BillDoc, BillPartDoc, BillType, BillStatus, ParsedInvoiceData, LineType } from '../shared/types.js';
@@ -19,6 +20,7 @@ function billRowToDoc(row: Bill): BillDoc {
   return {
     bill_id: row.billId,
     user_id: row.userId,
+    batch_id: row.batchId,
     fleet_id: row.fleetId,
     vehicle_id: row.vehicleId,
     bill_type: row.billType as BillType,
@@ -110,6 +112,7 @@ function billDocToRow(b: BillDoc): Record<string, unknown> {
   return {
     billId: b.bill_id,
     userId: b.user_id ?? null,
+    batchId: b.batch_id ?? null,
     fleetId: b.fleet_id ?? null,
     vehicleId: b.vehicle_id ?? null,
     billType: b.bill_type,
@@ -488,6 +491,7 @@ export interface BillListFilterOpts {
   dateFrom?: string;
   dateTo?: string;
   vendor?: string;
+  batchId?: string;
 }
 
 function buildBillListWhere(opts: BillListFilterOpts): any {
@@ -495,6 +499,7 @@ function buildBillListWhere(opts: BillListFilterOpts): any {
   const where: any = {};
 
   if (opts.userId) where.userId = opts.userId;
+  if (opts.batchId) where.batchId = opts.batchId;
 
   if (opts.statuses?.length) {
     where.ocrStatus = { [Op.in]: opts.statuses };
@@ -654,4 +659,80 @@ export async function listBillsByCreatedAtRange(
 export async function saveBillParts(parts: BillPartDoc[]): Promise<void> {
   if (!parts.length) return;
   await BillPart.bulkCreate(parts.map(partDocToRow) as any[]);
+}
+
+export interface BatchDoc {
+  id: string;
+  user_id: string;
+  name: string | null;
+  source: BatchSource;
+  total_files: number;
+  created_at: string;
+}
+
+export async function createBatch(doc: BatchDoc): Promise<BatchDoc> {
+  await InvoiceBatch.create({
+    id: doc.id,
+    userId: doc.user_id,
+    name: doc.name,
+    source: doc.source,
+    totalFiles: doc.total_files,
+    createdAt: new Date(doc.created_at),
+  });
+  return doc;
+}
+
+export async function getBatch(id: string, userId?: string): Promise<BatchDoc | null> {
+  const where: Record<string, unknown> = { id };
+  if (userId) where.userId = userId;
+  const row = await InvoiceBatch.findOne({ where });
+  if (!row) return null;
+  return {
+    id: row.id,
+    user_id: row.userId,
+    name: row.name,
+    source: row.source as BatchSource,
+    total_files: row.totalFiles,
+    created_at: row.createdAt.toISOString(),
+  };
+}
+
+export async function listBatches(userId?: string, limit = 50): Promise<BatchDoc[]> {
+  const where: Record<string, unknown> = {};
+  if (userId) where.userId = userId;
+  const rows = await InvoiceBatch.findAll({
+    where,
+    order: [['createdAt', 'DESC']],
+    limit,
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    user_id: row.userId,
+    name: row.name,
+    source: row.source as BatchSource,
+    total_files: row.totalFiles,
+    created_at: row.createdAt.toISOString(),
+  }));
+}
+
+export async function listBillsByBatch(batchId: string, userId?: string): Promise<BillDoc[]> {
+  const where: Record<string, unknown> = { batchId };
+  if (userId) where.userId = userId;
+  const rows = await Bill.findAll({ where, order: [['createdAt', 'DESC']] });
+  return rows.map(billRowToDoc);
+}
+
+export async function countBillsByBatchStatus(batchIds: string[]): Promise<Array<{ batchId: string; ocrStatus: string; cnt: number }>> {
+  if (batchIds.length === 0) return [];
+  const rows = await Bill.findAll({
+    attributes: ['batchId', 'ocrStatus', [fn('COUNT', col('bill_id')), 'cnt']],
+    where: { batchId: { [Op.in]: batchIds } },
+    group: ['batchId', 'ocrStatus'],
+    raw: true,
+  }) as unknown as Array<{ batchId: string; ocrStatus: string; cnt: string | number }>;
+  return rows.map((r) => ({
+    batchId: r.batchId,
+    ocrStatus: r.ocrStatus,
+    cnt: Number(r.cnt),
+  }));
 }

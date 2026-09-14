@@ -53,9 +53,12 @@ platform/src/
 ├── ocr/             # pipeline, providers, parser, transformer, models, repo
 │   ├── route.ts           # Thin HTTP controller (~548 lines, Zod-validated)
 │   ├── commentRepository.ts  # Invoice comments CRUD
+│   ├── compare/           # Invoice-to-invoice diff (rules + leftover AI)
 │   └── service/
 │       ├── invoiceService.ts  # CRUD, list, filters, cursor pagination (~279 lines)
 │       ├── ocrLifecycle.ts    # Upload, queue, OCR, approval (~424 lines)
+│       ├── batchService.ts    # Batch create / list / status counts
+│       ├── expandZip.ts       # Zip → PDF/image list
 │       ├── recordActivity.ts  # Shared audit + webhook dispatch helper
 │       └── exportService.ts   # CSV + Excel export (~141 lines)
 ├── users/           # auth, API keys, token ledger

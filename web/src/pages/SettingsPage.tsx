@@ -182,6 +182,10 @@ export function SettingsPage() {
   const [savingCost, setSavingCost] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
   const [howItWorksOpen, setHowItWorksOpen] = useState(false);
+  const [compareProvider, setCompareProvider] = useState('gemini');
+  const [compareModel, setCompareModel] = useState('gemini-2.5-flash');
+  const [savedCompare, setSavedCompare] = useState({ provider: 'gemini', model: 'gemini-2.5-flash' });
+  const [savingCompare, setSavingCompare] = useState(false);
 
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
   const toggle = (k: string) => setRevealed((p) => ({ ...p, [k]: !p[k] }));
@@ -208,6 +212,11 @@ export function SettingsPage() {
       if (typeof s.usdToInr === 'number') { setFxRate(String(s.usdToInr)); setSavedFxRate(s.usdToInr); }
       if (typeof s.thinkingBudget === 'number') { setThinkingBudget(s.thinkingBudget); setSavedThinkingBudget(s.thinkingBudget); }
       if (typeof s.mistralOcrPricePer1kPages === 'number') setOcrPageRate(String(s.mistralOcrPricePer1kPages));
+      const cp = s.compareProvider || 'gemini';
+      const cm = s.compareModel || 'gemini-2.5-flash';
+      setCompareProvider(cp);
+      setCompareModel(cm);
+      setSavedCompare({ provider: cp, model: cm });
       try {
         const { credentials } = await api.revealCreds();
         const cv: Record<string, string> = {};
@@ -233,6 +242,8 @@ export function SettingsPage() {
   const savedPrimary = savedChain[0];
   const savedFallbacks = savedChain.slice(1).filter((l) => l.enabled);
   const costDirty = thinkingBudget !== savedThinkingBudget || (Number(fxRate) > 0 && Number(fxRate) !== savedFxRate);
+  const compareDirty = compareProvider !== savedCompare.provider || compareModel !== savedCompare.model;
+  const compareProvDef = ALL_PROVIDERS.find((p) => p.id === compareProvider) ?? ALL_PROVIDERS[1];
 
   const handleSave = async () => {
     setSaving(true);
@@ -254,6 +265,16 @@ export function SettingsPage() {
       flash(fbCount > 0 ? `Saved — Primary + ${fbCount} fallback${fbCount > 1 ? 's' : ''}` : 'Saved — Primary only');
     } catch (e) { flash(`Error: ${(e as Error).message}`); }
     finally { setSaving(false); }
+  };
+
+  const handleSaveCompare = async () => {
+    setSavingCompare(true);
+    try {
+      await api.saveSettings({ compareProvider, compareModel });
+      setSavedCompare({ provider: compareProvider, model: compareModel });
+      flash(`Compare model saved — ${compareProvider} / ${compareModel}`);
+    } catch (e) { flash(`Error: ${(e as Error).message}`); }
+    finally { setSavingCompare(false); }
   };
 
   const handleSaveCreds = async (provId: string) => {
@@ -496,6 +517,56 @@ export function SettingsPage() {
           </div>
 
           <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base">Compare model</CardTitle>
+                <Badge variant={compareDirty ? 'warning' : 'info'}>{compareDirty ? 'Unsaved' : 'Invoice compare'}</Badge>
+              </div>
+              <CardDescription>
+                Used only on Compare — leftover name match, then a separate summary prompt. Gemini is the default (Vertex ADC, no API key). Totals stay rule-based.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <div className="min-w-[160px] flex-1 space-y-1.5">
+                  <Label className="text-[11px] uppercase tracking-wide">Provider</Label>
+                  <Select value={compareProvider} onValueChange={(id) => {
+                    const def = ALL_PROVIDERS.find((p) => p.id === id);
+                    setCompareProvider(id);
+                    setCompareModel(id === 'mistral' ? 'mistral-small-latest' : (def?.models[0] ?? 'gemini-2.5-flash'));
+                  }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ALL_PROVIDERS.filter((p) => p.id === 'gemini' || p.id === 'openai' || p.id === 'mistral').map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="min-w-[200px] flex-1 space-y-1.5">
+                  <Label className="text-[11px] uppercase tracking-wide">Model</Label>
+                  <Select value={compareModel} onValueChange={setCompareModel}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {modelOptions(compareProvDef, compareModel).map((m) => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button disabled={savingCompare || !compareDirty} onClick={() => void handleSaveCompare()}>
+                  {savingCompare ? 'Saving...' : 'Save compare model'}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {savedCompare.provider} / {savedCompare.model}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
             <button
               type="button"
               className="flex w-full items-center gap-2 px-6 py-4 text-left"
@@ -510,7 +581,8 @@ export function SettingsPage() {
                 <strong className="text-foreground">Fallback</strong> — optional Secondary / Tertiary. Used only if Primary fails or totals don&apos;t match.<br /><br />
                 Match → <span className="font-semibold text-success">OCR_COMPLETED</span>. All fail reconcile → best attempt as{' '}
                 <span className="font-semibold text-warning">NEED_REVIEW</span>. All crash →{' '}
-                <span className="font-semibold text-destructive">FAILED</span>.
+                <span className="font-semibold text-destructive">FAILED</span>.<br /><br />
+                <strong className="text-foreground">Compare</strong> — separate from OCR. Rules match codes/names first. AI only pairs leftovers, then a second prompt writes the reviewer note. Validation drops weak pairs. Money never comes from the model.
               </CardContent>
             )}
           </Card>

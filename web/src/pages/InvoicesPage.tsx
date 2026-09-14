@@ -30,8 +30,13 @@ type SortDir = 'asc' | 'desc';
 type StatusFilter = 'ALL' | 'DRAFT' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NEEDS_REVIEW';
 
 export function filterPdfs(files: FileList | File[]): File[] {
-  return Array.from(files).filter(
-    (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name),
+  return Array.from(files).filter((f) =>
+    f.type === 'application/pdf'
+    || /\.pdf$/i.test(f.name)
+    || /^image\/(jpeg|png|webp)$/i.test(f.type)
+    || /\.(jpe?g|png|webp|zip)$/i.test(f.name)
+    || f.type === 'application/zip'
+    || f.type === 'application/x-zip-compressed',
   );
 }
 
@@ -140,7 +145,8 @@ export function InvoicesPage() {
     minTotal: minTotal || undefined,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
-  }), [cursor, pageSize, q, statusFilter, reviewCodeFilter, minTotal, dateFrom, dateTo]);
+    batchId: batchFilter || undefined,
+  }), [cursor, pageSize, q, statusFilter, reviewCodeFilter, minTotal, dateFrom, dateTo, batchFilter]);
 
   const hasProcessingInvoices = useCallback((invoices: Invoice[]) =>
     invoices.some((r) => r.status === 'PENDING' || r.status === 'PROCESSING'), []);
@@ -161,13 +167,14 @@ export function InvoicesPage() {
       if (minTotal) params.minTotal = minTotal;
       if (dateFrom) params.dateFrom = dateFrom;
       if (dateTo) params.dateTo = dateTo;
+      if (batchFilter) params.batchId = batchFilter;
       return api.list(params);
     },
     refetchInterval: (query) =>
       hasProcessingInvoices(query.state.data?.invoices ?? []) ? 3000 : false,
   });
 
-  const { data: batches = [] } = useQuery({
+  const { data: batches = [], refetch: refetchBatches } = useQuery({
     queryKey: ['batches'],
     queryFn: () => api.batches().then((r) => r.batches).catch(() => [] as Batch[]),
   });
@@ -296,58 +303,34 @@ export function InvoicesPage() {
 
   async function handleFiles(files: FileList | File[]) {
     const pdfs = filterPdfs(files);
-    if (pdfs.length === 0) { setToast('No PDF files selected'); return; }
+    if (pdfs.length === 0) { setToast('No PDF, image, or zip files selected'); return; }
     if (busy) return;
     setBusy(true);
     setUploadProgress(pdfs.map((f) => ({ name: f.name, status: 'uploading' as const })));
 
-    let created = 0;
-    let dupes = 0;
-    const rejectedList: Array<string | { name: string; reason?: string }> = [];
-    const batch = batchName.trim() || undefined;
-
-    for (let i = 0; i < pdfs.length; i++) {
-      const file = pdfs[i];
-      setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'uploading' } : f)) ?? null);
-      try {
-        const result = await api.upload([file], i === 0 ? batch : undefined);
-        const fileCreated = result?.created?.length ?? 0;
-        const fileDupes = result?.duplicates?.length ?? 0;
-        const fileRejected = (result?.rejected ?? []) as Array<string | { name: string; reason?: string }>;
-
-        if (fileCreated > 0) {
-          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'processing' } : f)) ?? null);
-          await new Promise((r) => setTimeout(r, 400));
-          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'done' } : f)) ?? null);
-          created += fileCreated;
-        } else if (fileDupes > 0) {
-          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: 'Duplicate — already uploaded' } : f)) ?? null);
-          dupes += fileDupes;
-        } else if (fileRejected.length > 0) {
-          const reason = typeof fileRejected[0] === 'string'
-            ? fileRejected[0]
-            : fileRejected[0].reason ?? 'Rejected';
-          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: reason } : f)) ?? null);
-          rejectedList.push(...fileRejected);
-        } else {
-          setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: 'Unknown error' } : f)) ?? null);
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'unknown';
-        setUploadProgress((prev) => prev?.map((f, idx) => (idx === i ? { ...f, status: 'failed', error: msg } : f)) ?? null);
-        rejectedList.push({ name: file.name, reason: msg });
-      }
-    }
-
-    const rejected = rejectedList.length;
-    const rejectDetail = rejectedList.map((r) => (typeof r === 'string' ? r : `${r.name}${r.reason ? `: ${r.reason}` : ''}`)).slice(0, 3).join('; ');
-    if (dupes > 0) setDuplicateBanner({ count: dupes });
     try {
-      await refetch();
-      setToast(`Uploaded ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected${rejectDetail ? ` (${rejectDetail})` : ''}` : ''}`);
+      const result = await api.upload(pdfs, batchName.trim() || undefined) as {
+        created?: string[];
+        duplicates?: string[];
+        rejected?: Array<string | { name: string; reason?: string }>;
+        batchId?: string;
+      };
+      const created = result?.created?.length ?? 0;
+      const dupes = result?.duplicates?.length ?? 0;
+      const rejectedList = result?.rejected ?? [];
+      setUploadProgress(pdfs.map((f) => {
+        const fail = rejectedList.find((r) => typeof r !== 'string' && r.name === f.name);
+        if (fail && typeof fail !== 'string') return { name: f.name, status: 'failed' as const, error: fail.reason };
+        return { name: f.name, status: created ? 'done' as const : 'failed' as const };
+      }));
+      if (dupes > 0) setDuplicateBanner({ count: dupes });
+      if (result.batchId) setBatchFilter(result.batchId);
+      await Promise.all([refetch(), refetchBatches()]);
+      setToast(`Uploaded ${created} invoice${created === 1 ? '' : 's'}${rejectedList.length ? `, ${rejectedList.length} rejected` : ''}`);
       setShowUpload(false);
       setBatchName('');
     } catch (e) {
+      setUploadProgress(pdfs.map((f) => ({ name: f.name, status: 'failed' as const, error: e instanceof Error ? e.message : 'unknown' })));
       setToast('Upload failed: ' + (e instanceof Error ? e.message : 'unknown'));
     } finally {
       setBusy(false);
@@ -365,7 +348,8 @@ export function InvoicesPage() {
       const dupes = result?.duplicates?.length ?? 0;
       const rejected = result?.rejected?.length ?? 0;
       if (dupes > 0) setDuplicateBanner({ count: dupes });
-      await refetch();
+      await Promise.all([refetch(), refetchBatches()]);
+      if ((result as { batchId?: string })?.batchId) setBatchFilter((result as { batchId: string }).batchId);
       setToast(`Imported ${created} file${created === 1 ? '' : 's'}${dupes ? `, ${dupes} duplicate${dupes === 1 ? '' : 's'} skipped` : ''}${rejected ? `, ${rejected} rejected` : ''}`);
       setShowUpload(false); setImportText(''); setBatchName('');
     } catch (e) { setToast('Import failed: ' + (e instanceof Error ? e.message : 'unknown')); } finally { setBusy(false); }
@@ -537,9 +521,9 @@ export function InvoicesPage() {
           )}
         >
           <p className="text-base font-semibold text-foreground mb-1">
-            {dragging ? 'Drop PDFs here' : 'Drop PDF invoices here'}
+            {dragging ? 'Drop files here' : 'Drop PDFs, images, or one zip'}
           </p>
-          <p className="text-sm text-muted-foreground mb-4">or browse to select files</p>
+          <p className="text-sm text-muted-foreground mb-4">or browse — max 25 invoices after unzip. You can also paste S3 / http URLs below.</p>
 
           <Input type="text" aria-label="Batch name" placeholder="Batch name (optional)" value={batchName}
             onChange={(e) => setBatchName(e.target.value)} className="mx-auto mb-3 max-w-[280px]" />
@@ -547,7 +531,7 @@ export function InvoicesPage() {
           <label className={cn('inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary-hover transition-colors', busy && 'opacity-60 cursor-default')}>
             <Upload className="h-4 w-4" />
             {busy ? 'Uploading…' : 'Browse files'}
-            <input type="file" multiple accept="application/pdf,.pdf" disabled={busy} className="hidden"
+            <input type="file" multiple accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,.zip,application/zip" disabled={busy} className="hidden"
               onChange={(e) => { const input = e.currentTarget; if (input.files?.length) void handleFiles(input.files); input.value = ''; }} />
           </label>
 
@@ -636,6 +620,13 @@ export function InvoicesPage() {
             <div className="h-1.5 overflow-hidden rounded-full bg-border">
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
+            {b.failed > 0 && (
+              <Button size="sm" variant="outline" className="mt-3" onClick={() => {
+                void api.retryBatchFailed(b.id).then(() => { setToast(`Retried ${b.failed} failed`); void refetch(); }).catch((e) => setToast(e instanceof Error ? e.message : 'Retry failed'));
+              }}>
+                Retry failed
+              </Button>
+            )}
           </Card>
         );
       })()}
@@ -644,6 +635,14 @@ export function InvoicesPage() {
       {selected.size > 0 && (
         <div className="mx-7 mt-3 flex items-center gap-3 rounded-lg bg-foreground px-4 py-2.5">
           <span className="text-sm font-semibold text-card">{selected.size} selected</span>
+          {selected.size === 2 && (
+            <Button variant="ghost" size="sm" className="text-card/80 hover:text-card hover:bg-white/10" onClick={() => {
+              const [a, b] = [...selected];
+              navigate(`/compare?id1=${encodeURIComponent(a)}&id2=${encodeURIComponent(b)}`);
+            }}>
+              Compare 2
+            </Button>
+          )}
           <Button variant="ghost" size="sm" className="text-card/80 hover:text-card hover:bg-white/10" onClick={() => void handleBulkReextract()}>
             <RotateCcw className="h-3.5 w-3.5" /> Re-extract
           </Button>

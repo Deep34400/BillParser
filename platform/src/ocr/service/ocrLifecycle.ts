@@ -129,7 +129,11 @@ function processInBackground(
  * Upload one or more invoices. Validates each file, uploads to storage,
  * creates a PROCESSING bill, and starts OCR in the background.
  */
-export async function uploadInvoices(files: UploadedFile[], userId?: string): Promise<UploadResult> {
+export async function uploadInvoices(
+  files: UploadedFile[],
+  userId?: string,
+  opts?: { batchId?: string },
+): Promise<UploadResult> {
   const created: string[] = [];
   const rejected: { name: string; reason: string }[] = [];
 
@@ -160,11 +164,12 @@ export async function uploadInvoices(files: UploadedFile[], userId?: string): Pr
       });
       initialBill.ocr_status = 'PROCESSING';
       initialBill.user_id = userId ?? null;
+      initialBill.batch_id = opts?.batchId ?? null;
       await applyPipelineSettings(initialBill);
       await createBill(initialBill);
 
       created.push(billId);
-      recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { fileName: file.name });
+      recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { fileName: file.name, batchId: opts?.batchId });
       processInBackground(billId, file.buf, file.name, publicUrl, storagePath, userId);
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Upload failed';
@@ -177,7 +182,11 @@ export async function uploadInvoices(files: UploadedFile[], userId?: string): Pr
 }
 
 /** Import invoices from URLs. Downloads each, validates, and starts OCR. */
-export async function importFromUrls(sources: string[], userId?: string): Promise<UploadResult> {
+export async function importFromUrls(
+  sources: string[],
+  userId?: string,
+  opts?: { batchId?: string },
+): Promise<UploadResult> {
   const created: string[] = [];
   const rejected: string[] = [];
 
@@ -202,11 +211,12 @@ export async function importFromUrls(sources: string[], userId?: string): Promis
       });
       initialBill.ocr_status = 'PROCESSING';
       initialBill.user_id = userId ?? null;
+      initialBill.batch_id = opts?.batchId ?? null;
       await applyPipelineSettings(initialBill);
       await createBill(initialBill);
 
       created.push(billId);
-      recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { fileName, sourceUrl: url });
+      recordActivity(userId, 'invoice:upload', 'invoice.uploaded', billId, { fileName, sourceUrl: url, batchId: opts?.batchId });
       processInBackground(billId, buf, fileName, publicUrl, storagePath, userId);
     } catch {
       rejected.push(url);

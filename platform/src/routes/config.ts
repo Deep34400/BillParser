@@ -48,6 +48,8 @@ export async function configRoutes(app: FastifyInstance) {
       structuringModel: settings.structuringModel,
       singleProvider: settings.singleProvider ?? 'gemini',
       singleModel: settings.singleModel ?? 'gemini-2.5-flash',
+      compareProvider: settings.compareProvider ?? 'gemini',
+      compareModel: settings.compareModel ?? 'gemini-2.5-flash',
       emailIntake: {
         enabled: imap.enabled,
         address: imap.user || null,

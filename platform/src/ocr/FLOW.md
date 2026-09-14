@@ -9,7 +9,7 @@ See also: [README.md](./README.md) (module internals), [../webhook/README.md](..
 ## Flow Overview
 
 ```
-Upload PDF → validate → GCS → create bill (PROCESSING) → pg-boss queue
+Upload PDF / zip / URLs → create batch → validate each file → GCS → create bill (PROCESSING, batch_id) → pg-boss queue
   → ocrWorker picks job → runPipeline() → fallbackChain
     → single mode: llmSingle (Gemini/Claude/OpenAI/Mistral via visionCall)
     → split mode: mistralOcr/azapiOcr → llmNormalize
@@ -35,7 +35,8 @@ Upload PDF → validate → GCS → create bill (PROCESSING) → pg-boss queue
 
 ```mermaid
 flowchart TD
-  A[POST /api/invoices/upload] --> B{Zod + file validate}
+  A[POST /api/invoices/upload or /import] --> A0[create batch]
+  A0 --> B{file / zip / URL validate}
   B -->|invalid| B1[400 ValidationError]
   B -->|ok| C[uploadFile → GCS]
   C --> D[createBill PROCESSING + user_id]
@@ -81,10 +82,12 @@ flowchart TD
 
 | Step | Code | Notes |
 |------|------|-------|
-| HTTP handler | `ocr/route.ts` | Zod-validated multipart upload |
+| HTTP handler | `ocr/route.ts` | Multipart files/zip + `batchName`, or JSON `sources[]` |
+| Expand zip | `ocr/service/expandZip.ts` | PDF/image only; nested zip rejected; cap 25 |
+| Create batch | `ocr/service/batchService.ts` | `batches` row; each bill gets `batch_id` |
 | Validate file | `shared/storage.ts` | PDF, JPEG, PNG, WebP |
 | Store file | `shared/storage.ts` | Private GCS; signed URLs for read |
-| Create bill | `ocr/repository.ts` | `ocr_status: PROCESSING`, `user_id` for isolation |
+| Create bill | `ocr/repository.ts` | `ocr_status: PROCESSING`, `user_id` + `batch_id` |
 | Enqueue | `queue/ocrQueue.ts` | pg-boss `ocr-processing` queue; inline fallback in tests |
 
 Returns **HTTP 202** immediately with `bill_id`. OCR does not block the request.
@@ -169,8 +172,12 @@ List pagination uses **cursor-based** paging (`cursor` = ISO timestamp of last r
 
 | Method | Path | When |
 |--------|------|------|
-| `POST` | `/api/invoices/upload` | Start flow |
-| `GET` | `/api/invoices` | Poll list (cursor + filters) |
+| `POST` | `/api/invoices/upload` | Files, images, or one zip + optional `batchName` |
+| `POST` | `/api/invoices/import` | http / signed S3 URLs + optional `batchName` |
+| `GET` | `/api/batches` | Batch list + status counts |
+| `GET` | `/api/invoices/batch/:id` | Bills in a batch |
+| `POST` | `/api/invoices/compare` | Compare two ids, two JSON, or two files (Gemini leftover match + validated summary) |
+| `GET` | `/api/invoices` | Poll list (cursor + filters + `batchId`) |
 | `GET` | `/api/invoices/:id` | Detail view |
 | `POST` | `/api/invoices/:id/approve` | Approve |
 | `POST` | `/api/invoices/:id/reject` | Reject |

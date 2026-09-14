@@ -54,6 +54,8 @@ export async function settingsRoutes(app: FastifyInstance) {
       extractionModel: settings.extractionModel ?? settings.structuringModel,
       singleProvider: settings.singleProvider ?? 'gemini',
       singleModel: settings.singleModel ?? 'gemini-2.5-flash',
+      compareProvider: settings.compareProvider ?? 'gemini',
+      compareModel: settings.compareModel ?? 'gemini-2.5-flash',
       fallbackChain: settings.fallbackChain ?? null,
       providers,
       modelPricing: mergedPricing,
@@ -88,6 +90,8 @@ export async function settingsRoutes(app: FastifyInstance) {
     if (body.extractionModel) patch.extractionModel = body.extractionModel;
     if (body.singleProvider) patch.singleProvider = body.singleProvider;
     if (body.singleModel) patch.singleModel = body.singleModel;
+    if (typeof body.compareProvider === 'string') patch.compareProvider = body.compareProvider;
+    if (typeof body.compareModel === 'string') patch.compareModel = body.compareModel;
     if (body.modelPricing && typeof body.modelPricing === 'object') {
       patch.modelPricing = body.modelPricing;
     }
@@ -120,6 +124,8 @@ export async function settingsRoutes(app: FastifyInstance) {
       structuringModel: saved.structuringModel,
       singleProvider: saved.singleProvider,
       singleModel: saved.singleModel,
+      compareProvider: saved.compareProvider,
+      compareModel: saved.compareModel,
       fallbackChain: saved.fallbackChain ?? null,
     };
   });

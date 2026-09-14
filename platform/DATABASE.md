@@ -1,7 +1,7 @@
 # Database Design — BillParser Platform
 
 > **ORM:** Sequelize 6 · **Database:** PostgreSQL 15+ · **Extension:** pg_trgm (trigram search)
-> **Tables:** users, vendors, bills, bill_parts, invoice_comments, api_keys, token_transactions, app_settings, provider_credentials, audit_logs, webhook_endpoints, webhook_deliveries
+> **Tables:** users, vendors, batches, bills, bill_parts, invoice_comments, api_keys, token_transactions, app_settings, provider_credentials, audit_logs, webhook_endpoints, webhook_deliveries
 
 ---
 
@@ -14,6 +14,7 @@
 │ vendor_id  PK   │         │ bill_id         PK                   │
 │ legal_name      │         │ user_id         FK owner (NULL)      │
 │ display_name    │         │ vendor_id       FK → vendors (NULL)  │
+│ batch_id        FK → batches (NULL)  │
 │ gstin           │         │ bill_type       NOT NULL              │
 │ pan             │         │ ocr_status      NOT NULL              │
 │ invoice_count   │         │ vendor_name, vendor_gstin             │
@@ -162,6 +163,7 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 | **Identity** | | | |
 | `bill_id` | TEXT | **PK** | UUID |
 | `user_id` | TEXT | Indexed | Owner — regular users see only their bills; NULL for legacy/system rows |
+| `batch_id` | TEXT | Indexed | Upload batch (files, zip, or URLs) |
 | `fleet_id` | TEXT | | Fleet identifier |
 | `vehicle_id` | TEXT | Indexed | Vehicle identifier |
 | `bill_type` | TEXT | NOT NULL, CHECK | MAINTENANCE, FUEL, INSURANCE, TYRE, TOLL, ACCIDENT_REPAIR, BATTERY_REPLACEMENT, AMC_CONTRACT, OTHER |
@@ -262,6 +264,20 @@ One row per uploaded invoice. Contains all extracted data, costs, and audit fiel
 - `idx_bills_user_id` — `user_id` (data isolation)
 - `idx_bills_user_status` — `(user_id, ocr_status)` (filtered list per user)
 - `idx_bills_user_created` — `(user_id, created_at DESC)` (cursor list per user)
+- `idx_bills_batch_id` — `batch_id` (batch detail)
+
+### 2b. `batches` — Upload groups
+
+One row per multi-file / zip / URL import.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT PK | UUID |
+| `user_id` | TEXT | Owner |
+| `name` | TEXT | Optional label |
+| `source` | TEXT | `files` \| `zip` \| `urls` \| `mixed` |
+| `total_files` | INTEGER | Invoice count after unzip |
+| `created_at` | TIMESTAMPTZ | Created |
 
 **GST Rules:**
 - Intra-state: CGST + SGST (IGST = NULL)
@@ -399,6 +415,8 @@ Single row (`id = 1`). Stores pipeline config, pricing, and email intake setting
 | `extraction_model` | TEXT | Override extraction model |
 | `single_provider` | TEXT | Single-mode provider |
 | `single_model` | TEXT | Single-mode model |
+| `compare_provider` | TEXT | Invoice-compare provider (default `gemini`) |
+| `compare_model` | TEXT | Invoice-compare model (default `gemini-2.5-flash`) |
 | `fallback_chain` | JSONB | Ordered fallback levels |
 | `model_pricing` | JSONB | Per-model $/1M token overrides |
 | `usd_to_inr` | NUMERIC(10,4) | Exchange rate for ₹ display |

@@ -76,6 +76,7 @@ web/
 │   ├── pages/
 │   │   ├── LoginPage.tsx
 │   │   ├── InvoicesPage.tsx       # React Query, drag-and-drop upload, cursor pagination
+│   │   ├── ComparePage.tsx        # Compare two invoices (ids / JSON / files) + model + mismatch list
 │   │   ├── InvoiceDetailPage.tsx  # Orchestrates invoice/* components (~438 lines)
 │   │   ├── AnalyticsPage.tsx      # React Query + recharts
 │   │   ├── FraudPage.tsx

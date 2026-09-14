@@ -16,6 +16,7 @@ import { ActivityPage } from './pages/ActivityPage.js';
 import ApiDocsPage from './pages/ApiDocsPage.js';
 import UserGuidePage from './pages/UserGuidePage.js';
 import TutorialPage from './pages/TutorialPage.js';
+import ComparePage from './pages/ComparePage.js';
 import { api, type SessionUser } from './api/client.js';
 import { setUsdToInr } from './lib/format.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
@@ -77,6 +78,7 @@ export default function App() {
                 <Route path="/" element={<Navigate to="/invoices" />} />
                 <Route path="/invoices" element={<InvoicesPage />} />
                 <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+                <Route path="/compare" element={<ComparePage />} />
                 <Route path="/analytics" element={<AnalyticsPage />} />
                 <Route path="/fraud" element={<FraudPage />} />
                 <Route path="/odometer" element={<OdometerPage />} />

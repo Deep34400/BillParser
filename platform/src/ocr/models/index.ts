@@ -4,3 +4,4 @@
 export { Bill, type BillAttributes, initBillModel } from './bill.js';
 export { BillPart, type BillPartAttributes, initBillPartModel } from './billPart.js';
 export { InvoiceComment, type InvoiceCommentAttributes, initInvoiceCommentModel } from './invoiceComment.js';
+export { InvoiceBatch, type BatchAttributes, initInvoiceBatchModel } from './batch.js';

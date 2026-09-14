@@ -25,6 +25,9 @@ import { getBill } from './repository.js';
 import { bearerFromRequest } from '../middleware/auth.js';
 import { isPdf, isImage } from '../shared/storage.js';
 import { ValidationError } from '../shared/errors.js';
+import { expandZip, isZip } from './service/expandZip.js';
+import { startBatch, listUserBatches, getBatchDetail, MAX_BATCH_FILES } from './service/batchService.js';
+import { compareByIds, compareByJson } from './compare/compareInvoices.js';
 import {
   validateBody,
   validateQuery,
@@ -80,12 +83,99 @@ export async function billRoutes(app: FastifyInstance) {
         dateFrom: qs.dateFrom,
         dateTo: qs.dateTo,
         vendor: qs.vendor,
+        batchId: qs.batchId,
         userId: billOwnerFilter(req),
       });
     } catch (err) {
       req.log.error(err, 'Failed to list invoices');
       return reply.code(500).send({ error: 'Failed to list invoices', message: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  app.get('/api/batches', async (req) => {
+    const userId = req.appUser?.role === 'admin' ? undefined : req.appUser?.user_id;
+    return await listUserBatches(userId);
+  });
+
+  app.get('/api/invoices/batch/:batchId', async (req) => {
+    const { batchId } = req.params as { batchId: string };
+    const userId = billOwnerFilter(req);
+    return await getBatchDetail(batchId, userId);
+  });
+
+  app.post('/api/invoices/batch/:batchId/retry-failed', async (req) => {
+    const { batchId } = req.params as { batchId: string };
+    const userId = billOwnerFilter(req);
+    const detail = await getBatchDetail(batchId, userId);
+    const failed = detail.invoices.filter((inv) => inv.status === 'FAILED').map((inv) => inv.id);
+    if (failed.length) await bulkAction('reextract', failed, req.appUser?.user_id);
+    return { success: true, retried: failed.length };
+  });
+
+  app.get('/api/invoices/compare', async (req) => {
+    const qs = req.query as { id1?: string; id2?: string; ai?: string; provider?: string; model?: string };
+    if (!qs.id1 || !qs.id2) throw new ValidationError('id1 and id2 are required');
+    const data = await compareByIds(
+      qs.id1,
+      qs.id2,
+      billOwnerFilter(req),
+      qs.ai !== '0' && qs.ai !== 'false',
+      { provider: qs.provider, model: qs.model },
+    );
+    return { success: true, data };
+  });
+
+  app.post('/api/invoices/compare', async (req, reply) => {
+    if (!req.appUser) {
+      return reply.status(401).send({ success: false, message: 'Authentication required' });
+    }
+    const contentType = String(req.headers['content-type'] ?? '');
+    const useAi = (v: unknown) => v !== '0' && v !== false && v !== 'false';
+
+    if (contentType.includes('multipart/form-data')) {
+      const files: UploadedFile[] = [];
+      let ai = true;
+      for await (const part of (req as any).parts()) {
+        if (part.type === 'file') {
+          const buf = await part.toBuffer();
+          files.push({ buf, name: part.filename || 'invoice.pdf' });
+        } else if (part.fieldname === 'ai') {
+          const val = (await part.value) as string;
+          ai = useAi(val);
+        }
+      }
+      if (files.length !== 2) throw new ValidationError('Upload exactly two PDF or image files');
+      const result = await uploadInvoices(files, req.appUser.user_id);
+      return {
+        success: true,
+        data: {
+          status: 'processing',
+          invoiceA: { id: result.created[0] ?? null },
+          invoiceB: { id: result.created[1] ?? null },
+          rejected: result.rejected,
+        },
+      };
+    }
+
+    const body = (req.body ?? {}) as {
+      mode?: string;
+      id1?: string;
+      id2?: string;
+      left?: unknown;
+      right?: unknown;
+      ai?: boolean | string;
+      compareProvider?: string;
+      compareModel?: string;
+    };
+    const ai = useAi(body.ai ?? true);
+    const model = { provider: body.compareProvider, model: body.compareModel };
+    if (body.mode === 'json' || (body.left && body.right)) {
+      const data = await compareByJson(body.left, body.right, ai, model);
+      return { success: true, data };
+    }
+    if (!body.id1 || !body.id2) throw new ValidationError('Provide id1+id2, left+right JSON, or two files');
+    const data = await compareByIds(body.id1, body.id2, billOwnerFilter(req), ai, model);
+    return { success: true, data };
   });
 
   app.get('/api/invoices/counts', async (_req, reply) => {
@@ -238,10 +328,13 @@ export async function billRoutes(app: FastifyInstance) {
       }
 
       const files: UploadedFile[] = [];
+      let batchName = '';
       for await (const part of (req as any).parts()) {
         if (part.type === 'file') {
           const buf = await part.toBuffer();
           files.push({ buf, name: part.filename || 'invoice.pdf' });
+        } else if (part.fieldname === 'batchName') {
+          batchName = String((await part.value) ?? '');
         }
       }
 
@@ -249,7 +342,35 @@ export async function billRoutes(app: FastifyInstance) {
         throw new ValidationError('At least one file is required');
       }
 
-      return await uploadInvoices(files, req.appUser.user_id);
+      const invoices: UploadedFile[] = [];
+      const zipRejected: { name: string; reason: string }[] = [];
+      let zipCount = 0;
+      for (const file of files) {
+        if (isZip(file.buf) || /\.zip$/i.test(file.name)) {
+          zipCount += 1;
+          const expanded = expandZip(file.buf);
+          invoices.push(...expanded.files);
+          zipRejected.push(...expanded.rejected);
+        } else {
+          invoices.push(file);
+        }
+      }
+
+      if (invoices.length > MAX_BATCH_FILES) {
+        throw new ValidationError(`At most ${MAX_BATCH_FILES} invoices per batch (got ${invoices.length} after unzip)`);
+      }
+      if (invoices.length === 0) {
+        throw new ValidationError(zipRejected[0]?.reason || 'No PDF or image invoices found');
+      }
+
+      const source = zipCount === files.length ? 'zip' : zipCount > 0 ? 'mixed' : 'files';
+      const batch = await startBatch(req.appUser.user_id, batchName, source, invoices.length);
+      const result = await uploadInvoices(invoices, req.appUser.user_id, { batchId: batch.id });
+      return {
+        ...result,
+        rejected: [...zipRejected, ...result.rejected],
+        batchId: batch.id,
+      };
     } catch (err) {
       if (err instanceof ValidationError) {
         return reply.code(400).send({ success: false, message: err.message });
@@ -268,10 +389,19 @@ export async function billRoutes(app: FastifyInstance) {
       if (req.appUser.role !== 'admin' && (req.appUser.token_balance ?? 0) <= 0) {
         return reply.status(402).send({ success: false, message: 'Insufficient balance — contact admin to add balance' });
       }
-      const body = req.body as { sources?: string[] } | undefined;
-      const sources = body?.sources ?? [];
-      return await importFromUrls(sources, req.appUser?.user_id);
+      const body = req.body as { sources?: string[]; batchName?: string } | undefined;
+      const sources = (body?.sources ?? []).map((s) => s.trim()).filter(Boolean);
+      if (sources.length === 0) throw new ValidationError('At least one URL is required');
+      if (sources.length > MAX_BATCH_FILES) {
+        throw new ValidationError(`At most ${MAX_BATCH_FILES} URLs per batch`);
+      }
+      const batch = await startBatch(req.appUser.user_id, body?.batchName, 'urls', sources.length);
+      const result = await importFromUrls(sources, req.appUser.user_id, { batchId: batch.id });
+      return { ...result, batchId: batch.id };
     } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ success: false, message: err.message });
+      }
       return reply.code(500).send({ error: 'Import failed' });
     }
   });
