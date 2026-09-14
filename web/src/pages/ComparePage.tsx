@@ -91,7 +91,8 @@ export default function ComparePage() {
   const settingsProvider = cfg?.compareProvider || 'gemini';
   const settingsModel = cfg?.compareModel || 'gemini-2.5-flash';
   const activeProvider = overrideProvider || settingsProvider;
-  const activeModels = COMPARE_PROVIDERS.find((p) => p.id === activeProvider)?.models ?? [settingsModel];
+  const activeModels: readonly string[] =
+    COMPARE_PROVIDERS.find((p) => p.id === activeProvider)?.models ?? [settingsModel];
   const activeModel = overrideModel || (activeModels.includes(settingsModel) ? settingsModel : activeModels[0]);
 
   function modelBody() {
